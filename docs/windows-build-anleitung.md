@@ -43,6 +43,33 @@ das macOS-`node_modules`; danach `npm install`.)
 
 ---
 
+## Schritt 0b: 3D-Modelle bereitstellen (separat – NICHT im Repo)
+
+Die 3D-Modelle (`public/models/products/`, ~2,6 GB) sind aus dem Git-Repo **bewusst
+ausgeschlossen** (`.gitignore`). Nach `git clone` sind sie also **nicht** vorhanden.
+**Ohne diese Dateien baut der Showroom zwar, zeigt aber keine Produkte.**
+
+Vor dem Build die Modelle in den Projektordner kopieren:
+
+```
+<Projekt>\public\models\products\   <- hierhin die GLB-Modelle kopieren
+```
+
+Quelle: vom Showroom-Team / Netzlaufwerk / externe Platte. Beispiel (PowerShell):
+
+```powershell
+Copy-Item -Recurse "\\server\share\showroom-models\*" "C:\meta\build\showroom\public\models\products\"
+```
+
+Hinweise:
+- Die Einträge `public\models\obj` und `public\models\output` sind auf dem Mac nur Symlinks
+  auf externe Laufwerke und gehören **nicht** ins Repo. Auf Windows bei Bedarf als normale
+  Ordner anlegen bzw. die Inhalte hineinkopieren.
+- Erst **nach** dem Kopieren der Modelle den Build (`npm run dist:win` / `npm run package:win`)
+  ausführen, damit sie in `dist\` landen und im Installer enthalten sind.
+
+---
+
 ## Artefakt A: Standalone-Installer (.exe)
 
 ```powershell
