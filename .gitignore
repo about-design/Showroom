@@ -1,0 +1,7 @@
+node_modules/
+dist/
+public/models/output/
+public/models/obj/
+public/models/products/
+src/data/products.json
+src/data/cad-index.json

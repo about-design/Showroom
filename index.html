@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>META Online – 3D Showroom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script type="module" src="/src/main.js"></script>
+  <script async type="module" src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+</head>
+<body class="bg-gray-900">
+  <div id="canvas-container"></div>
+
+  <div id="ui-layer" x-data="showroomApp()" x-cloak>
+
+    <!-- ─── Loading Overlay ─── -->
+    <div x-show="isLoading" x-transition.opacity.duration.500ms
+         class="sr-loading">
+      <div class="sr-loading-inner">
+        <div class="sr-loading-logo">
+          <div class="sr-loading-mark">M</div>
+          <span class="sr-loading-brand">META</span>
+        </div>
+        <div class="sr-loading-bar-track">
+          <div class="sr-loading-bar-fill" :style="'width:' + loadProgress + '%'"></div>
+        </div>
+        <p class="sr-loading-status" x-text="loadStatus"></p>
+      </div>
+    </div>
+
+    <!-- ─── Top bar ─── -->
+    <header class="sr-topbar">
+      <div class="sr-topbar-left">
+        <div class="sr-logo">
+          <div class="sr-logo-mark">M</div>
+          <span>META</span>
+        </div>
+        <span class="sr-topbar-sep"></span>
+        <span class="sr-topbar-title">3D Showroom</span>
+      </div>
+      <div class="sr-topbar-center" x-show="currentProduct">
+        <span class="sr-product-name" x-text="currentProduct?.name"></span>
+        <template x-if="currentProduct?.specs?.load && currentProduct.specs.load !== '–'">
+          <span class="sr-product-spec" x-text="currentProduct.specs.load"></span>
+        </template>
+      </div>
+      <div class="sr-topbar-right">
+        <a href="/dashboard.html" class="sr-topbar-link" title="Produktverwaltung">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </a>
+        <a href="/converter.html" class="sr-topbar-link" title="GLB Konvertierung">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </a>
+        <button type="button" @click="resetCamera()" class="sr-topbar-btn" title="Kamera zurücksetzen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
+        <button type="button" @click="settingsOpen = !settingsOpen" class="sr-topbar-btn"
+                :class="settingsOpen && 'active'" title="Einstellungen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ─── Sidebar: Product list ─── -->
+    <aside class="sr-sidebar"
+           :class="{ 'sr-sidebar-closed': sidebarClosed }"
+           @mouseenter="sidebarClosed && (sidebarPeek = true)"
+           @mouseleave="sidebarPeek = false">
+      <button type="button" class="sr-sidebar-toggle" @click="sidebarClosed = !sidebarClosed"
+              :title="sidebarClosed ? 'Sidebar öffnen' : 'Sidebar schließen'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             :style="sidebarClosed ? 'transform:rotate(180deg)' : ''">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
+      <div class="sr-sidebar-header">
+        <span class="sr-sidebar-label">Produkte</span>
+        <span class="sr-sidebar-count" x-text="products.length"></span>
+      </div>
+      <div class="sr-sidebar-list">
+        <template x-for="product in products" :key="product.id">
+          <button type="button" @click="selectProduct(product)"
+                  class="sr-sidebar-item"
+                  :class="currentProduct?.id === product.id && 'active'">
+            <span class="sr-sidebar-item-name" x-text="product.name"></span>
+            <span class="sr-sidebar-item-sub" x-text="product.specs?.load && product.specs.load !== '–' ? product.specs.load : product.id"></span>
+          </button>
+        </template>
+      </div>
+      <button type="button" @click="mobileMenuClosed = !mobileMenuClosed"
+              class="sr-sidebar-mobile-toggle md:hidden">
+        <span x-text="mobileMenuClosed ? 'Produkte anzeigen' : 'Schließen'"></span>
+      </button>
+    </aside>
+
+    <!-- ─── Color palette (bottom) ─── -->
+    <div class="sr-colors">
+      <template x-for="(ral, code) in ralColors" :key="code">
+        <button type="button" @click="selectColor(code)"
+                class="sr-color-btn"
+                :class="currentColor === code && 'active'"
+                :style="'--c:' + ral.hex"
+                :title="ral.name + ' (' + code + ')'">
+          <span class="sr-color-swatch"></span>
+          <span class="sr-color-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </span>
+        </button>
+      </template>
+    </div>
+
+    <!-- ─── Anbau button (floating, contextual) ─── -->
+    <button type="button" x-show="canAddAnbau" x-transition @click="addAnbau()"
+            class="sr-fab sr-fab-anbau" title="Regal anbauen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span>Anbauen</span>
+    </button>
+
+    <!-- ─── AR button (mobile) ─── -->
+    <button type="button" x-show="isMobile" @click="openAR()"
+            class="sr-fab sr-fab-ar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      <span>AR ansehen</span>
+    </button>
+
+    <!-- ─── Settings panel (slide-in) ─── -->
+    <div class="sr-settings" :class="settingsOpen && 'open'">
+      <div class="sr-settings-group">
+        <span class="sr-settings-label">Beleuchtung</span>
+        <div class="sr-range-wrap">
+          <input type="range" min="0" max="100" step="1"
+                 x-model.number="lightIntensity" @input="setLightIntensity()"
+                 class="sr-range">
+          <span class="sr-range-val" x-text="lightIntensity + '%'"></span>
+        </div>
+      </div>
+      <div class="sr-settings-group" x-show="productCameras.length > 0">
+        <span class="sr-settings-label">Kamera</span>
+        <select class="sr-select" x-model="selectedCameraId" @change="onCameraSelect($event.target.value)">
+          <option value="orbit">Orbit (frei)</option>
+          <template x-for="cam in productCameras" :key="cam.id">
+            <option :value="cam.id" x-text="cam.name"></option>
+          </template>
+        </select>
+      </div>
+      <div class="sr-settings-group" x-show="currentProduct?.shelves?.shelfWidthMm">
+        <span class="sr-settings-label">Bodenmaße</span>
+        <span class="sr-settings-value" x-text="(currentProduct?.shelves?.shelfWidthMm || '–') + ' × ' + (currentProduct?.shelves?.shelfDepthMm || '–') + ' mm'"></span>
+      </div>
+      <div class="sr-settings-divider"></div>
+      <span class="sr-settings-label" style="margin-bottom:.5rem">Entwickler</span>
+      <button type="button" @click="toggleOriginalOrientation()" class="sr-settings-btn"
+              :class="showOriginalOrientation && 'active'">
+        <span x-text="showOriginalOrientation ? 'Showroom-Ansicht' : 'Modell wie in Datei'"></span>
+      </button>
+      <button type="button" @click="toggleLightDebug()" class="sr-settings-btn"
+              :class="showLightDebug && 'active'">
+        <span x-text="showLightDebug ? 'Lichter ausblenden' : 'Lichter anzeigen'"></span>
+      </button>
+      <button type="button" @click="togglePivotDebug()" class="sr-settings-btn"
+              :class="showPivotDebug && 'active'">
+        <span x-text="showPivotDebug ? 'Pivots ausblenden' : 'Pivots anzeigen'"></span>
+      </button>
+    </div>
+
+    <!-- ─── Hotspot container ─── -->
+    <div id="hotspot-container" class="fixed inset-0 pointer-events-none z-30">
+      <div class="pointer-events-auto"></div>
+    </div>
+
+    <!-- ─── Light debug container ─── -->
+    <div id="light-debug-container" class="fixed inset-0 pointer-events-none z-25" style="display: none;"></div>
+
+    <!-- ─── Hotspot info modal ─── -->
+    <div x-show="activeHotspot" x-transition.opacity.duration.200ms
+         @click="activeHotspot = null"
+         class="sr-modal-overlay" x-cloak>
+      <div @click.stop class="sr-modal" x-transition.scale.origin.center>
+        <div class="sr-modal-accent"></div>
+        <h3 class="sr-modal-title" x-text="activeHotspot?.title"></h3>
+        <p class="sr-modal-body" x-text="activeHotspot?.content"></p>
+        <button type="button" @click="activeHotspot = null" class="sr-modal-close">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── AR container (hidden) ─── -->
+  <div id="ar-container" class="fixed inset-0 z-50 bg-gray-900 hidden">
+    <button type="button" id="ar-close" class="absolute top-4 right-4 z-10 px-4 py-2 bg-gray-800 text-white rounded-lg">Schließen</button>
+    <model-viewer id="model-viewer" class="w-full h-full" ar ar-modes="webxr scene-viewer quick-look" camera-controls tone-mapping="commerce" shadow-intensity="1"></model-viewer>
+  </div>
+
+  <style>[x-cloak] { display: none !important; }</style>
+</body>
+</html>

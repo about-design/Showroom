@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GLB Orientierungs-Check (Y-up)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #e0e0e0; padding: 2rem; }
+  h1 { font-size: 1.4rem; margin-bottom: .3rem; }
+  .subtitle { color: #888; font-size: .85rem; margin-bottom: 1rem; }
+
+  .drop-zone {
+    border: 2px dashed #444; border-radius: 8px; padding: 2.5rem; text-align: center;
+    cursor: pointer; transition: border-color .2s, background .2s; margin-bottom: 1rem;
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: #6cf; background: rgba(102,204,255,.06); }
+  .drop-zone input { display: none; }
+  .drop-zone p { color: #999; font-size: .9rem; }
+  .drop-zone p strong { color: #ccc; }
+
+  .legend {
+    font-size: .78rem; color: #777; margin-bottom: 1.5rem; padding: .5rem .8rem;
+    background: #1a1a1a; border-radius: 6px; display: inline-block;
+  }
+  .legend .ax-x { color: #ff6666; font-weight: 700; }
+  .legend .ax-y { color: #66ff66; font-weight: 700; }
+  .legend .ax-z { color: #6688ff; font-weight: 700; }
+
+  .progress { color: #888; font-size: .85rem; margin-bottom: 1rem; }
+  .summary { margin-bottom: 1.2rem; font-size: .9rem; padding: .8rem 1rem; border-radius: 6px; }
+  .summary.all-ok { background: rgba(0,200,100,.12); color: #6fdb6f; }
+  .summary.has-issues { background: rgba(255,60,60,.12); color: #ff7070; }
+
+  .toolbar { margin-bottom: 1rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .filter-btn {
+    padding: .3rem .8rem; border-radius: 4px; border: 1px solid #333; background: #1a1a1a;
+    color: #aaa; cursor: pointer; font-size: .8rem; transition: all .15s;
+  }
+  .filter-btn:hover { border-color: #555; color: #ddd; }
+  .filter-btn.active { border-color: #6cf; color: #6cf; background: rgba(102,204,255,.08); }
+  .toolbar-sep { width: 1px; height: 1.4rem; background: #333; margin: 0 .2rem; }
+
+  .toggle-wrap { display: flex; align-items: center; gap: .5rem; cursor: pointer; user-select: none; }
+  .toggle-wrap span { font-size: .82rem; color: #888; transition: color .2s; }
+  .toggle-wrap.active span { color: #ffb347; }
+  .toggle-track {
+    width: 36px; height: 20px; border-radius: 10px; background: #333; position: relative; transition: background .2s;
+  }
+  .toggle-wrap.active .toggle-track { background: #b37520; }
+  .toggle-thumb {
+    width: 16px; height: 16px; border-radius: 50%; background: #888; position: absolute;
+    top: 2px; left: 2px; transition: transform .2s, background .2s;
+  }
+  .toggle-wrap.active .toggle-thumb { transform: translateX(16px); background: #ffcc66; }
+
+  .bake-zip-btn {
+    padding: .35rem .9rem; border-radius: 5px; border: 1px solid #b37520;
+    background: rgba(179,117,32,.15); color: #ffcc66; cursor: pointer;
+    font-size: .8rem; font-weight: 600; transition: all .15s; white-space: nowrap;
+  }
+  .bake-zip-btn:hover { background: rgba(179,117,32,.3); }
+  .bake-zip-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+
+  .card {
+    background: #1a1a1a; border-radius: 8px; overflow: hidden;
+    border-left: 3px solid #333; transition: border-color .2s;
+  }
+  .card.status-ok { border-left-color: #2a6a2a; }
+  .card.status-zup { border-left-color: #cc4444; }
+  .card.status-root-rot { border-left-color: #cc8833; }
+  .card.status-error { border-left-color: #882222; }
+
+  .card-preview {
+    width: 100%; aspect-ratio: 1; background: #141414; display: flex;
+    align-items: center; justify-content: center; position: relative;
+  }
+  .card-preview img { width: 100%; height: 100%; object-fit: contain; }
+  .card-preview .error-msg { color: #ff5555; font-size: .75rem; padding: 1rem; text-align: center; }
+
+  .card-body { padding: .7rem .8rem; }
+  .card-name { font-size: .8rem; font-weight: 600; word-break: break-all; margin-bottom: .35rem; line-height: 1.3; }
+
+  .badge {
+    display: inline-block; padding: .12rem .45rem; border-radius: 3px;
+    font-size: .7rem; font-weight: 600; margin-bottom: .35rem;
+  }
+  .badge-ok { background: #1a3a1a; color: #6fdb6f; }
+  .badge-zup { background: #3a1a1a; color: #ff7070; }
+  .badge-root-rot { background: #3a2e1a; color: #f0b040; }
+  .badge-error { background: #2a1515; color: #cc5555; }
+
+  .card-meta { font-size: .72rem; color: #777; line-height: 1.5; }
+  .card-meta dt { color: #555; display: inline; }
+  .card-meta dd { display: inline; margin: 0; color: #999; }
+  .card-meta .line { display: block; }
+  .card-finding { font-size: .72rem; color: #e8a040; margin-top: .3rem; line-height: 1.4; }
+  .mono { font-family: 'SF Mono', 'Fira Code', monospace; }
+
+  .card-dl-btn {
+    display: none; margin-top: .5rem; padding: .3rem .6rem; border-radius: 4px;
+    border: 1px solid #b37520; background: rgba(179,117,32,.1); color: #ffcc66;
+    cursor: pointer; font-size: .72rem; font-weight: 600; width: 100%; transition: all .15s;
+  }
+  .card-dl-btn:hover { background: rgba(179,117,32,.25); }
+  .card-dl-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .bake-active .card-dl-btn.has-issues { display: block; }
+</style>
+</head>
+<body>
+
+<h1>GLB Orientierungs-Check</h1>
+<p class="subtitle">Prüft GLB-Dateien auf korrektes Y-up-Koordinatensystem. Vorschau zeigt die tatsächliche Ausrichtung in Three.js.</p>
+
+<div class="drop-zone" id="dropZone">
+  <input type="file" id="folderInput" multiple accept=".glb" webkitdirectory>
+  <p><strong>Ordner auswählen</strong> oder GLB-Dateien hierher ziehen</p>
+  <p style="margin-top:.4rem; font-size:.8rem; color:#666;">
+    Einzeldateien? <span id="singleFileBtn" style="color:#6cf;cursor:pointer;text-decoration:underline;">Dateien wählen</span>
+  </p>
+  <input type="file" id="singleFileInput" multiple accept=".glb" style="display:none">
+</div>
+
+<div class="legend">
+  Achsen-Farben: <span class="ax-x">■ X</span> &nbsp;<span class="ax-y">■ Y (oben)</span> &nbsp;<span class="ax-z">■ Z</span>
+  &nbsp;·&nbsp; Gitter = Bodenfläche bei Y = 0
+</div>
+
+<div class="progress" id="progress" style="display:none;"></div>
+<div class="summary" id="summary" style="display:none;"></div>
+
+<div class="toolbar" id="toolbar" style="display:none;">
+  <button class="filter-btn active" data-filter="all">Alle</button>
+  <button class="filter-btn" data-filter="issues">Nur Auffällige</button>
+  <button class="filter-btn" data-filter="ok">Nur OK</button>
+  <div class="toolbar-sep" id="bakeSep" style="display:none;"></div>
+  <div class="toggle-wrap" id="bakeToggle" style="display:none;">
+    <div class="toggle-track"><div class="toggle-thumb"></div></div>
+    <span>Einbrennen</span>
+  </div>
+  <button class="bake-zip-btn" id="bakeZipBtn" style="display:none;">Alle als ZIP herunterladen</button>
+</div>
+
+<div class="grid" id="results"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+
+const PREVIEW_SIZE = 180
+
+const dracoLoader = new DRACOLoader()
+dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/libs/draco/')
+const gltfLoader = new GLTFLoader()
+gltfLoader.setDRACOLoader(dracoLoader)
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+renderer.setSize(PREVIEW_SIZE, PREVIEW_SIZE)
+renderer.setPixelRatio(1)
+renderer.outputColorSpace = THREE.SRGBColorSpace
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.0
+
+const dropZone = document.getElementById('dropZone')
+const folderInput = document.getElementById('folderInput')
+const singleFileInput = document.getElementById('singleFileInput')
+const progressEl = document.getElementById('progress')
+const summaryEl = document.getElementById('summary')
+const toolbar = document.getElementById('toolbar')
+const resultsEl = document.getElementById('results')
+const bakeToggle = document.getElementById('bakeToggle')
+const bakeSep = document.getElementById('bakeSep')
+const bakeZipBtn = document.getElementById('bakeZipBtn')
+
+// ─── Datei-Auswahl ──────────────────────────────────────────────────
+dropZone.addEventListener('click', () => folderInput.click())
+document.getElementById('singleFileBtn').addEventListener('click', (e) => { e.stopPropagation(); singleFileInput.click() })
+folderInput.addEventListener('change', (e) => handleFiles(e.target.files))
+singleFileInput.addEventListener('change', (e) => handleFiles(e.target.files))
+
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over') })
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'))
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault()
+  dropZone.classList.remove('drag-over')
+  const items = e.dataTransfer.items
+  if (items) {
+    const entries = []
+    for (const item of items) { const en = item.webkitGetAsEntry?.(); if (en) entries.push(en) }
+    if (entries.length) return collectFilesFromEntries(entries).then(processFiles)
+  }
+  handleFiles(e.dataTransfer.files)
+})
+
+function collectFilesFromEntries(entries) {
+  const files = []
+  function readDir(dir) {
+    return new Promise((res) => {
+      const reader = dir.createReader(); const all = []
+      ;(function batch() { reader.readEntries((b) => { if (!b.length) return res(Promise.all(all.map(readEntry))); all.push(...b); batch() }) })()
+    })
+  }
+  function readEntry(entry) {
+    if (entry.isFile) return new Promise((res) => { entry.file((f) => { if (f.name.toLowerCase().endsWith('.glb')) { Object.defineProperty(f, 'relativePath', { value: entry.fullPath }); files.push(f) } res() }) })
+    if (entry.isDirectory) return readDir(entry)
+    return Promise.resolve()
+  }
+  return Promise.all(entries.map(readEntry)).then(() => files)
+}
+function handleFiles(fl) { processFiles(Array.from(fl).filter((f) => f.name.toLowerCase().endsWith('.glb'))) }
+
+// ─── GLB JSON Parser (für Check) ────────────────────────────────────
+async function parseGlbJson(file) {
+  const buf = await file.arrayBuffer()
+  const v = new DataView(buf)
+  if (v.getUint32(0, true) !== 0x46546C67) throw new Error('Kein GLB')
+  const cLen = v.getUint32(12, true)
+  if (v.getUint32(16, true) !== 0x4E4F534A) throw new Error('JSON-Chunk fehlt')
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, cLen)))
+}
+
+// ─── Metadaten-Analyse ──────────────────────────────────────────────
+function analyzeGltfMeta(json) {
+  const asset = json.asset || {}
+  const generator = asset.generator || 'Unbekannt', version = asset.version || '?'
+  const findings = [], rootIndices = json.scenes?.[json.scene ?? 0]?.nodes || []
+  for (const idx of rootIndices) {
+    const node = json.nodes?.[idx]; if (!node) continue
+    const name = node.name || `Node #${idx}`
+    if (node.rotation) {
+      const [qx,qy,qz,qw] = node.rotation
+      if (isZupCorrQuat(qx,qy,qz,qw)) findings.push({ type: 'zup', text: `Root „${name}": ±90° X-Rotation → Z-up-Daten mit Root-Korrektur` })
+      else if (!isIdQuat(qx,qy,qz,qw)) findings.push({ type: 'rotation', text: `Root „${name}": Rotation ${quatToEulerDeg(qx,qy,qz,qw)}` })
+    }
+    if (node.matrix) {
+      const m = node.matrix, id = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
+      if (!m.every((v,i) => Math.abs(v-id[i])<0.001)) {
+        if (isZupCorrMatrix(m)) findings.push({ type: 'zup', text: `Root „${name}": Matrix → Z-up-Daten` })
+        else findings.push({ type: 'rotation', text: `Root „${name}": Nicht-triviale Matrix` })
+      }
+    }
+  }
+  return { generator, version, findings }
+}
+function isIdQuat(x,y,z,w) { return Math.abs(x)<.01 && Math.abs(y)<.01 && Math.abs(z)<.01 && Math.abs(Math.abs(w)-1)<.01 }
+function isZupCorrQuat(x,y,z,w) { return Math.abs(Math.abs(x)-.7071)<.02 && Math.abs(y)<.02 && Math.abs(z)<.02 && Math.abs(Math.abs(w)-.7071)<.02 }
+function isZupCorrMatrix(m) {
+  const a=[1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1], b=[1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1]
+  const cl=(r)=>r.every((v,i)=>Math.abs(m[i]-v)<.02); return cl(a)||cl(b)
+}
+function quatToEulerDeg(x,y,z,w) {
+  const sP=2*(w*y-z*x), p=Math.abs(sP)>=1?Math.sign(sP)*90:Math.asin(sP)*180/Math.PI
+  const sY=2*(w*z+x*y), cY=1-2*(y*y+z*z), yaw=Math.atan2(sY,cY)*180/Math.PI
+  const sR=2*(w*x+y*z), cR=1-2*(x*x+y*y), r=Math.atan2(sR,cR)*180/Math.PI
+  return `X ${r.toFixed(1)}° Y ${yaw.toFixed(1)}° Z ${p.toFixed(1)}°`
+}
+
+// ─── Three.js Vorschau ──────────────────────────────────────────────
+function renderPreview(gltfScene) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x141414); scene.add(gltfScene)
+  scene.add(new THREE.AmbientLight(0xffffff, 1.5))
+  const d1 = new THREE.DirectionalLight(0xffffff, 3); d1.position.set(3,5,4); scene.add(d1)
+  const d2 = new THREE.DirectionalLight(0xffffff, 1); d2.position.set(-2,1,-3); scene.add(d2)
+  const bbox = new THREE.Box3().setFromObject(gltfScene)
+  const center = bbox.getCenter(new THREE.Vector3()), size = bbox.getSize(new THREE.Vector3())
+  const maxDim = Math.max(size.x,size.y,size.z) || 1
+  const gs = Math.max(maxDim*1.5,1)
+  const grid = new THREE.GridHelper(gs, Math.min(Math.round(gs/.25),40), 0x444444, 0x282828); scene.add(grid)
+  const ax = new THREE.AxesHelper(Math.max(maxDim*.18,.15)); ax.renderOrder=999; ax.material.depthTest=false; scene.add(ax)
+  const hs = maxDim*.72
+  const cam = new THREE.OrthographicCamera(-hs,hs,hs,-hs,.001,maxDim*30)
+  const dist=maxDim*4, el=28*Math.PI/180, az=32*Math.PI/180
+  cam.position.set(center.x+dist*Math.cos(el)*Math.sin(az), center.y+dist*Math.sin(el), center.z+dist*Math.cos(el)*Math.cos(az))
+  cam.lookAt(center); renderer.render(scene, cam)
+  const url = renderer.domElement.toDataURL()
+  scene.remove(gltfScene); grid.geometry.dispose(); grid.material.dispose(); ax.geometry.dispose(); ax.material.dispose()
+  return url
+}
+function disposeScene(s) {
+  s.traverse((o) => {
+    if (o.geometry) o.geometry.dispose()
+    if (o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach((m)=>{m.map?.dispose();m.normalMap?.dispose();m.dispose()})
+  })
+}
+function loadGltf(file) {
+  return new Promise((res,rej) => { const u=URL.createObjectURL(file); gltfLoader.load(u,(g)=>{URL.revokeObjectURL(u);res(g)},undefined,(e)=>{URL.revokeObjectURL(u);rej(e)}) })
+}
+
+// ─── Analyse ────────────────────────────────────────────────────────
+async function analyzeFile(file) {
+  const name = file.relativePath || file.webkitRelativePath || file.name
+  const result = { name, file, status:'ok', preview:null, generator:'?', version:'?', findings:[], bbox:null, extent:null }
+  try { const m=analyzeGltfMeta(await parseGlbJson(file)); result.generator=m.generator; result.version=m.version; result.findings=m.findings } catch(_){}
+  try {
+    const gltf = await loadGltf(file); gltf.scene.updateMatrixWorld(true)
+    const bbox = new THREE.Box3().setFromObject(gltf.scene)
+    if (!bbox.isEmpty()) { result.bbox={min:bbox.min.clone(),max:bbox.max.clone()}; result.extent=bbox.getSize(new THREE.Vector3()) }
+    result.preview = renderPreview(gltf.scene); disposeScene(gltf.scene)
+  } catch(err) { result.status='error'; result.findings.push({type:'error',text:`Laden fehlgeschlagen: ${err.message}`}) }
+  if (result.status!=='error') {
+    if (result.findings.some(f=>f.type==='zup')) result.status='zup'
+    else if (result.findings.some(f=>f.type==='rotation')) result.status='root-rot'
+  }
+  return result
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  EINBRENNEN: Direkte Binär-Manipulation der GLB-Datei
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Quaternion-Mathematik ──────────────────────────────────────────
+const EPS = 0.005
+function qIsId(q) { return Math.abs(q[0])<EPS && Math.abs(q[1])<EPS && Math.abs(q[2])<EPS && Math.abs(Math.abs(q[3])-1)<EPS }
+function qToMat3([qx,qy,qz,qw]) {
+  const xx=qx*qx, yy=qy*qy, zz=qz*qz, xy=qx*qy, xz=qx*qz, yz=qy*qz, wx=qw*qx, wy=qw*qy, wz=qw*qz
+  return [1-2*(yy+zz),2*(xy-wz),2*(xz+wy), 2*(xy+wz),1-2*(xx+zz),2*(yz-wx), 2*(xz-wy),2*(yz+wx),1-2*(xx+yy)]
+}
+function rV3(m,x,y,z) { return [m[0]*x+m[1]*y+m[2]*z, m[3]*x+m[4]*y+m[5]*z, m[6]*x+m[7]*y+m[8]*z] }
+function qMul([ax,ay,az,aw],[bx,by,bz,bw]) {
+  return [aw*bx+ax*bw+ay*bz-az*by, aw*by-ax*bz+ay*bw+az*bx, aw*bz+ax*by-ay*bx+az*bw, aw*bw-ax*bx-ay*by-az*bz]
+}
+
+// ─── GLB Binär-Parser ───────────────────────────────────────────────
+function parseGlb(buf) {
+  const v = new DataView(buf)
+  if (v.getUint32(0,true) !== 0x46546C67) throw new Error('Kein GLB')
+  const jsonLen = v.getUint32(12,true)
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)))
+  const binStart = 20 + jsonLen
+  let bin = null
+  if (binStart + 8 <= buf.byteLength) {
+    const binLen = v.getUint32(binStart, true)
+    bin = new Uint8Array(buf, binStart + 8, binLen).slice()
+  }
+  const hasDraco = !!json.extensionsUsed?.includes('KHR_draco_mesh_compression')
+  return { json, bin, hasDraco }
+}
+
+function buildGlb(json, bin) {
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(json))
+  const jsonPad = (4 - jsonBytes.length % 4) % 4
+  const jsonChunkLen = jsonBytes.length + jsonPad
+  const binPad = bin ? (4 - bin.length % 4) % 4 : 0
+  const binChunkLen = bin ? bin.length + binPad : 0
+  const total = 12 + 8 + jsonChunkLen + (bin ? 8 + binChunkLen : 0)
+  const out = new ArrayBuffer(total)
+  const dv = new DataView(out), bytes = new Uint8Array(out)
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true)
+  dv.setUint32(12, jsonChunkLen, true); dv.setUint32(16, 0x4E4F534A, true)
+  bytes.set(jsonBytes, 20)
+  for (let i=0; i<jsonPad; i++) bytes[20+jsonBytes.length+i] = 0x20
+  if (bin) {
+    const o = 20 + jsonChunkLen
+    dv.setUint32(o, binChunkLen, true); dv.setUint32(o+4, 0x004E4942, true)
+    bytes.set(bin, o+8)
+    for (let i=0; i<binPad; i++) bytes[o+8+bin.length+i] = 0
+  }
+  return out
+}
+
+// ─── In-Place Vertex-Transformation ─────────────────────────────────
+function transformAcc(json, bin, accIdx, mat, isPosition) {
+  const acc = json.accessors[accIdx]
+  if (acc.componentType !== 5126) return
+  const bv = json.bufferViews[acc.bufferView]
+  const off0 = (bv.byteOffset||0) + (acc.byteOffset||0)
+  const stride = bv.byteStride || (acc.type === 'VEC4' ? 16 : 12)
+  const dv = new DataView(bin.buffer, bin.byteOffset)
+  let mnX=Infinity,mnY=Infinity,mnZ=Infinity, mxX=-Infinity,mxY=-Infinity,mxZ=-Infinity
+  for (let i=0; i<acc.count; i++) {
+    const o = off0 + i * stride
+    const x=dv.getFloat32(o,true), y=dv.getFloat32(o+4,true), z=dv.getFloat32(o+8,true)
+    const [rx,ry,rz] = rV3(mat,x,y,z)
+    dv.setFloat32(o,rx,true); dv.setFloat32(o+4,ry,true); dv.setFloat32(o+8,rz,true)
+    if (isPosition) { mnX=Math.min(mnX,rx);mnY=Math.min(mnY,ry);mnZ=Math.min(mnZ,rz); mxX=Math.max(mxX,rx);mxY=Math.max(mxY,ry);mxZ=Math.max(mxZ,rz) }
+  }
+  if (isPosition && acc.min && acc.max) { acc.min=[mnX,mnY,mnZ]; acc.max=[mxX,mxY,mxZ] }
+}
+
+function bakeMesh(json, bin, meshIdx, mat) {
+  const mesh = json.meshes[meshIdx]
+  for (const prim of mesh.primitives) {
+    const a = prim.attributes
+    if (a.POSITION !== undefined) transformAcc(json, bin, a.POSITION, mat, true)
+    if (a.NORMAL !== undefined) transformAcc(json, bin, a.NORMAL, mat, false)
+    if (a.TANGENT !== undefined) transformAcc(json, bin, a.TANGENT, mat, false)
+    if (prim.targets) for (const t of prim.targets) {
+      if (t.POSITION !== undefined) transformAcc(json, bin, t.POSITION, mat, false)
+      if (t.NORMAL !== undefined) transformAcc(json, bin, t.NORMAL, mat, false)
+      if (t.TANGENT !== undefined) transformAcc(json, bin, t.TANGENT, mat, false)
+    }
+  }
+}
+
+// ─── Rekursives Push-Down der Root-Rotation ─────────────────────────
+function pushRotDown(json, bin, nodeIdx) {
+  const node = json.nodes[nodeIdx]
+  const q = node.rotation
+  if (!q || qIsId(q)) return
+  const mat = qToMat3(q)
+
+  if (node.mesh !== undefined) bakeMesh(json, bin, node.mesh, mat)
+
+  if (node.children) {
+    for (const ci of node.children) {
+      const child = json.nodes[ci]
+      if (child.translation) child.translation = rV3(mat, ...child.translation)
+      child.rotation = qMul(q, child.rotation || [0,0,0,1])
+      pushRotDown(json, bin, ci)
+    }
+  }
+  delete node.rotation
+}
+
+function bakeInPlace(json, bin) {
+  const roots = json.scenes?.[json.scene ?? 0]?.nodes || []
+  for (const idx of roots) pushRotDown(json, bin, idx)
+}
+
+// ─── Bake & Export ──────────────────────────────────────────────────
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+}
+
+function sizeDelta(before, after) {
+  const pct = ((after - before) / before * 100).toFixed(1)
+  const sign = after > before ? '+' : ''
+  return { before, after, pct: parseFloat(pct), label: `${fmtSize(before)} → ${fmtSize(after)} (${sign}${pct}%)` }
+}
+
+const SIZE_WARN_THRESHOLD = 1.15
+
+async function bakeAndExport(file) {
+  const originalSize = file.size
+  const { json, bin, hasDraco } = parseGlb(await file.arrayBuffer())
+
+  let glb
+  if (hasDraco) {
+    glb = await bakeWithThreeJs(file)
+  } else {
+    bakeInPlace(json, bin)
+    glb = buildGlb(json, bin)
+  }
+
+  const newSize = glb.byteLength || glb.length
+  return { glb, sizeInfo: sizeDelta(originalSize, newSize), hasDraco }
+}
+
+async function bakeWithThreeJs(file) {
+  const gltf = await loadGltf(file)
+  gltf.scene.updateMatrixWorld(true)
+  const snapshots = []
+  gltf.scene.traverse((o) => { if (o.isMesh && o.geometry) snapshots.push({ mesh:o, wm:o.matrixWorld.clone() }) })
+  for (const {mesh, wm} of snapshots) { mesh.geometry = mesh.geometry.clone(); mesh.geometry.applyMatrix4(wm) }
+  gltf.scene.traverse((o) => { if (o===gltf.scene) return; o.position.set(0,0,0); o.quaternion.set(0,0,0,1); o.scale.set(1,1,1); o.updateMatrix() })
+
+  const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js')
+  const glb = await new GLTFExporter().parseAsync(gltf.scene, { binary: true })
+  disposeScene(gltf.scene)
+  return glb
+}
+
+function triggerDownload(blob, filename) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
+
+async function downloadSingle(result) {
+  const btn = document.querySelector(`[data-dl="${result.name}"]`)
+  if (btn) { btn.disabled = true; btn.textContent = 'Verarbeite…' }
+  try {
+    const { glb, sizeInfo, hasDraco } = await bakeAndExport(result.file)
+
+    if (sizeInfo.pct > (SIZE_WARN_THRESHOLD - 1) * 100) {
+      const dracoHint = hasDraco ? '\n\n⚠ Draco-komprimierte Datei – Empfehlung: Node-Script (bake-glb-yup.js) für optimale Größe.' : ''
+      const proceed = confirm(
+        `⚠ Dateigrößen-Warnung für "${result.name.split('/').pop()}":\n\n` +
+        `Vorher: ${fmtSize(sizeInfo.before)}\n` +
+        `Nachher: ${fmtSize(sizeInfo.after)} (+${sizeInfo.pct}%)\n` +
+        `${dracoHint}\n\nTrotzdem herunterladen?`
+      )
+      if (!proceed) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Einbrennen & herunterladen' }
+        return
+      }
+    }
+
+    triggerDownload(new Blob([glb], { type: 'model/gltf-binary' }), result.name.split('/').pop())
+    if (btn) {
+      btn.textContent = `✓ ${sizeInfo.label}`
+      btn.style.borderColor = sizeInfo.pct > 15 ? '#b37520' : '#2a6a2a'
+      btn.style.color = sizeInfo.pct > 15 ? '#ffcc66' : '#6fdb6f'
+    }
+  } catch (err) {
+    console.error('Bake-Fehler:', result.name, err)
+    if (btn) { btn.textContent = 'Fehler'; btn.style.color = '#ff5555' }
+  }
+}
+
+const MAX_PER_ZIP = 500
+
+async function downloadAllAsZip() {
+  const fixable = allResults.filter((r) => r.status==='zup' || r.status==='root-rot')
+  if (!fixable.length) return
+
+  let warnCount = 0, totalBefore = 0, totalAfter = 0
+  const precheck = []
+
+  bakeZipBtn.disabled = true
+  bakeZipBtn.textContent = `Größen-Check 0 / ${fixable.length}…`
+
+  for (let i = 0; i < fixable.length; i++) {
+    bakeZipBtn.textContent = `Größen-Check ${i + 1} / ${fixable.length}…`
+    try {
+      const { glb, sizeInfo, hasDraco } = await bakeAndExport(fixable[i].file)
+      totalBefore += sizeInfo.before
+      totalAfter += sizeInfo.after
+      if (sizeInfo.pct > (SIZE_WARN_THRESHOLD - 1) * 100) warnCount++
+      precheck.push({ r: fixable[i], glb, sizeInfo, hasDraco })
+    } catch (err) {
+      console.error('Bake-Fehler:', fixable[i].name, err)
+      precheck.push({ r: fixable[i], error: err })
+    }
+  }
+
+  const totalDelta = sizeDelta(totalBefore, totalAfter)
+  const errors = precheck.filter(p => p.error).length
+
+  let msg = `Größen-Report:\n\n` +
+    `Gesamt vorher: ${fmtSize(totalBefore)}\n` +
+    `Gesamt nachher: ${fmtSize(totalAfter)} (${totalDelta.pct > 0 ? '+' : ''}${totalDelta.pct}%)\n` +
+    `Dateien mit Größenzunahme >15%: ${warnCount}\n` +
+    (errors > 0 ? `Fehler: ${errors}\n` : '')
+
+  if (warnCount > 0) {
+    msg += `\n⚠ ${warnCount} Datei(en) werden deutlich größer. ` +
+      `Draco-komprimierte Dateien verlieren beim Browser-Export ihre Kompression.\n` +
+      `Empfehlung: Verwende "node scripts/bake-glb-yup.js --write" für optimale Ergebnisse.`
+  }
+
+  msg += '\n\nMit ZIP-Download fortfahren?'
+
+  if (!confirm(msg)) {
+    bakeZipBtn.disabled = false; bakeZipBtn.textContent = 'Alle als ZIP herunterladen'
+    return
+  }
+
+  const valid = precheck.filter(p => !p.error)
+  const totalParts = Math.ceil(valid.length / MAX_PER_ZIP)
+
+  for (let part = 0; part < totalParts; part++) {
+    const slice = valid.slice(part * MAX_PER_ZIP, (part + 1) * MAX_PER_ZIP)
+    const zip = new JSZip()
+    for (const { r, glb } of slice) {
+      zip.file(r.name.split('/').pop(), glb)
+    }
+    bakeZipBtn.textContent = `ZIP ${part + 1}/${totalParts} wird erstellt…`
+    const suffix = totalParts > 1 ? `-teil${part + 1}` : ''
+    triggerDownload(await zip.generateAsync({ type: 'blob' }), `glb-yup-baked${suffix}.zip`)
+  }
+
+  bakeZipBtn.disabled = false; bakeZipBtn.textContent = 'Alle als ZIP herunterladen'
+}
+
+// ─── Verarbeitung ───────────────────────────────────────────────────
+let allResults = [], bakeMode = false
+
+async function processFiles(files) {
+  if (!files.length) return alert('Keine .glb-Dateien gefunden.')
+  resultsEl.innerHTML=''; summaryEl.style.display='none'; toolbar.style.display='none'
+  progressEl.style.display='block'; allResults=[]; bakeMode=false; document.body.classList.remove('bake-active')
+  for (let i=0; i<files.length; i++) {
+    progressEl.textContent = `Prüfe ${i+1} / ${files.length}: ${files[i].name}`
+    allResults.push(await analyzeFile(files[i]))
+  }
+  progressEl.style.display='none'
+  allResults.sort((a,b) => {const o={zup:0,'root-rot':1,error:2,ok:3}; return (o[a.status]??9)-(o[b.status]??9)})
+  const issues = allResults.filter(r=>r.status!=='ok').length
+  summaryEl.style.display='block'
+  if (!issues) { summaryEl.className='summary all-ok'; summaryEl.textContent=`Alle ${allResults.length} Dateien geprüft – keine Auffälligkeiten.` }
+  else { summaryEl.className='summary has-issues'; summaryEl.textContent=`${allResults.length} Dateien geprüft – ${issues} mit Auffälligkeiten.` }
+  toolbar.style.display='flex'
+  bakeSep.style.display = issues?'':'none'; bakeToggle.style.display = issues?'flex':'none'; bakeZipBtn.style.display='none'
+  renderCards('all')
+}
+
+bakeToggle.addEventListener('click', () => {
+  bakeMode=!bakeMode; bakeToggle.classList.toggle('active',bakeMode)
+  document.body.classList.toggle('bake-active',bakeMode); bakeZipBtn.style.display=bakeMode?'':'none'
+})
+bakeZipBtn.addEventListener('click', downloadAllAsZip)
+
+function renderCards(filter) {
+  resultsEl.innerHTML=''
+  const list = filter==='issues'?allResults.filter(r=>r.status!=='ok'):filter==='ok'?allResults.filter(r=>r.status==='ok'):allResults
+  for (const r of list) {
+    const card = document.createElement('div'); card.className=`card status-${r.status}`
+    const prev = r.preview ? `<img src="${r.preview}" alt="Vorschau">` : '<div class="error-msg">Keine Vorschau</div>'
+    const badges = {ok:'<span class="badge badge-ok">Y-UP OK</span>',zup:'<span class="badge badge-zup">Z-UP DATEN</span>','root-rot':'<span class="badge badge-root-rot">ROOT-ROTATION</span>',error:'<span class="badge badge-error">FEHLER</span>'}
+    const finds = r.findings.map(f=>`<div class="card-finding">${esc(f.text)}</div>`).join('')
+    const bboxH = r.bbox ? `<span class="line"><dt>BBox min:</dt> <dd class="mono">${fv(r.bbox.min)}</dd></span><span class="line"><dt>BBox max:</dt> <dd class="mono">${fv(r.bbox.max)}</dd></span><span class="line"><dt>Größe:</dt> <dd class="mono">${fmt(r.extent.x)} × ${fmt(r.extent.y)} × ${fmt(r.extent.z)} m</dd></span>` : ''
+    const fileSizeH = r.file ? `<span class="line"><dt>Dateigröße:</dt> <dd class="mono">${fmtSize(r.file.size)}</dd></span>` : ''
+    const hasI = r.status==='zup'||r.status==='root-rot'
+    const dlBtn = hasI ? `<button class="card-dl-btn has-issues" data-dl="${esc(r.name)}">Einbrennen &amp; herunterladen</button>` : ''
+    card.innerHTML = `<div class="card-preview">${prev}</div><div class="card-body"><div class="card-name">${esc(r.name)}</div>${badges[r.status]||''}<dl class="card-meta"><span class="line"><dt>Generator:</dt> <dd>${esc(r.generator)}</dd></span>${fileSizeH}${bboxH}</dl>${finds}${dlBtn}</div>`
+    resultsEl.appendChild(card)
+  }
+}
+
+resultsEl.addEventListener('click', (e) => { const b=e.target.closest('.card-dl-btn'); if(!b)return; const r=allResults.find(x=>x.name===b.dataset.dl); if(r)downloadSingle(r) })
+toolbar.addEventListener('click', (e) => { const b=e.target.closest('.filter-btn'); if(!b)return; toolbar.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderCards(b.dataset.filter) })
+
+function fmt(v){return v.toFixed(4)} function fv(v){return`${fmt(v.x)}, ${fmt(v.y)}, ${fmt(v.z)}`} function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+</script>
+</body>
+</html>

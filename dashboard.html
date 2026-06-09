@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>META Produktverwaltung</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script type="module" src="/src/dashboard/main.js"></script>
+</head>
+<body>
+<div class="shell" id="app">
+
+  <!-- ═══════ Top bar ═══════ -->
+  <header class="top-bar">
+    <div class="top-bar-left">
+      <a href="/" class="logo" title="Zurück zum Showroom">
+        <div class="logo-mark">M</div>
+        <span>META</span>
+      </a>
+      <div class="breadcrumb">
+        / <span>Produktverwaltung</span>
+      </div>
+    </div>
+    <div class="top-bar-right">
+      <a href="/converter.html" class="btn btn-ghost" title="GLB Konvertierung">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Konvertierung
+      </a>
+      <button class="btn btn-ghost" id="btnAddGlb" title="GLB-Dateien hochladen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        GLB hochladen
+      </button>
+      <button class="btn btn-ghost" id="btnSave" title="products.json auf Disk speichern">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Speichern
+      </button>
+      <button class="btn btn-primary" id="btnExport" title="products.json als Download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Exportieren
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════ Stats strip ═══════ -->
+  <section class="stats-strip" id="statsStrip"></section>
+
+  <!-- ═══════ Toolbar ═══════ -->
+  <nav class="toolbar">
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input class="search-input" id="searchInput" type="text" placeholder="Suche nach Name, ID oder Artikelnummer …">
+    </div>
+    <div class="filter-group" id="filterGroup">
+      <button class="filter-chip active" data-filter="all">Alle</button>
+      <button class="filter-chip" data-filter="single">Einzel</button>
+      <button class="filter-chip" data-filter="composed">Zusammengebaut</button>
+      <button class="filter-chip" data-filter="incomplete">Unvollständig</button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group" id="statusFilterGroup">
+      <button class="filter-chip active" data-status="all">Alle Status</button>
+      <button class="filter-chip" data-status="open">
+        <span class="status-dot dot-open"></span>Offen
+      </button>
+      <button class="filter-chip" data-status="review">
+        <span class="status-dot dot-review"></span>In Prüfung
+      </button>
+      <button class="filter-chip" data-status="approved">
+        <span class="status-dot dot-approved"></span>Freigegeben
+      </button>
+      <button class="filter-chip" data-status="rejected">
+        <span class="status-dot dot-rejected"></span>Abgelehnt
+      </button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="sort-wrap">
+      <label class="sort-label" for="sortSelect">Sortierung</label>
+      <select class="sort-select" id="sortSelect">
+        <option value="default">Standard</option>
+        <option value="newest">Neueste zuerst</option>
+        <option value="oldest">Älteste zuerst</option>
+        <option value="name">Name A–Z</option>
+      </select>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <span class="result-count" id="resultCount"></span>
+    <div class="view-toggle" id="viewToggle">
+      <button class="view-btn active" data-view="grid" title="Rasteransicht">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </button>
+      <button class="view-btn" data-view="list" title="Listenansicht">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ═══════ Main content ═══════ -->
+  <main class="main-content">
+    <!-- Drop zone (shown when dragging over page) -->
+    <div class="upload-drop-overlay" id="dropOverlay">
+      <div class="upload-drop-inner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span>GLB-Dateien hier ablegen</span>
+      </div>
+    </div>
+    <div class="product-grid" id="productGrid"></div>
+  </main>
+</div>
+
+<!-- ═══════ Detail panel ═══════ -->
+<div class="detail-overlay" id="detailOverlay"></div>
+<aside class="detail-panel" id="detailPanel">
+  <div class="detail-header">
+    <span class="detail-title" id="detailTitle"></span>
+    <button class="detail-close" id="detailClose">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="detail-content" id="detailContent"></div>
+  <div class="detail-footer">
+    <button class="btn btn-danger" id="btnDeleteProduct" style="margin-right:auto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      Löschen
+    </button>
+    <a class="btn btn-ghost" id="btnShowroom" href="/" target="_blank" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      Im Showroom öffnen
+    </a>
+    <button class="btn btn-ghost" id="btnCancelDetail">Abbrechen</button>
+    <button class="btn btn-primary" id="btnSaveDetail">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+      Übernehmen
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════ Toasts ═══════ -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ═══════ Hidden file inputs ═══════ -->
+<input type="file" id="glbFileInput" accept=".glb" multiple style="display:none">
+</body>
+</html>

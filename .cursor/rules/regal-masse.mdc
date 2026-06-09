@@ -1,0 +1,40 @@
+---
+description: Regel für Ständer- und Boden-Positionierung (auf alle Maße anwendbar)
+globs: src/showroom/ProductPlacement.js, src/data/products.json
+alwaysApply: false
+---
+
+# Regal: Ständer und Böden – Positionsregel
+
+Diese Regel gilt für zusammengesetzte Regale (type: "composed") mit Ständern und Böden. Sie ist auf beliebige Maße anwendbar.
+
+## Referenz und Formeln
+
+- **Startpunkt:** Ständer 1 Pivot = Referenz (linkester Ständer, kleinstes X aus allen Part-Positionen).
+- **Böden-Pivot:** Ständer 1 + `shelfToStanderMm` (in mm).
+- **Ständer 2 Pivot:** Ständer 1 + `shelfWidthMm + 2 × clearanceMm` (in mm).
+
+## Konvention (3 mm Spiel je Seite)
+
+| Variable | Formel | Beispiel (1000 mm Boden) |
+|----------|--------|---------------------------|
+| clearanceMm | 3 (fest) | 3 |
+| shelfToStanderMm | shelfWidthMm/2 + clearanceMm | 500 + 3 = **503** |
+| Ständer 2 Abstand | shelfWidthMm + 2×clearanceMm | 1000 + 6 = **1006** |
+
+## Positionen in products.json
+
+- Ständer 1: `x: 0` (Startpunkt).
+- Ständer 2: `x: 1.006` (bei 1000 mm Boden) bzw. `x: (shelfWidthMm + 6)/1000` in Metern.
+- Böden: werden im Code gesetzt mit `shelfCenterX = staender1PivotX + shelfToStanderMm/1000`.
+
+## Bei anderen Bodenmaßen
+
+Für neuen Boden z. B. 1200 mm breit:
+
+- shelfWidthMm: 1200
+- shelfToStanderMm: 1200/2 + 3 = **603**
+- Ständer 2 Abstand: 1200 + 6 = **1206** → in positions: `x: 1.206`
+- Ständer 1 bleibt Startpunkt (z. B. x: 0).
+
+Code in ProductPlacement.js nutzt bereits `shelfToStanderMm` und den linkesten Part-Pivot; nur Konfiguration in products.json anpassen.

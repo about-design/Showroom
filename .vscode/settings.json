@@ -1,0 +1,19 @@
+{
+  "tailwindCSS.files.exclude": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/public/**"
+  ],
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/public/models/**": true,
+    "**/public/models/output/**": true,
+    "**/blender-exporter/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/public/models": true,
+    "**/public/models/output": true,
+    "**/blender-exporter": true
+  }
+}
