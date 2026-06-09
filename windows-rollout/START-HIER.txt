@@ -1,0 +1,55 @@
+META SHOWROOM – WINDOWS-ROLLOUT
+================================
+
+Dieser Ordner buendelt alles, was du fuer die Installation beim Kollegen brauchst.
+
+WICHTIG
+-------
+Die fertigen Installer-Dateien werden HIER NOCH NICHT mitgeliefert, weil sie
+auf einem WINDOWS-Rechner gebaut werden muessen (auf dem Mac nicht moeglich).
+Nach dem Build legst du sie in den Ordner "installer (hier ablegen nach Build)".
+
+
+SCHRITT 1 – Installer bauen (auf einem Windows-Rechner)
+-------------------------------------------------------
+Projekt auf den Windows-Rechner bringen, dann in PowerShell:
+
+    npm install
+    npm run dist:win        -> erzeugt:  META Showroom Setup 1.0.0.exe   (Standalone-Viewer)
+    npm run package:win     -> erzeugt:  meta-showroom-1.0.0-win-x64.zip (voller Stack, optional)
+
+Die Ergebnisse liegen danach im Projektordner unter "release\".
+Details: anleitungen\1 - Build-Anleitung (fuer dich).md
+
+
+SCHRITT 2 – Gebaute Dateien hierher kopieren
+--------------------------------------------
+Aus "release\" in den Ordner "installer (hier ablegen nach Build)" legen:
+  - META Showroom Setup 1.0.0.exe   (das Wichtigste zum Weitergeben)
+  - meta-showroom-1.0.0-win-x64.zip (nur falls voller Stack benoetigt)
+
+
+SCHRITT 3 – Beim Kollegen installieren (mit IT)
+-----------------------------------------------
+Variante A (schnell, nur ansehen):
+  "META Showroom Setup 1.0.0.exe" doppelklicken und installieren.
+  Braucht KEINE Zusatzsoftware. SmartScreen-Hinweis ggf. mit IT bestaetigen.
+
+Variante B (voller Funktionsumfang inkl. Konverter):
+  ZIP nach Anleitung "2 - IT-Rollout (voller Stack).md" installieren.
+  Braucht Node, Python, Blender, Memurai auf dem Zielrechner.
+
+
+ORDNERINHALT
+------------
+  START-HIER.txt                         <- diese Datei
+  icon-vorschau.png                      <- so sieht das App-Icon aus
+  anleitungen\                           <- alle Anleitungen (durchnummeriert)
+  installer (hier ablegen nach Build)\   <- hier die .exe / .zip ablegen
+
+
+Was wofuer?
+  1 - Build-Anleitung ........ fuer dich, zum Erzeugen der Installer
+  2 - IT-Rollout ............. fuer die IT, voller Stack (ZIP)
+  3 - README Windows ......... ausfuehrliche technische Details
+  4 - Bedienung .............. fuer den Anwender/Kollegen

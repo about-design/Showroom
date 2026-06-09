@@ -2,34 +2,112 @@
   "name": "meta-showroom",
   "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
+  "author": "META",
+  "description": "META Online – 3D Showroom",
   "scripts": {
+    "check": "vite build",
+    "logs:tail": "node scripts/logs-tail.mjs",
+    "logs:clear": "node scripts/logs-clear.mjs",
+    "migrate:logger": "node scripts/migrate-console-to-logger.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "node scripts/deploy.mjs",
     "products:update": "node scripts/update-products-from-models.js",
     "products:sync": "node scripts/update-products-from-models.js --sync",
     "dashboard": "vite --open /dashboard.html",
-    "glb:check": "open tools/check-glb-orientation.html",
+    "glb:check": "npx open-cli tools/check-glb-orientation.html",
+    "mtl:colors": "node tools/extract-mtl-colors.js",
+    "mtl:slim-mapping": "node scripts/slim-mtl-mapping.mjs",
+    "sync:colors": "node scripts/sync-colors-from-mtl.mjs",
+    "mtl:matching": "npx open-cli tools/mtl-color-matching.html",
     "glb:bake-yup": "node scripts/bake-glb-yup.js",
     "glb:bake-yup:write": "node scripts/bake-glb-yup.js --write",
+    "glb:check-orientations": "node scripts/check-glb-orientations.js",
+    "glb:check-orientations:write": "node scripts/check-glb-orientations.js --write",
+    "cad:auto-uv": "node scripts/run-auto-uv.mjs",
+    "catalog:reconvert-p134": "node scripts/reconvert-catalog-p134.mjs",
+    "catalog:reconvert-p134:dry": "node scripts/reconvert-catalog-p134.mjs --dry-run",
     "start:mcp": "node scripts/run-mcp.mjs",
     "start:api": "node scripts/run-api.mjs",
     "dev:full": "node scripts/start-services.mjs && concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"vite\"",
-    "dev:converter": "node scripts/start-services.mjs && concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"vite\""
+    "dev:converter": "node scripts/start-services.mjs && concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"vite\"",
+    "services:preflight": "node scripts/start-services.mjs",
+    "services:start": "node scripts/services-launch.mjs start",
+    "services:stop": "node scripts/services-launch.mjs stop",
+    "services:restart": "node scripts/services-launch.mjs restart",
+    "services:reload": "node scripts/services-launch.mjs reload",
+    "services:status": "node scripts/services-launch.mjs status",
+    "services:logs": "node scripts/services-launch.mjs logs",
+    "services:delete": "node scripts/services-launch.mjs delete",
+    "services:save": "node scripts/services-launch.mjs save",
+    "services:startup": "node scripts/services-launch.mjs startup",
+    "electron": "electron .",
+    "build:win": "npm run build && electron-builder --win",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "package:win": "node scripts/package-windows.mjs",
+    "start:showroom": "node scripts/start-services.mjs && concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"npm run preview\""
   },
   "dependencies": {
     "@google/model-viewer": "^4.0.0",
     "alpinejs": "^3.14.0",
     "gsap": "^3.12.0",
+    "meshoptimizer": "^1.0.1",
     "three": "^0.172.0"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0",
     "@gltf-transform/core": "^4.3.0",
     "@gltf-transform/extensions": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
     "@tailwindcss/vite": "^4.0.0",
+    "chrome-launcher": "^1.2.1",
+    "concurrently": "^9.1.0",
     "draco3dgltf": "^1.5.7",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "open-cli": "^8.0.0",
+    "pm2": "^6.0.14",
+    "puppeteer-core": "^24.42.0",
     "tailwindcss": "^4.0.0",
     "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "de.meta.showroom",
+    "productName": "META Showroom",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist",
+      "electron/**/*"
+    ],
+    "win": {
+      "icon": "electron/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "META Showroom",
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico",
+      "installerHeaderIcon": "electron/icon.ico",
+      "installerLanguages": [
+        "de_DE",
+        "en_US"
+      ],
+      "language": "2067"
+    }
   }
 }
