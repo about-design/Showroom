@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTL Colormatching</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a1c; color: #e2e2e2; padding: 1.5rem; max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 1.35rem; margin-bottom: 0.25rem; font-weight: 600; }
+    .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 1.25rem; }
+    .step { margin-bottom: 1.5rem; }
+    .step-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6a9; margin-bottom: 0.5rem; }
+    .drop-zone {
+      border: 2px dashed #3a3a3e; border-radius: 8px; padding: 1.5rem; text-align: center;
+      cursor: pointer; transition: border-color .2s, background .2s; margin-bottom: 0.75rem;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: #5a8; background: rgba(102,170,136,.06); }
+    .drop-zone input { display: none; }
+    .drop-zone p { color: #999; font-size: 0.9rem; }
+    .paste-hint { font-size: 0.8rem; color: #666; margin-top: 0.5rem; }
+    textarea.json-input {
+      width: 100%; min-height: 100px; padding: 0.75rem; border-radius: 6px;
+      border: 1px solid #333; background: #222; color: #ccc; font-family: ui-monospace, monospace; font-size: 0.8rem;
+      resize: vertical;
+    }
+    textarea.json-input::placeholder { color: #555; }
+    .palette { display: flex; flex-direction: column; gap: 0.5rem; }
+    .palette-row {
+      display: grid; grid-template-columns: 2.5rem 3rem 6rem 1fr 3rem 7rem minmax(0, 1fr); align-items: center; gap: 0.75rem;
+      padding: 0.5rem 0.75rem; background: #222; border-radius: 6px; border: 1px solid #2a2a2e;
+    }
+    .palette-row .id { font-weight: 600; color: #8ac; font-variant-numeric: tabular-nums; }
+    .swatch {
+      width: 2.5rem; height: 2rem; border-radius: 4px; border: 1px solid #444;
+      flex-shrink: 0;
+    }
+    .palette-row label { font-size: 0.8rem; color: #888; }
+    .palette-row input[type="color"] { width: 2.5rem; height: 2rem; padding: 0; border: 1px solid #444; border-radius: 4px; cursor: pointer; background: #111; }
+    .palette-row input[type="text"].hex { width: 7rem; padding: 0.35rem 0.5rem; font-family: ui-monospace, monospace; font-size: 0.8rem; border-radius: 4px; border: 1px solid #333; background: #1a1a1a; color: #ccc; }
+    .materials-wrap { background: #222; border-radius: 6px; border: 1px solid #2a2a2e; padding: 0.75rem 1rem; }
+    .materials-wrap summary { cursor: pointer; font-size: 0.9rem; color: #aaa; }
+    .materials-list { margin-top: 0.5rem; font-size: 0.8rem; color: #888; }
+    .materials-list div { padding: 0.2rem 0; }
+    .materials-list code { color: #8ac; font-size: 0.78rem; }
+    .btn {
+      padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #4a6; background: rgba(68,170,102,.15); color: #8fc;
+      cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: background .2s, border-color .2s;
+    }
+    .btn:hover { background: rgba(68,170,102,.3); border-color: #6a8; }
+    .btn.secondary { border-color: #444; background: #2a2a2e; color: #aaa; }
+    .btn.secondary:hover { border-color: #555; color: #ccc; }
+    .toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem; }
+    .export-json-wrap { margin-top: 0.75rem; }
+    .export-json-wrap textarea { width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #8fc; font-family: ui-monospace, monospace; font-size: 0.78rem; resize: vertical; }
+    .hidden { display: none !important; }
+    .status { font-size: 0.85rem; color: #6a9; margin-bottom: 0.5rem; }
+    .status.error { color: #e66; }
+    .load-tabs { display: flex; gap: 0; margin-bottom: 0.75rem; }
+    .tab-btn { padding: 0.5rem 1rem; border: 1px solid #333; background: #222; color: #888; cursor: pointer; font-size: 0.9rem; border-radius: 6px 6px 0 0; margin-right: 2px; }
+    .tab-btn:hover { color: #aaa; }
+    .tab-btn.active { background: #2a2a2e; color: #8ac; border-bottom-color: transparent; }
+    .tab-panel { padding: 0.75rem 0; border: 1px solid #333; border-radius: 0 6px 6px 6px; background: #1a1a1c; margin-top: -1px; padding-top: 1rem; }
+    .drop-zone-multi { min-height: 4rem; }
+    .ral-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: #222; border-radius: 6px; border: 1px solid #2a2a2e; }
+    .ral-label { font-size: 0.85rem; color: #888; }
+    .ral-file { font-size: 0.8rem; max-width: 12rem; }
+    .ral-status { font-size: 0.8rem; color: #6a9; }
+    .palette-row .ral-name { font-size: 0.75rem; color: #8a8; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .palette-row select.ral-select { padding: 0.3rem 0.5rem; font-size: 0.8rem; border-radius: 4px; border: 1px solid #333; background: #1a1a1a; color: #ccc; min-width: 0; max-width: 100%; }
+    .palette-row select.ral-select option { background: #222; color: #ccc; }
+  </style>
+</head>
+<body>
+  <h1>MTL Colormatching</h1>
+  <p class="subtitle">OBJ/MTL-Dateien auswählen → JSON wird gebaut → Farben zuordnen → Matching speichern.</p>
+
+  <div class="step">
+    <div class="step-title">1. Daten laden</div>
+    <div class="load-tabs">
+      <button type="button" class="tab-btn active" data-tab="files">OBJ/MTL-Dateien</button>
+      <button type="button" class="tab-btn" data-tab="json">JSON einfügen</button>
+    </div>
+    <div class="tab-panel" id="panelFiles">
+      <div class="drop-zone drop-zone-multi" id="dropZoneFiles">
+        <p><strong>OBJ- und MTL-Dateien hier ablegen</strong> oder klicken</p>
+        <p class="paste-hint">Mehrere Dateien möglich. Aus OBJ wird die referenzierte MTL automatisch genutzt.</p>
+        <input type="file" id="fileInputObjMtl" accept=".obj,.mtl,model/obj,model/mtl" multiple>
+      </div>
+      <p class="status hidden" id="filesStatus"></p>
+    </div>
+    <div class="tab-panel hidden" id="panelJson">
+      <div class="drop-zone" id="dropZoneJson">
+        <p><strong>JSON-Datei ablegen</strong> oder klicken</p>
+        <input type="file" id="fileInputJson" accept=".json,application/json">
+      </div>
+      <textarea class="json-input" id="jsonPaste" placeholder="Oder JSON hier einfügen (z. B. Ausgabe von: node tools/extract-mtl-colors.js ./pfad --format json)"></textarea>
+      <div class="toolbar" style="margin-top: 0.5rem;">
+        <button type="button" class="btn secondary" id="btnParse">JSON übernehmen</button>
+      </div>
+      <p class="status hidden" id="loadStatus"></p>
+    </div>
+  </div>
+
+  <div class="step hidden" id="stepMatch">
+    <div class="step-title">2. Farben zuordnen (Match)</div>
+    <div class="ral-bar">
+      <span class="ral-label">RAL-Palette:</span>
+      <span class="ral-status status hidden" id="ralStatus"></span>
+      <input type="file" id="fileInputRal" accept=".json,application/json" class="ral-file" title="Fallback wenn Projekt unter Dev-Server nicht geladen">
+      <button type="button" class="btn secondary" id="btnRalMap" disabled>Alle auf nächsten RAL mappen</button>
+    </div>
+    <p class="status" id="matchStatus"></p>
+    <p class="status" style="font-size:0.8rem; color:#888">Materialien mit Textur (map_Kd/map_Ka … .png/.jpg) werden beim Konvertieren nicht per Mapping ersetzt; die MTL-Oberfläche bleibt.</p>
+    <div class="palette" id="palette"></div>
+    <details class="materials-wrap" style="margin-top: 1rem;">
+      <summary>Material-Mapping (Referenz)</summary>
+      <div class="materials-list" id="materialsList"></div>
+    </details>
+  </div>
+
+  <div class="step hidden" id="stepExport">
+    <div class="step-title">3. Matching speichern</div>
+    <div class="toolbar">
+      <button type="button" class="btn" id="btnSaveProjectMapping" title="Speichert das Farb-Mapping im Projekt – sofort für Konverter und Massenexport nutzbar">Mapping im Projekt speichern</button>
+      <button type="button" class="btn secondary" id="btnLoadProjectMapping" title="Bestehendes Mapping laden und bearbeiten">Projekt-Mapping laden</button>
+      <button type="button" class="btn secondary" id="btnDownload">Als JSON herunterladen</button>
+      <button type="button" class="btn secondary" id="btnCopy">In Zwischenablage kopieren</button>
+    </div>
+    <p class="status" style="margin-top:0.35rem">Ein Mapping = alle Farben. „Mapping im Projekt speichern“ schreibt nach <code>public/mtl-ral-color-mapping.json</code> – Konverter und „Alle GLBs neu konvertieren“ nutzen es sofort. Materialien mit PNG/JPG-Textur (map_Kd etc.) werden nicht überschrieben.</p>
+    <div class="export-json-wrap">
+      <textarea id="exportJson" readonly placeholder="Export-JSON erscheint hier nach Klick auf Download/Kopieren oder beim Ändern einer Farbe."></textarea>
+    </div>
+  </div>
+
+  <script>
+    const dropZoneFiles = document.getElementById('dropZoneFiles');
+    const fileInputObjMtl = document.getElementById('fileInputObjMtl');
+    const filesStatus = document.getElementById('filesStatus');
+    const dropZoneJson = document.getElementById('dropZoneJson');
+    const fileInputJson = document.getElementById('fileInputJson');
+    const jsonPaste = document.getElementById('jsonPaste');
+    const btnParse = document.getElementById('btnParse');
+    const loadStatus = document.getElementById('loadStatus');
+    const stepMatch = document.getElementById('stepMatch');
+    const stepExport = document.getElementById('stepExport');
+    const matchStatus = document.getElementById('matchStatus');
+    const paletteEl = document.getElementById('palette');
+    const materialsList = document.getElementById('materialsList');
+    const exportJson = document.getElementById('exportJson');
+    const btnDownload = document.getElementById('btnDownload');
+    const btnSaveProjectMapping = document.getElementById('btnSaveProjectMapping');
+    const btnLoadProjectMapping = document.getElementById('btnLoadProjectMapping');
+    const btnCopy = document.getElementById('btnCopy');
+
+    let state = { data: null, matches: {}, ralColors: null, hexToRal: null }; // hexToRal: #hex (lowercase) -> { key, name }
+
+    function normalizeHex(hex) {
+      if (!hex || typeof hex !== 'string') return '';
+      const h = hex.trim().replace(/^#/, '');
+      if (h.length === 6 && /^[0-9a-fA-F]{6}$/.test(h)) return '#' + h.toUpperCase();
+      return hex;
+    }
+
+    function loadRalFromRaw(raw) {
+      const ralColors = {};
+      const hexToRal = {};
+      for (const [key, val] of Object.entries(raw)) {
+        if (key === '_meta' || !val || typeof val !== 'object') continue;
+        if (val && typeof val.hex === 'string') {
+          const hex = val.hex.startsWith('#') ? val.hex : '#' + val.hex;
+          const norm = normalizeHex(hex);
+          const keyNorm = norm.toLowerCase();
+          ralColors[key] = { hex: keyNorm, name: val.name || key };
+          hexToRal[keyNorm] = { key, name: val.name || key };
+        }
+      }
+      state.ralColors = ralColors;
+      state.hexToRal = hexToRal;
+      ralStatus.textContent = Object.keys(ralColors).length + ' RAL-Farben geladen';
+      ralStatus.classList.remove('hidden');
+      ralStatus.classList.remove('error');
+      btnRalMap.disabled = Object.keys(ralColors).length === 0;
+      if (state.data) renderPalette();
+    }
+
+    // RAL-Palette beim Start laden (Dev-Server), sonst Fallback über Dateiauswahl
+    fetch('/ralColors.json')
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((raw) => loadRalFromRaw(raw))
+      .catch(() => {
+        ralStatus.textContent = 'RAL-Palette: Datei wählen (oder Projekt unter Dev-Server öffnen).';
+        ralStatus.classList.remove('hidden');
+      });
+
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach((p) => p.classList.add('hidden'));
+        btn.classList.add('active');
+        document.getElementById('panel' + (btn.dataset.tab === 'files' ? 'Files' : 'Json')).classList.remove('hidden');
+      });
+    });
+
+    // OBJ/MTL: Dateien lesen und JSON bauen
+    const COLOR_KEYS = ['Ka', 'Kd', 'Ks', 'Ke'];
+    const LABELS = { Ka: 'ambient', Kd: 'diffuse', Ks: 'specular', Ke: 'emissive' };
+
+    function rgbToHex(r, g, b) {
+      const to255 = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+      return '#' + [to255(r), to255(g), to255(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    function hasMapImageLine(line) {
+      return /^map_\w+/.test(line) && /\.(png|jpg|jpeg|gif|tga|bmp|tif|tiff)(\s|$)/i.test(line);
+    }
+    function parseMtl(content, sourceName) {
+      const materials = [];
+      let current = null;
+      const lines = content.split(/\r?\n/);
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        if (t.startsWith('newmtl ')) {
+          current = { name: t.slice(7).trim(), colors: [], source: sourceName, hasTexture: false };
+          materials.push(current);
+          continue;
+        }
+        if (!current) continue;
+        if (hasMapImageLine(t)) {
+          current.hasTexture = true;
+          continue;
+        }
+        for (const key of COLOR_KEYS) {
+          if (t.startsWith(key + ' ')) {
+            const parts = t.slice(key.length).trim().split(/\s+/).map(Number);
+            if (parts.length >= 3) {
+              const [r, g, b] = parts;
+              const hex = rgbToHex(r, g, b);
+              current.colors.push({
+                type: LABELS[key],
+                r, g, b,
+                r255: Math.round(r * 255),
+                g255: Math.round(g * 255),
+                b255: Math.round(b * 255),
+                hex,
+              });
+            }
+            break;
+          }
+        }
+      }
+      return materials;
+    }
+
+    function buildDataFromObjMtl(fileMap) {
+      const uniqueColorsByHex = new Map();
+      const allMaterials = [];
+      const mtlNamesToProcess = new Set();
+      for (const [nameLower, { name, content }] of Object.entries(fileMap)) {
+        if (nameLower.endsWith('.mtl')) mtlNamesToProcess.add(name);
+        if (nameLower.endsWith('.obj')) {
+          const mtlMatch = content.match(/mtllib\s+(.+)/);
+          if (mtlMatch) {
+            const mtlName = mtlMatch[1].trim().split(/\s+/)[0];
+            const mtlKey = mtlName.toLowerCase();
+            if (fileMap[mtlKey]) mtlNamesToProcess.add(fileMap[mtlKey].name);
+          }
+        }
+      }
+      for (const mtlName of mtlNamesToProcess) {
+        const mtlKey = mtlName.toLowerCase();
+        if (!fileMap[mtlKey]) continue;
+        const content = fileMap[mtlKey].content;
+        const materials = parseMtl(content, mtlName);
+        for (const mat of materials) {
+          allMaterials.push({ file: mtlName, material: mat.name, colors: mat.colors });
+          for (const c of mat.colors) {
+            if (!uniqueColorsByHex.has(c.hex)) {
+              uniqueColorsByHex.set(c.hex, { hex: c.hex, r: c.r255, g: c.g255, b: c.b255, type: c.type, sources: [], hasTexture: false });
+            }
+            const entry = uniqueColorsByHex.get(c.hex);
+            entry.sources.push({ file: mtlName, material: mat.name, type: c.type });
+            if (mat.hasTexture) entry.hasTexture = true;
+          }
+        }
+      }
+      const uniqueColors = [...uniqueColorsByHex.values()].map((c, i) => ({ id: i + 1, ...c }));
+      const hexToId = Object.fromEntries(uniqueColors.map((c) => [c.hex, c.id]));
+      const materialsWithMapping = allMaterials.map(({ file, material, colors }) => ({
+        file,
+        material,
+        colors: colors.map((c) => ({ ...c, colorId: hexToId[c.hex] })),
+        mapping: Object.fromEntries(colors.map((c) => [c.type, hexToId[c.hex]])),
+      }));
+      return {
+        palette: uniqueColors,
+        materials: materialsWithMapping.map(({ file, material, mapping, colors }) => ({
+          material,
+          file,
+          mapping,
+          colors: colors.map((c) => ({ type: c.type, colorId: c.colorId, hex: c.hex })),
+        })),
+        hexToId,
+      };
+    }
+
+    function readFilesAsMap(files, onDone) {
+      const fileMap = {};
+      let pending = 0;
+      const list = Array.from(files).filter((f) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.obj') || n.endsWith('.mtl');
+      });
+      if (list.length === 0) {
+        onDone(null, 'Keine OBJ- oder MTL-Dateien gefunden.');
+        return;
+      }
+      list.forEach((file) => {
+        const key = file.name.toLowerCase();
+        pending++;
+        const r = new FileReader();
+        r.onload = () => {
+          fileMap[key] = { name: file.name, content: r.result };
+          pending--;
+          if (pending === 0) {
+            const data = buildDataFromObjMtl(fileMap);
+            if (data.palette.length === 0) onDone(null, 'In den MTL-Dateien wurden keine Farben gefunden.');
+            else onDone(data, null);
+          }
+        };
+        r.readAsText(file);
+      });
+    }
+
+    dropZoneFiles.addEventListener('click', () => fileInputObjMtl.click());
+    dropZoneFiles.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneFiles.classList.add('drag-over'); });
+    dropZoneFiles.addEventListener('dragleave', () => dropZoneFiles.classList.remove('drag-over'));
+    dropZoneFiles.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZoneFiles.classList.remove('drag-over');
+      const files = e.dataTransfer?.files;
+      if (files?.length) processObjMtlFiles(files);
+    });
+    fileInputObjMtl.addEventListener('change', () => {
+      const files = fileInputObjMtl.files;
+      if (files?.length) processObjMtlFiles(files);
+    });
+
+    function processObjMtlFiles(files) {
+      setStatus(filesStatus, 'Lese Dateien …', false);
+      readFilesAsMap(files, (data, err) => {
+        if (err) {
+          setStatus(filesStatus, err, true);
+          return;
+        }
+        setStatus(filesStatus, 'JSON aus ' + files.length + ' Datei(en) gebaut: ' + data.palette.length + ' Farben, ' + (data.materials?.length ?? 0) + ' Materialien.', false);
+        applyData(data);
+      });
+    }
+
+    // JSON laden
+    dropZoneJson.addEventListener('click', () => fileInputJson.click());
+    dropZoneJson.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneJson.classList.add('drag-over'); });
+    dropZoneJson.addEventListener('dragleave', () => dropZoneJson.classList.remove('drag-over'));
+    dropZoneJson.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZoneJson.classList.remove('drag-over');
+      const f = e.dataTransfer?.files?.[0];
+      if (f && (f.name.toLowerCase().endsWith('.json') || f.type === 'application/json')) readJsonFile(f);
+    });
+    fileInputJson.addEventListener('change', () => { const f = fileInputJson.files?.[0]; if (f) readJsonFile(f); });
+    btnParse.addEventListener('click', () => {
+      const raw = jsonPaste.value.trim();
+      if (!raw) { setStatus(loadStatus, 'Bitte JSON einfügen oder Datei wählen.', true); return; }
+      try {
+        const data = JSON.parse(raw);
+        if (!data.palette || !Array.isArray(data.palette)) throw new Error('JSON muss "palette" (Array) enthalten.');
+        applyData(data);
+        setStatus(loadStatus, 'Geladen: ' + data.palette.length + ' Farben.', false);
+      } catch (err) {
+        setStatus(loadStatus, 'Ungültiges JSON: ' + err.message, true);
+      }
+    });
+
+    function readJsonFile(file) {
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const data = JSON.parse(r.result);
+          if (!data.palette || !Array.isArray(data.palette)) throw new Error('Datei muss "palette" (Array) enthalten.');
+          jsonPaste.value = JSON.stringify(data, null, 2);
+          applyData(data);
+          setStatus(loadStatus, 'Geladen: ' + data.palette.length + ' Farben, ' + (data.materials?.length ?? 0) + ' Materialien.', false);
+        } catch (err) {
+          setStatus(loadStatus, 'Ungültiges JSON: ' + err.message, true);
+        }
+      };
+      r.readAsText(file);
+    }
+
+    function setStatus(el, text, isError) {
+      el.textContent = text;
+      el.classList.toggle('error', !!isError);
+      el.classList.remove('hidden');
+    }
+
+    const fileInputRal = document.getElementById('fileInputRal');
+    const btnRalMap = document.getElementById('btnRalMap');
+    const ralStatus = document.getElementById('ralStatus');
+
+    fileInputRal.addEventListener('change', () => {
+      const f = fileInputRal.files?.[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          loadRalFromRaw(JSON.parse(r.result));
+        } catch (e) {
+          ralStatus.textContent = 'Ungültige RAL-JSON';
+          ralStatus.classList.add('error');
+        }
+      };
+      r.readAsText(f);
+    });
+
+    function rgbDistance(r1, g1, b1, r2, g2, b2) {
+      return (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2;
+    }
+
+    function nearestRal(r, g, b) {
+      if (!state.ralColors) return null;
+      // Wie ColorService.nearestRALFromRgbRgb: feste Ausnahme + bei Gleichstand lexikographisch kleinster RAL-Code
+      if (r === 132 && g === 126 && b === 120 && state.ralColors['RAL 9007']?.hex) return 'RAL 9007';
+      const tied = [];
+      let bestD = Infinity;
+      for (const [key, val] of Object.entries(state.ralColors)) {
+        if (key === '_meta' || !val || typeof val !== 'object' || !val.hex) continue;
+        const m = val.hex.match(/^#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
+        if (!m) continue;
+        const r2 = parseInt(m[1], 16), g2 = parseInt(m[2], 16), b2 = parseInt(m[3], 16);
+        const d = rgbDistance(r, g, b, r2, g2, b2);
+        if (d < bestD) {
+          bestD = d;
+          tied.length = 0;
+          tied.push(key);
+        } else if (d === bestD) {
+          tied.push(key);
+        }
+      }
+      if (!tied.length) return null;
+      tied.sort((a, b) => a.localeCompare(b, 'en'));
+      return tied[0];
+    }
+
+    btnRalMap.addEventListener('click', () => {
+      if (!state.data || !state.ralColors) return;
+      state.data.palette.forEach((c) => {
+        const key = nearestRal(c.r, c.g, c.b);
+        if (key) {
+          const hex = state.ralColors[key].hex;
+          state.matches[String(c.id)] = hex;
+        }
+      });
+      renderPalette();
+      updateExport();
+      matchStatus.textContent = 'Alle Farben auf nächsten RAL gemappt. Anpassungen möglich.';
+      matchStatus.classList.remove('error');
+    });
+
+    function hexFromRgb(r, g, b) {
+      return '#' + [r, g, b].map((x) => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join('');
+    }
+
+    function applyData(data) {
+      state.data = data;
+      state.matches = {};
+      data.palette.forEach((c) => { state.matches[String(c.id)] = c.hex; });
+      stepMatch.classList.remove('hidden');
+      stepExport.classList.remove('hidden');
+      matchStatus.textContent = 'Ordne jeder Farbe eine Ersatzfarbe zu (Standard: Original).';
+      renderPalette();
+      renderMaterials();
+      updateExport();
+    }
+
+    function renderPalette() {
+      const { palette } = state.data;
+      const hasRal = !!state.ralColors && Object.keys(state.ralColors).length > 0;
+      paletteEl.innerHTML = '';
+      palette.forEach((c) => {
+        const row = document.createElement('div');
+        row.className = 'palette-row';
+        const matchHex = state.matches[String(c.id)] ?? c.hex;
+        const hexNorm = matchHex.startsWith('#') ? matchHex.toLowerCase() : '#' + matchHex.toLowerCase();
+        const ralInfo = state.hexToRal?.[hexNorm];
+        const ralLabel = ralInfo ? ralInfo.key + ' ' + (ralInfo.name || '') : '';
+        const ralSelectOpts = hasRal
+          ? '<option value="">— Manuell</option>' +
+            Object.entries(state.ralColors)
+              .map(([key, val]) => `<option value="${key.replace(/"/g, '&quot;')}">${key} ${val.name || ''}</option>`)
+              .join('')
+          : '';
+        const ralCell = hasRal
+          ? `<select class="ral-select" data-id="${c.id}" aria-label="RAL für Farbe ${c.id}">${ralSelectOpts}</select>`
+          : `<span class="ral-name" title="${ralLabel}">${ralLabel}</span>`;
+        row.innerHTML = `
+          <span class="id">${c.id}</span>
+          <div class="swatch" style="background:${c.hex}" title="${c.hex}"></div>
+          <label>Original</label>
+          <input type="color" value="${matchHex}" data-id="${c.id}" aria-label="Match Farbe ${c.id}">
+          <input type="text" class="hex" value="${matchHex}" data-id-hex="${c.id}" maxlength="7" placeholder="#rrggbb">
+          ${ralCell}
+        `;
+        const colorInput = row.querySelector('input[type="color"]');
+        const hexInput = row.querySelector('input.hex');
+        const ralSelect = row.querySelector('select.ral-select');
+        const ralNameSpan = row.querySelector('.ral-name');
+        const updateRalLabel = () => {
+          const h = (state.matches[String(c.id)] ?? c.hex).toString();
+          const hexNorm = h.startsWith('#') ? h.toLowerCase() : '#' + h.toLowerCase();
+          const ral = state.hexToRal?.[hexNorm];
+          if (ralSelect) {
+            ralSelect.value = ral ? ral.key : '';
+          }
+          if (ralNameSpan) ralNameSpan.textContent = ral ? ral.key + ' ' + (ral.name || '') : '';
+        };
+        const syncToHex = () => {
+          const v = colorInput.value;
+          hexInput.value = v;
+          state.matches[String(c.id)] = v;
+          updateRalLabel();
+          updateExport();
+        };
+        const syncToColor = () => {
+          let v = hexInput.value.trim();
+          if (!v.startsWith('#')) v = '#' + v;
+          if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+            colorInput.value = v;
+            state.matches[String(c.id)] = v;
+            updateRalLabel();
+            updateExport();
+          }
+        };
+        if (ralSelect) {
+          ralSelect.value = ralInfo ? ralInfo.key : '';
+          ralSelect.addEventListener('change', () => {
+            const key = ralSelect.value;
+            if (!key) return;
+            const hex = state.ralColors[key].hex;
+            state.matches[String(c.id)] = hex;
+            colorInput.value = hex;
+            hexInput.value = hex;
+            updateExport();
+          });
+        }
+        colorInput.addEventListener('input', syncToHex);
+        hexInput.addEventListener('input', () => { if (/^#?[0-9a-fA-F]{6}$/.test(hexInput.value.trim())) syncToColor(); });
+        hexInput.addEventListener('change', syncToColor);
+        hexInput.addEventListener('blur', syncToColor);
+        paletteEl.appendChild(row);
+      });
+    }
+
+    function renderMaterials() {
+      const { materials } = state.data;
+      if (!materials?.length) { materialsList.innerHTML = '<div>Keine Materialien im JSON.</div>'; return; }
+      materialsList.innerHTML = materials.map((m) => `
+        <div><strong>${m.material}</strong> <code>${JSON.stringify(m.mapping)}</code></div>
+      `).join('');
+    }
+
+    function buildExport() {
+      const { data, matches, hexToRal } = state;
+      const matchPalette = data.palette.map((c) => {
+        const matchHex = matches[String(c.id)] ?? c.hex;
+        const m = matchHex.match(/^#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
+        const r = m ? parseInt(m[1], 16) : c.r;
+        const g = m ? parseInt(m[2], 16) : c.g;
+        const b = m ? parseInt(m[3], 16) : c.b;
+        return {
+          id: c.id,
+          originalHex: normalizeHex(c.hex),
+          matchHex: normalizeHex(matchHex),
+          r, g, b,
+        };
+      });
+      const matchRal = {};
+      if (hexToRal) {
+        data.palette.forEach((c) => {
+          const hex = (matches[String(c.id)] ?? c.hex).toLowerCase();
+          if (!hex.startsWith('#')) return;
+          const ral = hexToRal[hex] || hexToRal['#' + hex];
+          if (ral) matchRal[String(c.id)] = ral.key;
+        });
+      }
+      const overrideExcludeHex = data.palette
+        .filter((c) => c.hasTexture)
+        .map((c) => normalizeHex(c.hex))
+        .filter(Boolean);
+      const out = {
+        sourcePalette: data.palette.map((c) => ({ ...c, hex: normalizeHex(c.hex) })),
+        matches: { ...matches },
+        matchPalette,
+        materials: data.materials,
+        hexToId: data.hexToId,
+      };
+      if (Object.keys(matchRal).length) out.matchRal = matchRal;
+      if (overrideExcludeHex.length) out.overrideExcludeHex = overrideExcludeHex;
+      return out;
+    }
+
+    function buildProjectMappingExport() {
+      const out = buildExport();
+      out._comment = 'MTL→RAL-Mapping. „Mapping im Projekt speichern“ schreibt diese Datei – Konverter und Massenexport nutzen sie sofort.';
+      return out;
+    }
+
+    function updateExport() {
+      if (!state.data) return;
+      exportJson.value = JSON.stringify(buildExport(), null, 2);
+    }
+
+    btnDownload.addEventListener('click', () => {
+      const blob = new Blob([exportJson.value], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'mtl-color-matching.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    if (btnSaveProjectMapping) {
+      btnSaveProjectMapping.addEventListener('click', async () => {
+        if (!state.data) return;
+        const out = buildProjectMappingExport();
+        const json = JSON.stringify(out, null, 2);
+        btnSaveProjectMapping.disabled = true;
+        matchStatus.textContent = 'Speichere …';
+        matchStatus.classList.remove('error');
+        try {
+          const res = await fetch('/__api/save-mapping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: json,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok) {
+            matchStatus.textContent = 'Mapping im Projekt gespeichert – Konverter und Massenexport nutzen es sofort.';
+            matchStatus.classList.remove('error');
+          } else {
+            matchStatus.textContent = data.error || `Fehler ${res.status}. Projekt unter Dev-Server (npm run dev) öffnen, dann hier erneut speichern.`;
+            matchStatus.classList.add('error');
+          }
+        } catch (e) {
+          matchStatus.textContent = 'Speichern fehlgeschlagen: ' + (e.message || 'Netzwerkfehler').replace(/^Error: /, '') + '. Projekt unter Dev-Server öffnen (z. B. /tools/mtl-color-matching.html).';
+          matchStatus.classList.add('error');
+        }
+        btnSaveProjectMapping.disabled = false;
+      });
+    }
+
+    if (btnLoadProjectMapping) {
+      btnLoadProjectMapping.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/mtl-ral-color-mapping.json');
+          if (!res.ok) throw new Error(res.status === 404 ? 'Keine Mapping-Datei gefunden.' : `HTTP ${res.status}`);
+          const loaded = await res.json();
+          let palette;
+          if (loaded.sourcePalette && Array.isArray(loaded.sourcePalette) && loaded.sourcePalette.length) {
+            palette = loaded.sourcePalette.map((c, i) => ({
+              id: c.id ?? i + 1,
+              hex: c.hex || '',
+              r: c.r ?? 128,
+              g: c.g ?? 128,
+              b: c.b ?? 128,
+              type: c.type,
+              sources: c.sources || [],
+            })).filter((c) => c.hex);
+          } else if (loaded.matchPalette && Array.isArray(loaded.matchPalette) && loaded.matchPalette.length) {
+            palette = loaded.matchPalette.map((p, i) => ({
+              id: p.id ?? i + 1,
+              hex: p.originalHex || '',
+              r: p.r ?? 128,
+              g: p.g ?? 128,
+              b: p.b ?? 128,
+            }));
+          } else {
+            throw new Error('Ungültige Struktur: sourcePalette oder matchPalette fehlt.');
+          }
+          state.data = {
+            palette,
+            materials: loaded.materials || [],
+            hexToId: loaded.hexToId || {},
+          };
+          state.matches = {};
+          if (loaded.matchPalette && Array.isArray(loaded.matchPalette)) {
+            loaded.matchPalette.forEach((p, i) => {
+              if (palette[i] && p.matchHex) state.matches[String(palette[i].id)] = p.matchHex;
+            });
+          } else if (loaded.matchRal && state.ralColors && loaded.sourcePalette) {
+            loaded.sourcePalette.forEach((c) => {
+              const ralKey = loaded.matchRal[String(c.id)];
+              const entry = ralKey && state.ralColors[ralKey];
+              if (entry && entry.hex) state.matches[String(c.id)] = entry.hex;
+            });
+          } else if (loaded.matches && loaded.sourcePalette) {
+            loaded.sourcePalette.forEach((c) => {
+              const h = loaded.matches[String(c.id)];
+              if (h) state.matches[String(c.id)] = h;
+            });
+          }
+          if (Object.keys(state.matches).length === 0) palette.forEach((c) => { state.matches[String(c.id)] = c.hex; });
+          stepMatch.classList.remove('hidden');
+          stepExport.classList.remove('hidden');
+          renderPalette();
+          renderMaterials();
+          updateExport();
+          matchStatus.textContent = 'Projekt-Mapping geladen. Anpassen und erneut speichern möglich.';
+          matchStatus.classList.remove('error');
+        } catch (e) {
+          matchStatus.textContent = e.message || 'Laden fehlgeschlagen. Projekt unter Dev-Server öffnen (z. B. /tools/mtl-color-matching.html).';
+          matchStatus.classList.add('error');
+        }
+      });
+    }
+
+    btnCopy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(exportJson.value);
+        matchStatus.textContent = 'JSON in Zwischenablage kopiert.';
+        matchStatus.classList.remove('error');
+        setTimeout(() => { matchStatus.textContent = 'Ordne jeder Farbe eine Ersatzfarbe zu (Standard: Original).'; }, 2000);
+      } catch (e) {
+        matchStatus.textContent = 'Kopieren fehlgeschlagen.';
+        matchStatus.classList.add('error');
+      }
+    });
+  </script>
+</body>
+</html>

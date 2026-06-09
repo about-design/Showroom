@@ -1,8 +1,13 @@
+import { createLogger } from '../lib/logger.js'
+const log = createLogger("ProductPlacement")
+
 import * as THREE from 'three'
 import SceneManager from './SceneManager.js'
 import RoomEnvironment from './RoomEnvironment.js'
 import ProductLoader from './ProductLoader.js'
 import MaterialManager from './MaterialManager.js'
+import ColorService from '../services/ColorService.js'
+import { resolveEffectiveDefaultColorOrFallback } from '../lib/defaultColorMapping.js'
 import gsap from 'gsap'
 
 /**
@@ -13,6 +18,11 @@ class ProductPlacement {
     this.scene = SceneManager.getScene()
     this.placements = new Map() // zoneId -> { productId, group }
     this.currentProductPerZone = new Map()
+  }
+
+  /** Nur noch RAL-Vorschau bei explizitem hexColor; sonst GLB unverändert (siehe MaterialManager). */
+  _applyAppearanceToModel(modelOrClone, productData, hexColor) {
+    MaterialManager.applyProductAppearance(modelOrClone, productData, hexColor)
   }
 
   /**
@@ -29,7 +39,7 @@ class ProductPlacement {
     const pos = RoomEnvironment.getZonePosition(zoneId)
     const rotY = RoomEnvironment.getZoneRotation(zoneId)
     if (!pos) {
-      console.warn('[ProductPlacement] Zone nicht gefunden:', zoneId)
+            log.scoped("ProductPlacement").warn("Zone nicht gefunden:", zoneId)
       return null
     }
 
@@ -68,8 +78,7 @@ class ProductPlacement {
     const bbox = new THREE.Box3().setFromObject(model)
     group.position.set(pos.x, pos.y - bbox.min.y, pos.z)
 
-    MaterialManager.traverseMeshes(model)
-    MaterialManager.applyRALColor(model, hexColor)
+    this._applyAppearanceToModel(model, productData, hexColor)
 
     this.scene.add(group)
     this.placements.set(zoneId, {
@@ -119,7 +128,6 @@ class ProductPlacement {
     const group = new THREE.Group()
     group.name = `placement-${zoneId}-${productId}`
     const toRad = Math.PI / 180
-
     for (const part of productData.parts) {
       const product = allProducts.find((p) => p.id === part.productId)
       if (!product?.glbFile) continue
@@ -147,14 +155,15 @@ class ProductPlacement {
         clone.userData.placeRotationY = place.rotationY ?? 0
         clone.userData.placeRotationZ = place.rotationZ ?? 0
         group.add(clone)
-        MaterialManager.applyRALColor(clone, hexColor, true)
+        this._applyAppearanceToModel(clone, productData, hexColor)
       }
     }
 
     const bbox = new THREE.Box3().setFromObject(group)
-    const capHeight = MaterialManager.getCapHeight(group)
+    // Früher: bbox.max.y minus Kappenhöhe (heuristisch erkannt). Die GLB ist
+    // nun die Wahrheit, die Oberkante der Böden ist die Modell-Oberkante.
     const firstBodenY = 0.15
-    const lastBodenY = bbox.max.y - capHeight
+    const lastBodenY = bbox.max.y
     const raster = 0.05
     const shelfHeights = this.computeShelfHeights(firstBodenY, lastBodenY, 5, raster)
     const shelvesProductId = productData.shelves?.productId
@@ -196,7 +205,7 @@ class ProductPlacement {
               clone.userData.rotationOffset = rotOffset ? { x: rotOffset.x ?? 0, y: rotOffset.y ?? 0, z: rotOffset.z ?? 0 } : null
               clone.userData.placeRotationY = 0
               group.add(clone)
-              MaterialManager.applyRALColor(clone, hexColor, true)
+              this._applyAppearanceToModel(clone, productData, hexColor)
             }
           }
         }
@@ -348,16 +357,24 @@ class ProductPlacement {
   }
 
   /** Aktualisiert die Farbe des Produkts in der Zone (nach RAL-Wechsel). */
-  updateColor(zoneId, hexColor) {
+  updateColor(zoneId, hexColor, ralCode = null) {
+    if (hexColor == null) return
     const p = this.placements.get(zoneId)
     if (!p || !p.group) return
-    if (p.isComposed) {
-      p.group.children.forEach((clone) => {
-        MaterialManager.applyRALColor(clone, hexColor, true)
-      })
-      return
+    const effUpd = resolveEffectiveDefaultColorOrFallback(p.productData)
+    const rc =
+      (ralCode && ColorService.getRAL(String(ralCode).trim()) ? String(ralCode).trim() : null) ||
+      (effUpd && ColorService.getRAL(effUpd) ? effUpd : null)
+    const finishCtx = rc
+      ? { ralCode: rc, surfaceFinish: p.productData?.surfaceFinish }
+      : { ralCode: null, surfaceFinish: p.productData?.surfaceFinish }
+    const stripColorMaps = MaterialManager.shouldStripColorMapsForProduct(p.productData)
+    const roots = p.isComposed ? [...p.group.children] : (p.model ? [p.model] : [])
+    const forceTraverse = !!p.isComposed
+    for (const root of roots) {
+      if (!root) continue
+      MaterialManager.applyRALColor(root, hexColor, forceTraverse, finishCtx, { stripColorMaps })
     }
-    if (p.model) MaterialManager.applyRALColor(p.model, hexColor)
   }
 
   /** Alle Platzierungen zurücksetzen */

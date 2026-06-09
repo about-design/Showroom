@@ -1,139 +1,198 @@
 import * as THREE from 'three'
-
-const CAP_MATERIAL = { color: 0xd4d4d4, roughness: 0.55, metalness: 0.0 }
-
-/**
- * Erkennung von Plastikkappen: Kleine Meshes die ganz oben auf den Ständern sitzen.
- * Kriterien: Mesh-Oberkante nahe Modell-Oberkante, Mesh-Höhe < 3% der Gesamthöhe,
- * Mesh-Unterkante oberhalb von 90% der Gesamthöhe.
- */
-const CAP_MAX_HEIGHT_RATIO = 0.03
-const CAP_MIN_Y_RATIO = 0.90
-const CAP_TOP_TOLERANCE = 0.005 // 5 mm
+import ColorService from '../services/ColorService.js'
+import { resolveEffectiveDefaultColorOrFallback } from '../lib/defaultColorMapping.js'
+import { isPbrMaterial } from '../lib/materialUtils.js'
 
 /**
- * Findet färbbare Meshes (_colorable) und wendet RAL/Hex auf MeshStandardMaterial an.
- * Erkennt Kunststoffkappen (positionsbasiert) und weist ihnen eine feste, nicht-metallische Oberfläche zu.
+ * Findet färbbare Meshes und wendet RAL/Hex auf MeshStandardMaterial an.
+ * Politik: Die GLB ist die Wahrheit – die frühere heuristische Kappen-Erkennung
+ * (Position + Namens-Hints + fixes Plastik-Material) wurde entfernt, weil
+ * Kappen in der Bake-Pipeline explizit getaggt werden.
  */
 class MaterialManager {
   constructor() {
-    this.currentHex = '#D7D7D7'
-    this.currentRAL = 'RAL 7035'
+    this.currentHex = ColorService.getDefaultHex()
+    this.currentRAL = ColorService.getDefaultRAL()
     this.colorableMeshes = []
-    this.capMeshes = []
   }
 
   /**
-   * Durchsucht ein Object3D nach Meshes mit "_colorable" im Namen (Mesh oder Material).
-   * Erkennt zusätzlich Kappen-Meshes anhand ihrer Position und weist ihnen die Kunststoff-Oberfläche zu.
+   * Durchsucht ein Object3D nach Meshes und sammelt alle färbbaren Meshes.
    * @param {THREE.Object3D} object3D
    * @returns {THREE.Mesh[]}
    */
   traverseMeshes(object3D) {
-    const colorable = []
-    if (!object3D) return colorable
-
+    if (!object3D) return []
     const allMeshes = []
     object3D.traverse((o) => {
-      if (!o.isMesh) return
-      const nameLower = (o.name || '').toLowerCase()
-      const matName = (o.material && !Array.isArray(o.material)) ? (o.material.name || '').toLowerCase() : ''
-      if (nameLower.includes('_colorable') || matName.includes('_colorable')) {
-        colorable.push(o)
-      }
-      allMeshes.push(o)
+      if (o.isMesh) allMeshes.push(o)
     })
-
-    const caps = this.detectCapsByPosition(object3D, allMeshes)
-    this.colorableMeshes = colorable.filter((m) => !caps.includes(m))
-    this.capMeshes = caps
-    if (caps.length) this.applyCapMaterial(caps)
+    this.colorableMeshes = allMeshes
     return this.colorableMeshes
   }
 
-  /**
-   * Erkennt Kappen anhand der Position: kleine Meshes ganz oben am Modell.
-   * Ein Mesh gilt als Kappe wenn:
-   *   1. Seine Oberkante nahe der Modell-Oberkante liegt (±5 mm)
-   *   2. Seine Eigenhöhe < 3% der Gesamthöhe ist (typisch: ~10-15 mm bei 2000+ mm Ständer)
-   *   3. Seine Unterkante oberhalb von 90% der Gesamthöhe liegt
-   * @param {THREE.Object3D} object3D
-   * @param {THREE.Mesh[]} allMeshes
-   * @returns {THREE.Mesh[]}
-   */
-  detectCapsByPosition(object3D, allMeshes) {
-    if (allMeshes.length < 2) return []
-
-    const fullBox = new THREE.Box3().setFromObject(object3D)
-    const modelHeight = fullBox.max.y - fullBox.min.y
-    if (modelHeight < 0.3) return [] // Modell zu klein für Ständer mit Kappen
-
-    const maxMeshHeight = modelHeight * CAP_MAX_HEIGHT_RATIO
-    const minBottomY = fullBox.min.y + modelHeight * CAP_MIN_Y_RATIO
-    const topY = fullBox.max.y
-
-    const caps = []
-    const tmpBox = new THREE.Box3()
-    for (const mesh of allMeshes) {
-      tmpBox.setFromObject(mesh)
-      const meshHeight = tmpBox.max.y - tmpBox.min.y
-      const nearTop = Math.abs(tmpBox.max.y - topY) < CAP_TOP_TOLERANCE
-      const isSmall = meshHeight < maxMeshHeight
-      const sitsOnTop = tmpBox.min.y > minBottomY
-
-      if (nearTop && isSmall && sitsOnTop) {
-        caps.push(mesh)
-      }
-    }
-
-    if (caps.length && import.meta.env.DEV) {
-      console.log(`[MaterialManager] ${caps.length} Kappe(n) erkannt:`,
-        caps.map((m) => `${m.name || '(unnamed)'} (h=${(tmpBox.setFromObject(m), (tmpBox.max.y - tmpBox.min.y) * 1000).toFixed(1)}mm)`))
-    }
-
-    return caps
+  /** Meshes wie applyRALColor / applyMaterialFinishOverride. */
+  _colorableMeshesFor(object3D, forceTraverse) {
+    if (forceTraverse && object3D) return this.traverseMeshes(object3D)
+    return this.colorableMeshes.length ? this.colorableMeshes : this.traverseMeshes(object3D)
   }
 
   /**
-   * Weist Kappen-Meshes eine feste Kunststoff-Oberfläche zu (hellgrau, matt, nicht-metallisch).
-   * @param {THREE.Mesh[]} caps
+   * @param {(mesh: THREE.Mesh, m: THREE.Material) => void} fn
    */
-  applyCapMaterial(caps) {
-    const mat = new THREE.MeshStandardMaterial(CAP_MATERIAL)
-    mat.name = 'PlasticCap'
-    caps.forEach((mesh) => {
-      mesh.material = mat
+  _forEachColorableMaterial(object3D, forceTraverse, fn) {
+    const meshes = this._colorableMeshesFor(object3D, forceTraverse)
+    meshes.forEach((mesh) => {
+      if (!mesh.material) return
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      mats.forEach((m) => fn(mesh, m))
     })
   }
 
   /**
-   * Setzt die Farbe aller zuvor gefundenen (oder übergebenen) colorable Meshes.
-   * Kappen-Meshes werden nicht eingefärbt.
+   * Setzt Metallic/Roughness pro Material abhängig von der aktuellen Farbe:
+   * nur exakt RAL 9007 = metallisch, alle anderen Farben = matt.
+   * Wird genutzt wenn GLB-Originalfarben angezeigt werden (kein Override), damit keine falsch metallischen Flächen bleiben.
+   * @param {THREE.Object3D} object3D - Gruppe/Mesh des Produkts
+   */
+  applyFinishFromMeshColors(object3D) {
+    if (!object3D) return
+    object3D.traverse((o) => {
+      if (!o.isMesh || !o.material) return
+      const mats = Array.isArray(o.material) ? o.material : [o.material]
+      mats.forEach((m) => this._applyFinishFromMeshSingleMaterial(m))
+    })
+  }
+
+  /** Metallic/Roughness aus aktueller Mesh-Farbe (wie applyFinishFromMeshColors, nur ein Material). */
+  _applyFinishFromMeshSingleMaterial(m) {
+    if (!m || (m.metalness === undefined && m.metallic === undefined)) return
+    const hex = m.color ? '#' + m.color.getHexString().padStart(6, '0') : null
+    const finish = hex ? ColorService.getMaterialFinishFromHex(hex) : ColorService.getMaterialFinish(null)
+    if (finish) {
+      if (m.metalness !== undefined) m.metalness = finish.metallic
+      if (m.metallic !== undefined) m.metallic = finish.metallic
+      if (m.roughness !== undefined) m.roughness = finish.roughness
+    }
+  }
+
+  /** Entfernt Base-Color-Map, damit Katalog-RAL/Regeln sichtbar werden (wie Bake ohne Textur-Override). */
+  _stripBaseColorMapForRecolor(m) {
+    if (!m || !isPbrMaterial(m)) return
+    if (m.map) {
+      m.map = null
+      m.needsUpdate = true
+    }
+  }
+
+  /**
+   * Einheitlich: Base-Map-Handling, dann Vollfarbe (THREE.Color oder Hex-String), dann Finish.
+   * @param {THREE.Material} m
+   * @param {THREE.Color|string} fillColor
+   * @param {{ metallic: number, roughness: number }|null} finish
+   * @param {{ stripMaps: boolean }} opts
+   */
+  _recolorMaterial(m, fillColor, finish, opts) {
+    const stripMaps = !!opts?.stripMaps
+    if (stripMaps) this._stripBaseColorMapForRecolor(m)
+    if (!stripMaps && m.map) {
+      if (m.color) m.color.setRGB(1, 1, 1)
+      else if (isPbrMaterial(m)) m.color = new THREE.Color(0xffffff)
+    } else {
+      const isColorObj = fillColor && typeof fillColor === 'object' && fillColor.isColor
+      if (m.color) {
+        if (isColorObj) m.color.copy(fillColor)
+        else m.color.set(fillColor)
+      } else if (isPbrMaterial(m)) {
+        m.color = isColorObj ? fillColor.clone() : new THREE.Color(fillColor)
+      }
+    }
+    if (finish) this._applyFinishToMaterial(m, finish)
+    m.needsUpdate = true
+  }
+
+  /**
+   * Setzt Farbe und Finish (nur RAL 9007 = metallisch, sonst matt) auf alle colorable Meshes.
    * @param {THREE.Object3D} object3D - Gruppe/Mesh des Produkts
    * @param {string} hexColor - z.B. "#D7D7D7"
    * @param {boolean} forceTraverse - wenn true, immer object3D durchsuchen (für Klone/zusammengesetzte Produkte)
    */
-  applyRALColor(object3D, hexColor, forceTraverse = false) {
+  /**
+   * @param {object} [finishContext] - Optional: exakter RAL + Oberfläche (wie in products.json), damit Finish nicht nur aus Hex geraten wird.
+   * @param {string} [finishContext.ralCode] - z. B. "RAL 2001"
+   * @param {string} [finishContext.surfaceFinish] - "auto" | "verzinkt" | "pulver"
+   */
+  applyRALColor(object3D, hexColor, forceTraverse = false, finishContext = null, opts = null) {
     if (!object3D && !this.colorableMeshes.length) return
-    this.currentHex = hexColor
-    const meshes = (forceTraverse && object3D) ? this.traverseMeshes(object3D) : (this.colorableMeshes.length ? this.colorableMeshes : this.traverseMeshes(object3D))
+    const stripMaps = !!(opts && opts.stripColorMaps)
+    this.currentHex = hexColor || ColorService.getDefaultHex()
     const color = new THREE.Color(hexColor)
-    meshes.forEach((mesh) => {
-      if (!mesh.material) return
-      if (Array.isArray(mesh.material)) {
-        mesh.material.forEach((m) => { if (m.color) m.color.copy(color) })
-      } else if (mesh.material.color) {
-        mesh.material.color.copy(color)
+    const finish = (() => {
+      if (!finishContext) return ColorService.getMaterialFinishFromHex(hexColor)
+      const rc = finishContext.ralCode != null ? String(finishContext.ralCode).trim() : ''
+      const sf = finishContext.surfaceFinish
+      if (rc && ColorService.getRAL(rc)) {
+        return ColorService.getMaterialFinishWithSurface(rc, sf ?? 'auto')
+      }
+      return ColorService.getMaterialFinishFromHex(hexColor, sf ?? null)
+    })()
+    this._forEachColorableMaterial(object3D, forceTraverse, (_mesh, m) => {
+      this._recolorMaterial(m, color, finish, { stripMaps })
+    })
+  }
+
+  /** Setzt metallic/metalness und roughness auf ein Material (einheitlich für Showroom/Dashboard). */
+  _applyFinishToMaterial(m, finish) {
+    if (m.metalness !== undefined) m.metalness = finish.metallic
+    if (m.metallic !== undefined) m.metallic = finish.metallic
+    if (m.roughness !== undefined) m.roughness = finish.roughness
+  }
+
+  /**
+   * Explizite PBR-Werte wie in Blender (Farbtests / Referenz), unabhängig von RAL-Logik.
+   * Gilt für dieselben Meshes wie applyRALColor.
+   * @param {THREE.Object3D} object3D
+   * @param {{
+   *   hex?: string,
+   *   metalness?: number,
+   *   metallic?: number,
+   *   roughness?: number,
+   *   ior?: number,
+   * }} ov
+   */
+  applyMaterialFinishOverride(object3D, ov) {
+    if (!object3D || !ov || typeof ov !== 'object') return
+    const hex = ov.hex
+    const metal = ov.metalness ?? ov.metallic
+    const rough = ov.roughness
+    const ior = ov.ior
+    const hasHex = typeof hex === 'string' && hex.length >= 4
+    let color = null
+    if (hasHex) {
+      try {
+        color = new THREE.Color(hex)
+      } catch {
+        color = null
+      }
+    }
+    this._forEachColorableMaterial(object3D, false, (_mesh, m) => {
+      if (color && m.color) m.color.copy(color)
+      const pbr = isPbrMaterial(m)
+      if (pbr) {
+        if (typeof metal === 'number' && Number.isFinite(metal)) m.metalness = metal
+        if (typeof rough === 'number' && Number.isFinite(rough)) m.roughness = rough
+        if (typeof ior === 'number' && Number.isFinite(ior) && m.isMeshPhysicalMaterial) m.ior = ior
       }
     })
   }
 
   /**
-   * Setzt die aktuelle RAL-Bezeichnung (für UI).
+   * Setzt die aktuelle RAL-Bezeichnung (für UI). Hex wird aus ColorService abgeleitet.
    * @param {string} ralCode
    */
   setCurrentRAL(ralCode) {
-    this.currentRAL = ralCode
+    this.currentRAL = ralCode || ColorService.getDefaultRAL()
+    this.currentHex = ColorService.ralToHex(this.currentRAL)
   }
 
   /** @returns {string} Aktuelle Hex-Farbe */
@@ -146,38 +205,99 @@ class MaterialManager {
     return this.currentRAL
   }
 
-  /** @returns {THREE.Mesh[]} Zuletzt erkannte Kappen-Meshes */
-  getCapMeshes() {
-    return this.capMeshes
+  /**
+   * Standard: Base-Color-Maps beim RAL-Einfärben entfernen.
+   * Mit `conversionPreset.keepBaseColorTexture === true` bleibt die Textur (z. B. Lochraster) sichtbar und wird nur mit `color` getönt.
+   */
+  shouldStripColorMapsForProduct(productData) {
+    return productData?.conversionPreset?.keepBaseColorTexture !== true
   }
 
   /**
-   * Berechnet die Höhe der Kappen über der Oberkante des restlichen Modells.
-   * @param {THREE.Object3D} object3D - gesamtes Modell
-   * @returns {number} Kappenhöhe in Metern (0 wenn keine Kappen)
+   * GLB Lighting Lab: PBR aus Preset (Metalness, Roughness, envMapIntensity).
+   * Basisfarbe preset.mC nur wenn opts.tintBaseColor (Showroom: false, damit RAL/GLB z. B. Blau-Verzinkt bleibt).
+   * @param {THREE.Object3D} root
+   * @param {{ mM?: number, mR?: number, mC?: string, eI?: number }} preset
+   * @param {{ tintBaseColor?: boolean }} opts
    */
-  getCapHeight(object3D) {
-    if (!this.capMeshes.length || !object3D) return 0
-    const fullBox = new THREE.Box3().setFromObject(object3D)
-    const nonCapMaxY = this.computeNonCapMaxY(object3D)
-    return Math.max(0, fullBox.max.y - nonCapMaxY)
-  }
+  applyGlbLabPreset(root, preset, opts = {}) {
+    if (!root || !preset) return
+    const tintBaseColor = !!opts.tintBaseColor
 
-  /**
-   * Berechnet die maximale Y-Höhe aller Nicht-Kappen-Meshes.
-   * @param {THREE.Object3D} object3D
-   * @returns {number}
-   */
-  computeNonCapMaxY(object3D) {
-    const capSet = new Set(this.capMeshes)
-    let maxY = -Infinity
-    const tmpBox = new THREE.Box3()
-    object3D.traverse((o) => {
-      if (!o.isMesh || capSet.has(o)) return
-      tmpBox.setFromObject(o)
-      if (tmpBox.max.y > maxY) maxY = tmpBox.max.y
+    root.traverse((o) => {
+      if (!o.isMesh || !o.material) return
+      const mats = Array.isArray(o.material) ? o.material : [o.material]
+      if (!o.userData._showroomLabBackup) {
+        o.userData._showroomLabBackup = mats.map((m) => {
+          if (!isPbrMaterial(m)) return null
+          return {
+            metalness: m.metalness,
+            roughness: m.roughness,
+            envMapIntensity: m.envMapIntensity,
+            color: m.color ? m.color.clone() : null,
+          }
+        })
+      }
+      mats.forEach((m) => {
+        if (!isPbrMaterial(m)) return
+        if (typeof preset.mM === 'number' && Number.isFinite(preset.mM)) m.metalness = preset.mM
+        if (typeof preset.mR === 'number' && Number.isFinite(preset.mR)) m.roughness = preset.mR
+        if (typeof preset.eI === 'number' && Number.isFinite(preset.eI) && m.envMapIntensity !== undefined) {
+          m.envMapIntensity = preset.eI
+        }
+        if (tintBaseColor && preset.mC && m.color) {
+          try {
+            m.color.set(preset.mC)
+          } catch {
+            /* ignore */
+          }
+        }
+        m.needsUpdate = true
+      })
     })
-    return maxY === -Infinity ? 0 : maxY
+  }
+
+  /** Stellt Materialien nach GLB-Lab-Modus wieder her und entfernt Backups. */
+  restoreAfterGlbLab(root) {
+    if (!root) return
+    root.traverse((o) => {
+      const b = o.userData._showroomLabBackup
+      if (!b || !o.material) return
+      const mats = Array.isArray(o.material) ? o.material : [o.material]
+      mats.forEach((m, i) => {
+        const snap = b[i]
+        if (!m || !snap) return
+        if (snap.metalness !== undefined) m.metalness = snap.metalness
+        if (snap.roughness !== undefined) m.roughness = snap.roughness
+        if (snap.envMapIntensity !== undefined && m.envMapIntensity !== undefined) {
+          m.envMapIntensity = snap.envMapIntensity
+        }
+        if (snap.color && m.color) m.color.copy(snap.color)
+        m.needsUpdate = true
+      })
+      delete o.userData._showroomLabBackup
+    })
+  }
+
+  /**
+   * Showroom / Platzierung: GLB wie nach Konvertierung (Bake). Keine Live-Overrides
+   * aus Stammdaten (surfaceFinish, materialFinishOverride, Namensregeln/Mapping).
+   * Ausnahme: wird eine nicht-leere `hexColor` übergeben, wird nur für die Vorschau
+   * eingefärbt (z. B. nach erstem RAL-Klick oder wenn der Aufrufer explizit eine Farbe mitgibt).
+   */
+  applyProductAppearance(object3D, productData, hexColor) {
+    if (!object3D) return
+    const hasExplicitHex =
+      hexColor != null && typeof hexColor === 'string' && String(hexColor).trim() !== ''
+    if (!hasExplicitHex) return
+
+    this.traverseMeshes(object3D)
+    const stripColorMaps = this.shouldStripColorMapsForProduct(productData)
+    const effRal = resolveEffectiveDefaultColorOrFallback(productData || {})
+    const finishCtx = effRal && ColorService.getRAL(effRal)
+      ? { ralCode: effRal, surfaceFinish: productData?.surfaceFinish }
+      : { ralCode: null, surfaceFinish: productData?.surfaceFinish }
+    this.applyRALColor(object3D, hexColor, false, finishCtx, { stripColorMaps })
   }
 }
 

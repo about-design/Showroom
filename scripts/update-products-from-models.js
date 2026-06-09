@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { createLogger } from './lib/logger.mjs'
+const log = createLogger("update-products-from-models")
+
 /**
  * Scannt public/models/products (inkl. Unterordner) nach .glb-Dateien
  * und aktualisiert src/data/products.json:
@@ -86,6 +89,9 @@ function detectOrientationFromGlb(glbPath) {
       fs.readSync(fd, header, 0, 20, 0)
       if (header.readUInt32LE(0) !== 0x46546C67) return null
       const jsonLen = header.readUInt32LE(12)
+      // Schutz gegen manipulierte/korrupte GLBs: unbegrenztes Buffer.alloc vermeiden
+      const MAX_GLB_JSON_BYTES = 64 * 1024 * 1024
+      if (!Number.isFinite(jsonLen) || jsonLen <= 0 || jsonLen > MAX_GLB_JSON_BYTES) return null
       const jsonBuf = Buffer.alloc(jsonLen)
       fs.readSync(fd, jsonBuf, 0, jsonLen, 20)
       const json = JSON.parse(jsonBuf.toString('utf-8'))
@@ -130,15 +136,24 @@ function findCadFiles(relativePath) {
   return found
 }
 
+/** Liest RAL aus Dateinamen: z.B. "…_RAL_7035.glb" → "RAL 7035". _VZK wird nicht mehr als RAL 9007 gewertet. */
+function ralFromFilename(relativePath) {
+  const base = path.basename(relativePath, '.glb')
+  const ralMatch = base.match(/_RAL_(\d{4})(?:_|\.|$)/i)
+  if (ralMatch) return `RAL ${ralMatch[1]}`
+  return null
+}
+
 function defaultProduct(relativePath) {
   const id = pathToId(relativePath)
   const glbUrl = urlPath(relativePath)
+  const defaultColor = ralFromFilename(relativePath) || 'RAL 7035'
   const product = {
     id,
     name: `Produkt ${id}`,
     glbFile: glbUrl,
     colorableMeshes: [],
-    defaultColor: 'RAL 7035',
+    defaultColor,
     hotspots: [
       {
         id: 'info-1',
@@ -218,10 +233,10 @@ if (scanOrientation) {
     const ori = detectOrientationFromGlb(absGlb)
     if (ori) { p.orientation = ori; scanned++ }
   }
-  console.log(`Orientierung erkannt: ${scanned} Produkte gescannt, ${skipped} übersprungen (bereits gesetzt).`)
+    log.info(`Orientierung erkannt: ${scanned} Produkte gescannt, ${skipped} übersprungen (bereits gesetzt).`)
 }
 
 fs.writeFileSync(productsJsonPath, JSON.stringify(data, null, 2) + '\n', 'utf8')
 
-console.log(`products.json aktualisiert: ${updated.length} Produkte (${foundPaths.length} GLB(s) im Ordner).`)
-if (removed > 0) console.log(`Entfernt (--sync): ${removed} Einträge ohne vorhandene GLB-Datei.`)
+log.info(`products.json aktualisiert: ${updated.length} Produkte (${foundPaths.length} GLB(s) im Ordner).`)
+if (removed > 0) log.info(`Entfernt (--sync): ${removed} Einträge ohne vorhandene GLB-Datei.`)

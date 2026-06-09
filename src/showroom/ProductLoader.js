@@ -1,3 +1,6 @@
+import { createLogger } from '../lib/logger.js'
+const log = createLogger("ProductLoader")
+
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
@@ -5,7 +8,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 const eventTarget = new EventTarget()
 
 /**
- * Lädt GLB-Dateien via GLTFLoader + DRACOLoader. Cached geladene Modelle.
+ * Lädt GLB-Dateien via GLTFLoader + Draco.
  * Events: load-progress, load-complete, load-error
  */
 class ProductLoader {
@@ -86,14 +89,14 @@ class ProductLoader {
       if (import.meta.env.DEV) {
         const names = []
         model.traverse((o) => { names.push({ name: o.name || '(unnamed)', type: o.type }) })
-        console.log('[ProductLoader] Szenenstruktur:', glbPath, names)
+                log.scoped("ProductLoader").info("Szenenstruktur:", glbPath, names)
       }
       this.emit('load-progress', { progress: 100, path: glbPath })
       this.emit('load-complete', { path: glbPath, model })
       this.cache.set(cacheKey, model)
       return model.clone(true)
     } catch (err) {
-      if (import.meta.env.DEV) console.warn('[ProductLoader] GLB fehlgeschlagen, nutze Platzhalter:', glbPath, err)
+      if (import.meta.env.DEV) log.scoped("ProductLoader").warn("GLB fehlgeschlagen, nutze Platzhalter:", glbPath, err)
       this.emit('load-error', { path: glbPath, error: err })
       const placeholder = this.createPlaceholder(glbPath)
       this.emit('load-complete', { path: glbPath, model: placeholder })

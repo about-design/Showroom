@@ -1,9 +1,12 @@
 {
+  "_meta": { "version": 2, "updatedAt": "2026-04-03" },
   "RAL 7035": { "hex": "#D7D7D7", "name": "Lichtgrau", "popular": true },
   "RAL 7016": { "hex": "#383E42", "name": "Anthrazitgrau", "popular": true },
-  "RAL 5010": { "hex": "#0E4FA2", "name": "Enzianblau", "popular": true },
+  "RAL 5010": { "hex": "#3232F4", "name": "Enzianblau", "popular": true },
+  "RAL 1003": { "hex": "#FFFF00", "name": "Signalgelb", "popular": true },
   "RAL 3000": { "hex": "#AB2524", "name": "Feuerrot", "popular": false },
   "RAL 6011": { "hex": "#587246", "name": "Resedagrün", "popular": false },
   "RAL 9005": { "hex": "#0A0A0A", "name": "Tiefschwarz", "popular": true },
-  "RAL 9010": { "hex": "#F4F4F4", "name": "Reinweiß", "popular": true }
+  "RAL 2001": { "hex": "#FF5F00", "name": "Rotorange", "popular": true },
+  "RAL 9007": { "hex": "#F4F4F4", "name": "Verzinkt", "popular": true }
 }

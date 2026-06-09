@@ -2,6 +2,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import * as THREE from 'three'
 import SceneManager from './SceneManager.js'
 import gsap from 'gsap'
+import { EURIS } from './eurisConstants.js'
 
 /**
  * OrbitControls: Drehen um den aktuellen Drehpunkt, Klick setzt keinen neuen Pivot.
@@ -21,6 +22,81 @@ class CameraController {
 
     this.startPosition = new THREE.Vector3().copy(this.camera.position)
     this.startTarget = new THREE.Vector3().copy(this.controls.target)
+
+    this._showroomControls = {
+      minDistance: this.controls.minDistance,
+      maxDistance: this.controls.maxDistance,
+      maxPolarAngle: this.controls.maxPolarAngle,
+      minPolarAngle: this.controls.minPolarAngle,
+      dampingFactor: this.controls.dampingFactor,
+      panSpeed: this.controls.panSpeed,
+      cameraNear: this.camera.near,
+      cameraFar: this.camera.far,
+      targetY: this.controls.target.y,
+    }
+    this._eurisActive = false
+
+    /** Aktuelle Brennweite (Kleinbild-Äquivalent, mm). 24 ≙ ~53° vFOV (nahe Three.js-Standard 60°). */
+    this.focalLengthMm = 24
+    this.setFocalLength(this.focalLengthMm)
+  }
+
+  /**
+   * Setzt die Brennweite als Kleinbild-/Vollformat-Äquivalent (Sensorhöhe 24 mm)
+   * und passt den vertikalen FOV der Three.js-PerspectiveCamera entsprechend an.
+   * @param {number} mm - z. B. 16, 24, 50, 100, 200
+   */
+  setFocalLength(mm) {
+    const f = Number(mm)
+    if (!Number.isFinite(f) || f <= 0) return
+    this.focalLengthMm = f
+    const SENSOR_HEIGHT_MM = 24
+    const vFovRad = 2 * Math.atan(SENSOR_HEIGHT_MM / (2 * f))
+    this.camera.fov = (vFovRad * 180) / Math.PI
+    this.camera.updateProjectionMatrix()
+    this.controls.update()
+  }
+
+  /** @returns {number} aktuelle Brennweite in mm (Kleinbild-Äquivalent) */
+  getFocalLength() {
+    return this.focalLengthMm
+  }
+
+  /**
+   * Euris (Babylon ArcRotateCamera → Orbit): Target 1,5 m, Zoom 0,5–35 m, Clipping 0,1–100 m.
+   * @param {boolean} on
+   */
+  setEurisMode(on) {
+    const c = this.controls
+    const cam = this.camera
+    const s = this._showroomControls
+    if (on) {
+      this._eurisActive = true
+      cam.near = EURIS.cameraNear
+      cam.far = EURIS.cameraFar
+      cam.updateProjectionMatrix()
+      c.target.set(0, EURIS.orbitTargetY, 0)
+      c.minDistance = EURIS.minDistance
+      c.maxDistance = EURIS.maxDistance
+      c.maxPolarAngle = EURIS.maxPolarAngle
+      c.minPolarAngle = EURIS.minPolarAngle
+      c.dampingFactor = EURIS.dampingFactor
+      c.panSpeed = EURIS.panSpeed
+      cam.position.set(EURIS.cameraPosition.x, EURIS.cameraPosition.y, EURIS.cameraPosition.z)
+    } else {
+      this._eurisActive = false
+      cam.near = s.cameraNear
+      cam.far = s.cameraFar
+      cam.updateProjectionMatrix()
+      c.target.set(0, s.targetY, 0)
+      c.minDistance = s.minDistance
+      c.maxDistance = s.maxDistance
+      c.maxPolarAngle = s.maxPolarAngle
+      c.minPolarAngle = s.minPolarAngle
+      c.dampingFactor = s.dampingFactor
+      c.panSpeed = s.panSpeed
+    }
+    c.update()
   }
 
   /**
@@ -78,8 +154,8 @@ class CameraController {
   }
 
   /**
-   * Wechselt zur Ansicht einer Modell-Kamera (Position + Target).
-   * @param {{ position: {x,y,z}, target: {x,y,z} }} view
+   * Wechselt zur Ansicht einer Modell-Kamera (Position + Target, optional Brennweite).
+   * @param {{ position: {x,y,z}, target: {x,y,z}, focalLength?: number }} view
    * @param {number} duration
    */
   setToView(view, duration = 0.6) {
@@ -100,6 +176,32 @@ class CameraController {
       duration,
       ease: 'power2.inOut',
     })
+    if (Number.isFinite(view.focalLength) && view.focalLength > 0) {
+      this.setFocalLength(view.focalLength)
+    }
+  }
+
+  /**
+   * Liefert die aktuelle Kameraansicht: Position, Target und Brennweite.
+   * Kann als Preset gespeichert und später per setToView() wieder angewendet werden.
+   * @returns {{ position: {x:number,y:number,z:number}, target: {x:number,y:number,z:number}, focalLength: number }}
+   */
+  getCurrentView() {
+    const p = this.camera.position
+    const t = this.controls.target
+    const u = this.camera.up
+    return {
+      position: { x: p.x, y: p.y, z: p.z },
+      target: { x: t.x, y: t.y, z: t.z },
+      /** Welt-Up wie von OrbitControls / PerspectiveCamera genutzt (für Blender-Look-at). */
+      up: { x: u.x, y: u.y, z: u.z },
+      focalLength: this.focalLengthMm,
+    }
+  }
+
+  /** Dieselbe PerspectiveCamera wie SceneManager (OrbitControls-Objekt). */
+  getCamera() {
+    return this.camera
   }
 
   /**

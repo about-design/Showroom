@@ -1,0 +1,13 @@
+# Mini-Test für extract-mtl-colors
+newmtl Rot
+Ka 0.2 0.0 0.0
+Kd 0.9 0.1 0.1
+Ks 0.5 0.5 0.5
+
+newmtl Gruen
+Kd 0.2 0.7 0.2
+Ka 0.1 0.2 0.1
+
+newmtl Blau
+Kd 0.1 0.2 0.9
+Ke 0.0 0.0 0.3

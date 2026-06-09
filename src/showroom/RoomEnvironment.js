@@ -52,6 +52,34 @@ class RoomEnvironment {
     this.meshes.ceilingLight = new THREE.Mesh(lightGeo, lightMat)
     this.meshes.ceilingLight.visible = false
     this.scene.add(this.meshes.ceilingLight)
+
+    // Euris: Rückwand (Babylon-Raum), standardmäßig aus
+    const eurisWallGeo = new THREE.PlaneGeometry(20, 5)
+    const eurisWallMat = new THREE.MeshStandardMaterial({
+      color: 0xcccccc,
+      roughness: 0.95,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+    })
+    this.meshes.eurisBackWall = new THREE.Mesh(eurisWallGeo, eurisWallMat)
+    this.meshes.eurisBackWall.position.set(0, 2.5, -10)
+    this.meshes.eurisBackWall.receiveShadow = true
+    this.meshes.eurisBackWall.visible = false
+    this.scene.add(this.meshes.eurisBackWall)
+  }
+
+  /**
+   * Euris: Betonboden-Farbe + Rückwand wie Konfigurator-Doku.
+   * @param {boolean} active
+   */
+  setEurisMode(active) {
+    const floor = this.meshes.floor
+    const wall = this.meshes.eurisBackWall
+    if (floor?.material?.color) {
+      if (active) floor.material.color.setHex(0x888888)
+      else floor.material.color.setHex(0xfafafa)
+    }
+    if (wall) wall.visible = !!active
   }
 
   /**
@@ -93,6 +121,44 @@ class RoomEnvironment {
   setWallsVisible(visible) {
     this.showWalls = visible
     if (this.meshes.walls) this.meshes.walls.visible = visible
+  }
+
+  /**
+   * Blendet alle Umgebungs-Meshes (Boden, Wände, Deckenlicht, Euris-Rückwand) aus
+   * bzw. wieder ein. Beim Ausblenden wird der vorherige Sichtbarkeits-Zustand
+   * gemerkt und beim Einblenden 1:1 wiederhergestellt – passend zum aktiven
+   * Lighting-Profil.
+   * @param {boolean} visible
+   */
+  setEnvironmentVisible(visible) {
+    const all = [
+      this.meshes.floor,
+      this.meshes.walls,
+      this.meshes.ceilingLight,
+      this.meshes.eurisBackWall,
+    ].filter(Boolean)
+    if (!visible) {
+      this._envVisibilityBackup = all.map((m) => m.visible)
+      all.forEach((m) => { m.visible = false })
+    } else {
+      const backup = this._envVisibilityBackup
+      all.forEach((m, i) => {
+        m.visible = backup ? !!backup[i] : true
+      })
+      this._envVisibilityBackup = null
+    }
+  }
+
+  /**
+   * Bodenfarbe (Endlos-Plane), z. B. an Lab-Hintergrund angleichen.
+   * @param {number|string} color - Hex-Zahl oder #rrggbb
+   */
+  setFloorColor(color) {
+    const floor = this.meshes.floor
+    if (!floor?.material?.color) return
+    const c = typeof color === 'string' ? parseInt(color.replace('#', ''), 16) : color
+    if (!Number.isFinite(c)) return
+    floor.material.color.setHex(c)
   }
 }
 

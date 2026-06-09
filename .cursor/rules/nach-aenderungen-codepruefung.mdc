@@ -1,0 +1,24 @@
+---
+description: Nach Codeänderungen immer Qualitäts- und Sicherheitsprüfung ausführen
+alwaysApply: true
+---
+
+# Codeprüfung nach Änderungen
+
+Gilt für jede Session, in der du **Projektcode** (nicht nur reinen Text) geändert hast.
+
+## Pflicht nach relevanten Edits
+
+1. **`npm run check`** im Projektroot ausführen (Vite-Produktionsbuild – fängt Syntax-, Import- und viele Bundling-Fehler).
+2. **`read_lints`** für alle **bearbeiteten Dateien** aufrufen und gemeldete Probleme beheben, bevor du abschließt.
+
+## Sicherheit & Sauberkeit (kurz prüfen)
+
+- **Keine Secrets** in Commits oder Beispielcode (`.env` nicht committen).
+- **User-/Server-Daten** in HTML: weiterhin `esc()` / sichere APIs nutzen, kein rohes `innerHTML` mit ungefilterten Strings.
+- **Fetch / API**: Pfade mit `encodeURIComponent` wo IDs in URLs stecken; Fehlerantworten (`!res.ok`) sinnvoll behandeln.
+- **Keine unnötigen** `eval`, `new Function`, oder `dangerouslySetInnerHTML`-Äquivalente ohne Not.
+
+## Wenn `npm run check` fehlschlägt
+
+Fehler beheben und **`npm run check` erneut** laufen lassen, bis Exit-Code 0. Nicht mit „sollte der Nutzer lokal prüfen“ abschließen, wenn die Umgebung Shell-Zugriff erlaubt.

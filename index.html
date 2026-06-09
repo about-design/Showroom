@@ -6,7 +6,7 @@
   <title>META Online – 3D Showroom</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <script type="module" src="/src/main.js"></script>
   <script async type="module" src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
 </head>
@@ -14,6 +14,11 @@
   <div id="canvas-container"></div>
 
   <div id="ui-layer" x-data="showroomApp()" x-cloak>
+
+    <!-- Overlay: quadratischer Ausschnitt (Vorschau für Blender-Render bei Seitenverhältnis 1:1). -->
+    <div class="sr-aspect-overlay" x-show="blenderAspectId === 'square'" x-cloak aria-hidden="true">
+      <div class="sr-aspect-frame"></div>
+    </div>
 
     <!-- ─── Loading Overlay ─── -->
     <div x-show="isLoading" x-transition.opacity.duration.500ms
@@ -77,10 +82,10 @@
       </button>
       <div class="sr-sidebar-header">
         <span class="sr-sidebar-label">Produkte</span>
-        <span class="sr-sidebar-count" x-text="products.length"></span>
+        <span class="sr-sidebar-count" x-text="colorFilter ? (filteredProducts.length + ' von ' + products.length) : products.length"></span>
       </div>
       <div class="sr-sidebar-list">
-        <template x-for="product in products" :key="product.id">
+        <template x-for="product in filteredProducts" :key="product.id">
           <button type="button" @click="selectProduct(product)"
                   class="sr-sidebar-item"
                   :class="currentProduct?.id === product.id && 'active'">
@@ -94,6 +99,29 @@
         <span x-text="mobileMenuClosed ? 'Produkte anzeigen' : 'Schließen'"></span>
       </button>
     </aside>
+
+    <!-- ─── Farbfilter: nur Produkte in gewählter RAL-Farbe ─── -->
+    <div class="sr-color-filter">
+      <span class="sr-color-filter-label">Farbfilter:</span>
+      <div class="sr-color-filter-chips">
+        <button type="button" @click="setColorFilter(null)"
+                class="sr-color-filter-chip"
+                :class="!colorFilter && 'active'"
+                title="Alle Produkte anzeigen">
+          Alle
+        </button>
+        <template x-for="(ral, code) in ralColors" :key="code">
+          <button type="button" @click="setColorFilter(code)"
+                  class="sr-color-filter-chip sr-color-filter-chip-swatch"
+                  :class="colorFilter === code && 'active'"
+                  :style="'--c:' + ral.hex"
+                  :title="'Nur ' + ral.name + ' (' + code + ')'">
+            <span class="sr-color-filter-swatch"></span>
+            <span x-text="code.replace('RAL ', '')"></span>
+          </button>
+        </template>
+      </div>
+    </div>
 
     <!-- ─── Color palette (bottom) ─── -->
     <div class="sr-colors">
@@ -128,6 +156,19 @@
     <!-- ─── Settings panel (slide-in) ─── -->
     <div class="sr-settings" :class="settingsOpen && 'open'">
       <div class="sr-settings-group">
+        <span class="sr-settings-label">Beleuchtungsprofil</span>
+        <select class="sr-select" x-model="lightingProfile" @change="onLightingProfileChange()">
+          <option value="showroom">Showroom (Standard)</option>
+          <option value="euris">Euris (Konfigurator)</option>
+          <option value="verzinkt">GLB Lab – Verzinkt</option>
+          <option value="studio">GLB Lab – Studio</option>
+          <option value="warehouse">GLB Lab – Warehouse</option>
+          <option value="bright">GLB Lab – Bright</option>
+          <option value="noenv">GLB Lab – Ohne Env</option>
+        </select>
+        <p class="sr-settings-hint">GLB Lab entspricht dem internen Lighting-Tool (Key/Fill/Hemi, Hintergrund, PBR wie Preset).</p>
+      </div>
+      <div class="sr-settings-group">
         <span class="sr-settings-label">Beleuchtung</span>
         <div class="sr-range-wrap">
           <input type="range" min="0" max="100" step="1"
@@ -135,6 +176,189 @@
                  class="sr-range">
           <span class="sr-range-val" x-text="lightIntensity + '%'"></span>
         </div>
+      </div>
+      <div class="sr-settings-group" x-show="lightingProfile === 'showroom'" x-cloak>
+        <span class="sr-settings-label">Freies Flächenlicht</span>
+        <label class="sr-free-light-toggle">
+          <input type="checkbox" x-model="freeLightEnabled" @change="syncFreeLight()">
+          <span>Aktiv</span>
+        </label>
+        <span class="sr-settings-sublabel">Intensität (nur dieses Licht)</span>
+        <div class="sr-range-wrap">
+          <input type="range" min="0" max="100" step="1"
+                 x-model.number="freeLightIntensity" @input="syncFreeLight()"
+                 class="sr-range">
+          <span class="sr-range-val" x-text="freeLightIntensity + '%'"></span>
+        </div>
+        <span class="sr-settings-sublabel">Größe (m)</span>
+        <div class="sr-free-light-axes">
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label" title="Breite">Br</span>
+            <input type="range" min="0.3" max="10" step="0.05"
+                   x-model.number="freeLightWidth" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Number(freeLightWidth).toFixed(2)"></span>
+          </div>
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label" title="Höhe">H</span>
+            <input type="range" min="0.3" max="8" step="0.05"
+                   x-model.number="freeLightHeight" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Number(freeLightHeight).toFixed(2)"></span>
+          </div>
+        </div>
+        <span class="sr-settings-sublabel">Richtung (°)</span>
+        <div class="sr-free-light-axes">
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label" title="Horizontal">↻</span>
+            <input type="range" min="-180" max="180" step="1"
+                   x-model.number="freeLightYaw" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Math.round(freeLightYaw) + '°'"></span>
+          </div>
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label" title="Neigung">∠</span>
+            <input type="range" min="-85" max="85" step="1"
+                   x-model.number="freeLightPitch" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Math.round(freeLightPitch) + '°'"></span>
+          </div>
+        </div>
+        <span class="sr-settings-sublabel">Position (m)</span>
+        <div class="sr-free-light-axes">
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label">X</span>
+            <input type="range" min="-10" max="10" step="0.1"
+                   x-model.number="freeLightX" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Number(freeLightX).toFixed(1)"></span>
+          </div>
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label">Y</span>
+            <input type="range" min="0.2" max="12" step="0.1"
+                   x-model.number="freeLightY" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Number(freeLightY).toFixed(1)"></span>
+          </div>
+          <div class="sr-range-wrap sr-range-wrap--compact">
+            <span class="sr-axis-label">Z</span>
+            <input type="range" min="-10" max="10" step="0.1"
+                   x-model.number="freeLightZ" @input="syncFreeLight()" class="sr-range">
+            <span class="sr-range-val sr-range-val--narrow" x-text="Number(freeLightZ).toFixed(1)"></span>
+          </div>
+        </div>
+      </div>
+      <div class="sr-settings-group">
+        <span class="sr-settings-label">Objektiv</span>
+        <div class="sr-focal-chips">
+          <template x-for="mm in focalLengths" :key="mm">
+            <button type="button" @click="setFocalLength(mm)"
+                    class="sr-focal-chip"
+                    :class="focalLength === mm && 'active'"
+                    :title="'Brennweite ' + mm + ' mm (Kleinbild-Äquivalent)'">
+              <span class="sr-focal-chip-val" x-text="mm"></span>
+              <span class="sr-focal-chip-unit">mm</span>
+            </button>
+          </template>
+        </div>
+        <p class="sr-settings-hint">Kleinbild-Äquivalent. 16 mm Weitwinkel · 50 mm Normal · 200 mm Tele.</p>
+      </div>
+      <div class="sr-settings-group">
+        <span class="sr-settings-label">Eigene Kameraansichten</span>
+        <div class="sr-cam-preset-input">
+          <input type="text" class="sr-input" maxlength="64"
+                 x-model="newCameraPresetName"
+                 @keydown.enter.prevent="saveCameraPreset()"
+                 placeholder="Name (z. B. Front · ¾ links · Detail)">
+          <button type="button" class="sr-cam-preset-save"
+                  @click="saveCameraPreset()"
+                  title="Aktuelle Kameraposition + Brennweite speichern">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            <span>Speichern</span>
+          </button>
+        </div>
+        <template x-if="cameraPresets.length === 0">
+          <p class="sr-settings-hint">Speichere Ansichten und wende sie auf jedes Modell an.</p>
+        </template>
+        <div class="sr-cam-preset-list" x-show="cameraPresets.length > 0">
+          <template x-for="preset in cameraPresets" :key="preset.id">
+            <div class="sr-cam-preset-row">
+              <button type="button" class="sr-cam-preset-apply"
+                      @click="applyCameraPreset(preset.id)"
+                      :title="'Anwenden: ' + preset.name + ' (' + preset.focalLength + ' mm)'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                  <path d="M23 7l-7 5 7 5V7z"/>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+                <span class="sr-cam-preset-name" x-text="preset.name"></span>
+                <span class="sr-cam-preset-mm" x-text="preset.focalLength + ' mm'"></span>
+              </button>
+              <button type="button" class="sr-cam-preset-del"
+                      @click="deleteCameraPreset(preset.id)"
+                      title="Ansicht löschen">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                </svg>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="sr-settings-group">
+        <span class="sr-settings-label">Bildexport</span>
+        <button type="button" class="sr-capture-btn"
+                @click="captureSceneImage()"
+                :disabled="!currentProduct"
+                title="Aktuelle Ansicht inkl. Boden + Hintergrund als PNG herunterladen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="9" cy="9" r="2"/>
+            <path d="M21 15l-5-5L5 21"/>
+          </svg>
+          <span>Foto mit Hintergrund (PNG)</span>
+        </button>
+        <button type="button" class="sr-capture-btn"
+                @click="captureProductImage()"
+                :disabled="!currentProduct"
+                title="Aktuelle Ansicht als PNG mit transparentem Hintergrund herunterladen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span>Modell freistellen (PNG)</span>
+        </button>
+        <p class="sr-settings-hint">Foto: Szene wie sichtbar. Freistellen: nur Modell, transparenter Hintergrund.</p>
+      </div>
+      <div class="sr-settings-group">
+        <span class="sr-settings-label">Blender-Render</span>
+        <div class="sr-blender-row">
+          <select class="sr-select" x-model="blenderEngine" title="Render-Engine">
+            <option value="eevee">Schnell (Eevee)</option>
+            <option value="cycles">Fotoreal (Cycles)</option>
+          </select>
+          <select class="sr-select" x-model="blenderResId" title="Ausgabeauflösung">
+            <option value="hd">1920 × 1080</option>
+            <option value="2k">2560 × 1440</option>
+            <option value="4k">3840 × 2160</option>
+          </select>
+          <select class="sr-select" x-model="blenderAspectId" title="Seitenverhältnis">
+            <option value="landscape">Quer (16:9)</option>
+            <option value="square">Quadratisch (1:1)</option>
+          </select>
+          <select class="sr-select" x-model="blenderFormat" title="Dateiformat">
+            <option value="png">PNG (transparent)</option>
+            <option value="jpg">JPG (weißer Hintergrund)</option>
+          </select>
+        </div>
+        <button type="button" class="sr-capture-btn sr-blender-render-btn"
+                @click="renderInBlender()"
+                :disabled="!currentProduct || isBlenderRendering"
+                :title="blenderFormat === 'jpg' ? 'JPG mit Blender (weißer Hintergrund + Bodenschatten)' : 'PNG mit Blender (transparent + weicher Bodenschatten)'">
+          <span class="sr-spinner" x-show="isBlenderRendering" x-cloak aria-hidden="true"></span>
+          <span x-text="isBlenderRendering ? 'Blender rendert …' : (blenderFormat === 'jpg' ? 'In Blender rendern (JPG)' : 'In Blender rendern (PNG)')"></span>
+        </button>
+        <p class="sr-blender-error" x-show="blenderRenderError" x-text="blenderRenderError" x-cloak></p>
+        <p class="sr-settings-hint">Lokal: <code>npm run dev</code>, Blender installiert, Umgebungsvariable <code>BLENDER_PATH</code> (siehe README). Optional: <code>public/hdri/warehouse.hdr</code> für Umgebungslicht.</p>
       </div>
       <div class="sr-settings-group" x-show="productCameras.length > 0">
         <span class="sr-settings-label">Kamera</span>
@@ -163,7 +387,147 @@
               :class="showPivotDebug && 'active'">
         <span x-text="showPivotDebug ? 'Pivots ausblenden' : 'Pivots anzeigen'"></span>
       </button>
+      <button type="button" @click="toggleMeshInfo()" class="sr-settings-btn"
+              :class="showMeshInfo && 'active'">
+        <span x-text="showMeshInfo ? 'Mesh-Info ausblenden' : 'Mesh-Info anzeigen'"></span>
+      </button>
+      <button type="button" @click="togglePerformancePanel()" class="sr-settings-btn"
+              :class="perfPanelOpen && 'active'">
+        <span x-text="perfPanelOpen ? 'Performance-Test ausblenden' : 'Performance-Test'"></span>
+      </button>
+      <div x-show="showMeshInfo" class="sr-mesh-info-wrap">
+        <div class="sr-settings-divider"></div>
+        <span class="sr-settings-label" style="margin-bottom:.5rem">Meshes im aktuellen Modell</span>
+        <div class="sr-mesh-info-list">
+          <template x-if="meshInfoList.length === 0">
+            <p class="sr-mesh-info-empty" x-text="currentProduct ? 'Keine Meshes gefunden.' : 'Kein Produkt geladen.'"></p>
+          </template>
+          <template x-for="(item, i) in meshInfoList" :key="i">
+            <div
+              class="sr-mesh-info-row"
+              :class="meshIsolateIndex === i && 'is-active'"
+              @click="toggleMeshPartIsolate(i)"
+              title="Klick: nur dieses Teil anzeigen · erneut klicken: alle Teile"
+            >
+              <span class="sr-mesh-info-name" x-text="item.name"></span>
+              <span class="sr-mesh-info-color" :style="'background:' + item.color" :title="item.color"></span>
+              <span class="sr-mesh-info-hex" x-text="item.color"></span>
+              <span class="sr-mesh-info-vertices" x-text="item.vertices.toLocaleString('de-DE') + ' V'"></span>
+              <span class="sr-mesh-info-pbr" title="Metallisch (Skalar; * = MR-Textur im GLB moduliert mit)">
+                <span class="sr-mesh-info-pbr-label">M</span>
+                <span x-text="(item.metalness != null ? item.metalness.toFixed(2) : '–') + (item.hasMRMap ? ' *' : '')"></span>
+              </span>
+              <span class="sr-mesh-info-pbr" title="Rauheit (Skalar; * = MR-Textur im GLB)">
+                <span class="sr-mesh-info-pbr-label">R</span>
+                <span x-text="(item.roughness != null ? item.roughness.toFixed(2) : '–') + (item.hasMRMap ? ' *' : '')"></span>
+              </span>
+              <button
+                type="button"
+                class="sr-mesh-focus-btn"
+                title="Kamera auf dieses Teil ausrichten"
+                @click.stop="focusMeshPart(i)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2M3 17v2a2 2 0 0 0 2 2h2m10-16h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2"/>
+                </svg>
+              </button>
+            </div>
+          </template>
+        </div>
+        <button
+          type="button"
+          x-show="meshInfoList.length > 0 && meshIsolateIndex !== null"
+          x-cloak
+          class="sr-mesh-clear-btn"
+          @click="clearMeshPartIsolate()"
+        >
+          Alle Teile anzeigen
+        </button>
+        <div x-show="meshInfoList.length > 0" class="sr-mesh-info-total">
+          <span>Gesamt:</span>
+          <span x-text="meshInfoList.reduce((s, m) => s + m.vertices, 0).toLocaleString('de-DE') + ' Vertices'"></span>
+        </div>
+        <p x-show="meshInfoList.length > 0" class="sr-mesh-info-footnote">
+          Zeile anklicken: nur dieses Mesh sichtbar; Symbol rechts: Kamera auf Teil fokussieren. M/R = aktuelle Shader-Werte. Farbauswahl: nur <strong>RAL 9007</strong> wird metallisch (0,75), alle anderen RAL mit 0 – unabhängig vom GLB. * = Metallic-Roughness-Textur.
+        </p>
+      </div>
     </div>
+
+    <!-- ─── Performance-Test (Overlay links neben Einstellungen) ─── -->
+    <aside class="sr-perf" :class="perfPanelOpen && 'open'" x-show="perfPanelOpen" x-cloak
+           role="complementary" aria-label="Performance-Test">
+      <div class="sr-perf-header">
+        <h2 class="sr-perf-title">Performance-Test</h2>
+        <button type="button" class="sr-perf-close" @click="togglePerformancePanel()" title="Schließen">×</button>
+      </div>
+
+      <div class="sr-perf-section">
+        <span class="sr-perf-label">Geometrie</span>
+        <p class="sr-perf-muted" x-show="!perfStats">Kein Modell geladen.</p>
+        <div class="sr-perf-rows" x-show="perfStats">
+          <div class="sr-perf-row"><span>Vertices</span><span x-text="perfStats.vertices.toLocaleString('de-DE')"></span></div>
+          <div class="sr-perf-row"><span>Triangles</span><span x-text="perfStats.triangles.toLocaleString('de-DE')"></span></div>
+          <div class="sr-perf-row"><span>Meshes</span><span x-text="String(perfStats.meshes)"></span></div>
+          <div class="sr-perf-row"><span>Unique Geometrien</span><span x-text="String(perfStats.uniqueGeometries)"></span></div>
+          <div class="sr-perf-row"><span>Unique Materialien</span><span x-text="String(perfStats.uniqueMaterials)"></span></div>
+        </div>
+        <div class="sr-perf-top-wrap" x-show="perfStats && perfStats.topMeshes && perfStats.topMeshes.length">
+          <span class="sr-perf-sublabel">Top-Meshes (Triangles)</span>
+          <template x-for="row in perfStats.topMeshes" :key="row.index">
+            <button type="button" class="sr-perf-top-row"
+                    @click="toggleMeshPartIsolate(row.index)"
+                    title="Nur dieses Mesh anzeigen (wie Mesh-Info)">
+              <span class="sr-perf-top-name" x-text="row.name"></span>
+              <span class="sr-perf-top-val" x-text="row.triangles.toLocaleString('de-DE') + ' △'"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <div class="sr-perf-section">
+        <span class="sr-perf-label">GPU-Memory (Schätzung)</span>
+        <p class="sr-perf-muted" x-show="!perfStats">–</p>
+        <div class="sr-perf-rows" x-show="perfStats">
+          <div class="sr-perf-row"><span>Geometrie</span><span x-text="perfStats.geomMb.toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row"><span>Texturen</span><span x-text="perfStats.texMb.toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row sr-perf-row-strong"><span>Summe</span><span x-text="perfStats.totalMb.toFixed(2) + ' MB'"></span></div>
+        </div>
+      </div>
+
+      <div class="sr-perf-section">
+        <span class="sr-perf-label">Stresstest (Klone + FPS ~2 s)</span>
+        <p class="sr-perf-hint">Klone rechts neben dem Modell; erste 10 Frames werden verworfen (Warm-up).</p>
+        <div class="sr-perf-buttons">
+          <button type="button" class="sr-perf-chip" :disabled="perfStressRunning || !currentProduct"
+                  @click="runPerfStress(1)">1×</button>
+          <button type="button" class="sr-perf-chip" :disabled="perfStressRunning || !currentProduct"
+                  @click="runPerfStress(4)">4×</button>
+          <button type="button" class="sr-perf-chip" :disabled="perfStressRunning || !currentProduct"
+                  @click="runPerfStress(16)">16×</button>
+          <button type="button" class="sr-perf-chip" :disabled="perfStressRunning || !currentProduct"
+                  @click="runPerfStress(64)">64×</button>
+        </div>
+        <div class="sr-perf-stress-row">
+          <label class="sr-perf-sublabel" for="perfStressNInput">Anzahl</label>
+          <input id="perfStressNInput" type="number" min="1" max="256" class="sr-perf-input"
+                 x-model.number="perfStressN" :disabled="perfStressRunning">
+          <button type="button" class="sr-perf-start" :disabled="perfStressRunning || !currentProduct"
+                  @click="runPerfStress(perfStressN)">
+            <span class="sr-spinner" x-show="perfStressRunning" x-cloak aria-hidden="true"></span>
+            <span x-text="perfStressRunning ? 'Läuft …' : 'Starten'"></span>
+          </button>
+        </div>
+        <div class="sr-perf-stress-result" x-show="perfStressResult" x-cloak>
+          <span x-text="perfStressSummaryLine()"></span>
+          <span class="sr-perf-stress-sub" x-show="perfStressResult && perfStressResult.drawCalls != null"
+                x-text="perfStressDetailLine()"></span>
+        </div>
+        <div class="sr-perf-actions">
+          <button type="button" class="sr-perf-action-btn" @click="clearPerfStress()"
+                  :disabled="perfStressRunning">Klone entfernen</button>
+        </div>
+      </div>
+    </aside>
 
     <!-- ─── Hotspot container ─── -->
     <div id="hotspot-container" class="fixed inset-0 pointer-events-none z-30">

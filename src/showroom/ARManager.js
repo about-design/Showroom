@@ -2,6 +2,12 @@
  * Zeigt auf Mobile ein model-viewer mit aktuellem Modell und RAL-Farbe.
  * Nur auf Touch-Geräten sichtbar; Farbübergabe via model-viewer Materials API.
  */
+import { createLogger } from '../lib/logger.js'
+const log = createLogger("ARManager")
+
+
+import ColorService from '../services/ColorService.js'
+
 class ARManager {
   constructor() {
     this.container = document.getElementById('ar-container')
@@ -34,7 +40,7 @@ class ARManager {
     this.currentHex = hexColor
 
     if (!this.container || !this.viewer) {
-      console.warn('[ARManager] ar-container oder model-viewer nicht gefunden')
+            log.scoped("ARManager").warn("ar-container oder model-viewer nicht gefunden")
       return
     }
 
@@ -61,13 +67,13 @@ class ARManager {
         if (model && model.materials && model.materials.length) {
           model.materials.forEach((mat) => {
             if (mat.pbrMetallicRoughness && mat.pbrMetallicRoughness.baseColorFactor) {
-              const c = hexToRgb(hexColor)
+              const c = ColorService.hexToRgbNorm(hexColor) || ColorService.hexToRgbNorm(ColorService.getDefaultHex()) || { r: 0.84, g: 0.84, b: 0.84 }
               mat.pbrMetallicRoughness.baseColorFactor = [c.r, c.g, c.b, 1]
             }
           })
         }
       } catch (e) {
-        if (import.meta.env.DEV) console.warn('[ARManager] Materials API:', e)
+        if (import.meta.env.DEV) log.scoped("ARManager").warn("Materials API:", e)
       }
     })
   }
@@ -78,17 +84,6 @@ class ARManager {
   hide() {
     if (this.container) this.container.classList.add('hidden')
   }
-}
-
-function hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-  return result
-    ? {
-        r: parseInt(result[1], 16) / 255,
-        g: parseInt(result[2], 16) / 255,
-        b: parseInt(result[3], 16) / 255,
-      }
-    : { r: 0.84, g: 0.84, b: 0.84 }
 }
 
 export default new ARManager()

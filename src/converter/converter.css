@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 @source not "../../public/**";
+@source not "../../node_modules/**";
+@source not "../data/**";
 
 :root {
   --bg-deep: #0a0a0b;
@@ -68,6 +70,60 @@ body {
 .breadcrumb { font-size: .82rem; color: var(--text-muted); }
 .breadcrumb span { color: var(--text-secondary); }
 .top-bar-right { display: flex; align-items: center; gap: .75rem; }
+
+/* ─── Konvertierung (Top-Bar) ─── */
+.conv-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .28rem .65rem .28rem .5rem;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--info);
+  white-space: nowrap;
+}
+.conv-indicator.is-completed {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--success);
+}
+.conv-indicator.is-failed {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+}
+.conv-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.conv-indicator.is-running .conv-indicator-dot {
+  animation: convPulse 1.2s ease-in-out infinite;
+}
+.conv-indicator-label { color: var(--text-secondary); font-weight: 500; }
+.conv-indicator.is-running .conv-indicator-label { color: var(--text-primary); }
+.conv-indicator-elapsed {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 2.5rem;
+  text-align: right;
+}
+.conv-indicator.is-running .conv-indicator-elapsed { color: var(--info); }
+.conv-indicator.is-completed .conv-indicator-elapsed { color: var(--success); }
+.conv-indicator.is-failed .conv-indicator-elapsed { color: var(--danger); }
+
+@keyframes convPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
 
 /* ─── Health indicators ─── */
 .health-indicators { display: flex; align-items: center; gap: .5rem; }
@@ -235,6 +291,12 @@ body {
 .opt-hint {
   font-size: .68rem; color: var(--text-muted); font-style: italic;
 }
+.color-mapping-row {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem;
+}
+.opt-file-hidden { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+.color-mapping-status { font-size: .75rem; color: var(--text-muted); }
+.color-mapping-status.ok { color: var(--success); }
 
 /* ─── Preflight Modal ─── */
 .pf-modal-backdrop {
@@ -275,6 +337,10 @@ body {
 .pf-stat-label { font-size: .7rem; color: var(--text-muted); }
 .pf-warnings { padding: .75rem 1.5rem; flex-shrink: 0; }
 .pf-warn-item { font-size: .78rem; color: var(--warning); margin-bottom: .2rem; }
+.pf-order-hint {
+  font-size: .7rem; color: var(--text-muted); padding: .5rem 1.5rem 0;
+  flex-shrink: 0;
+}
 .pf-section-title {
   font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   color: var(--text-muted); padding: .85rem 1.5rem .5rem; flex-shrink: 0;
@@ -284,6 +350,10 @@ body {
   display: grid; grid-template-columns: 90px 1fr 40px;
   align-items: center; gap: .75rem; font-size: .8rem; color: var(--text-secondary);
 }
+.pf-auto-match-row {
+  grid-template-columns: auto 1fr;
+}
+.pf-auto-match-row input[type="checkbox"] { margin-right: .5rem; accent-color: var(--accent); }
 .pf-range { width: 100%; accent-color: var(--accent); }
 .pf-color-list {
   flex: 1; overflow-y: auto; padding: 0 1.5rem .5rem;

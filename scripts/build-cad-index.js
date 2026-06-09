@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { createLogger } from './lib/logger.mjs'
+const log = createLogger("build-cad-index")
+
 /**
  * Baut einen CAD-Index: Scannt alle OBJ-Dateien im obj-Ordner,
  * liest mtllib-Referenzen, findet Texturen in MTL-Dateien,
@@ -24,7 +27,7 @@ const indexPath = path.join(root, 'src', 'data', 'cad-index.json')
 const productsJsonPath = path.join(root, 'src', 'data', 'products.json')
 
 if (!fs.existsSync(objDir)) {
-  console.error(`OBJ-Verzeichnis nicht gefunden: ${objDir}`)
+    log.error(`OBJ-Verzeichnis nicht gefunden: ${objDir}`)
   process.exit(1)
 }
 
@@ -32,8 +35,9 @@ const entries = fs.readdirSync(objDir)
 const objFiles = entries.filter(f => f.toLowerCase().endsWith('.obj'))
 const mtlFiles = new Set(entries.filter(f => f.toLowerCase().endsWith('.mtl')).map(f => f))
 const textureFiles = new Set(entries.filter(f => /\.(png|jpg|jpeg|tiff|tga|bmp)$/i.test(f)))
+const stepFiles = entries.filter(f => /\.(step|stp)$/i.test(f))
 
-console.log(`Gefunden: ${objFiles.length} OBJ, ${mtlFiles.size} MTL, ${textureFiles.size} Texturen`)
+log.info(`Gefunden: ${objFiles.length} OBJ, ${mtlFiles.size} MTL, ${textureFiles.size} Texturen, ${stepFiles.length} STEP`)
 
 // Phase 1: OBJ-Dateien scannen → mtllib-Referenzen extrahieren
 const objEntries = []
@@ -79,7 +83,7 @@ for (const objFile of objFiles) {
   if (scanned % 500 === 0) process.stdout.write(`  ${scanned}/${objFiles.length} gescannt\r`)
 }
 
-console.log(`  ${scanned}/${objFiles.length} OBJ-Dateien gescannt`)
+log.info(`  ${scanned}/${objFiles.length} OBJ-Dateien gescannt`)
 
 // Phase 2: Index aufbauen – verschiedene Lookup-Keys pro Eintrag
 // Key = Nummer (als String), Value = { obj, mtl, textures }
@@ -106,6 +110,13 @@ for (const entry of objEntries) {
       if (!group.files.includes(f)) group.files.push(f)
     }
   }
+}
+
+// STEP-Dateien: Nach Basisname (Nummer) in Gruppen aufnehmen (wie OBJ), auch rein STEP-only
+for (const stepFile of stepFiles) {
+  const stepBase = stepFile.replace(/\.(step|stp)$/i, '')
+  const group = getOrCreateGroup(stepBase)
+  if (!group.files.includes(stepFile)) group.files.push(stepFile)
 }
 
 // Phase 3: Produkte → CAD-Dateien matchen
@@ -193,6 +204,7 @@ const index = {
   totalObjFiles: objFiles.length,
   totalMtlFiles: mtlFiles.size,
   totalTextureFiles: textureFiles.size,
+  totalStepFiles: stepFiles.length,
   totalGroups: groups.size,
   matchedProducts: matched,
   unmatchedProducts: unmatched,
@@ -202,17 +214,17 @@ const index = {
 
 fs.writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n', 'utf-8')
 
-console.log(`\nIndex erstellt: ${indexPath}`)
-console.log(`  Gruppen: ${groups.size}`)
-console.log(`  Produkte mit CAD-Match: ${matched}`)
-console.log(`  Produkte ohne CAD-Match: ${unmatched}`)
-console.log(`  Alleinstehende MTLs: ${orphanMtlMatched}`)
+log.info(`\nIndex erstellt: ${indexPath}`)
+log.info(`  Gruppen: ${groups.size}`)
+log.info(`  Produkte mit CAD-Match: ${matched}`)
+log.info(`  Produkte ohne CAD-Match: ${unmatched}`)
+log.info(`  Alleinstehende MTLs: ${orphanMtlMatched}`)
 
 // Zeige ein paar Beispiele
-console.log('\nBeispiele:')
+log.info('\nBeispiele:')
 let shown = 0
 for (const [pid, files] of Object.entries(productCadMap)) {
   if (shown >= 5) break
-  console.log(`  ${pid}: ${files.join(', ')}`)
+    log.info(`  ${pid}: ${files.join(', ')}`)
   shown++
 }

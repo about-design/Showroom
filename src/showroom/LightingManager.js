@@ -1,28 +1,45 @@
+import { createLogger } from '../lib/logger.js'
+const log = createLogger("LightingManager")
+
 import * as THREE from 'three'
+import { PMREMGenerator } from 'three'
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js'
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js'
 import SceneManager from './SceneManager.js'
+import { GLB_LAB_PRESETS, GLB_LAB_FILL_COLOR } from './glbLabLightingPresets.js'
+import { EURIS } from './eurisConstants.js'
+import { BASE } from './lighting/lightConstants.js'
+import { applyFreeLightState } from './lighting/FreeAreaLight.js'
+import { createShowroomRig } from './lighting/ShowroomRig.js'
+import { createGlbLabRig } from './lighting/GlbLabRig.js'
+import { createEurisRig } from './lighting/EurisRig.js'
 
 /**
  * HDRI Environment (wenn vorhanden) + Spotlights / Ambient für den Lagerraum.
+ * Koordinator: delegiert Rig-Aufbau an ./lighting/*.
  */
-/** Basis-Intensitäten (+20 %) – werden mit dem Regler skaliert */
-const BASE = {
-  ambient: 0.216,
-  main: 0.264,
-  fill: 0.06,
-  sideLeft: 0.336,
-  sideRight: 0.336,
-  frontPanel: 3,
-  backLeft: 0.24,
-  backRight: 0.24,
-  topDown: 0.8,
-}
-
 class LightingManager {
   constructor() {
     this.scene = SceneManager.getScene()
     this.lights = {}
     this.intensity = 1
+    /** Gruppe für alle Lichter – wird bewusst nie gedreht/verschoben, damit Lichter fest im Weltraum bleiben. */
+    this.lightsRoot = null
+    this.showroomRig = null
+    this.labRig = null
+    this.eurisRig = null
+    this._labActive = false
+    /** @type {object|null} */
+    this._labPreset = null
+    this._labEnvTexture = null
+    this._pmremGenerator = null
+    /** scene.environment vor Lab (z. B. späteres HDRI) */
+    this._environmentBeforeLab = null
+    this._eurisActive = false
+    this._eurisHdriTexture = null
+    this._eurisEnvLoading = false
+    /** @type {object|null} */
+    this._freeLight = null
   }
 
   /**
@@ -31,75 +48,212 @@ class LightingManager {
   init() {
     RectAreaLightUniformsLib.init()
 
-    const ambient = new THREE.AmbientLight(0xffffff, BASE.ambient)
-    this.scene.add(ambient)
-    this.lights.ambient = ambient
+    const lightsRoot = new THREE.Group()
+    lightsRoot.name = 'fixed-lights-root'
+    lightsRoot.position.set(0, 0, 0)
+    lightsRoot.quaternion.identity()
+    lightsRoot.scale.set(1, 1, 1)
+    lightsRoot.updateMatrixWorld = function (force) {
+      this.matrix.identity()
+      this.matrixWorld.identity()
+      for (let i = 0; i < this.children.length; i++) {
+        this.children[i].updateMatrixWorld(force)
+      }
+    }
+    this.scene.add(lightsRoot)
+    this.lightsRoot = lightsRoot
 
-    const main = new THREE.DirectionalLight(0xfff8f0, BASE.main)
-    main.position.set(5, 8, 5)
-    main.castShadow = true
-    main.shadow.mapSize.width = 2048
-    main.shadow.mapSize.height = 2048
-    main.shadow.radius = 4
-    main.shadow.camera.near = 0.5
-    main.shadow.camera.far = 50
-    main.shadow.camera.left = -10
-    main.shadow.camera.right = 10
-    main.shadow.camera.top = 10
-    main.shadow.camera.bottom = -10
-    this.scene.add(main)
-    this.lights.main = main
+    const sr = createShowroomRig(lightsRoot)
+    this.showroomRig = sr.showroomRig
+    Object.assign(this.lights, sr.lights)
+    this._freeLight = { ...sr.initialFreeLightState }
 
-    const fill = new THREE.DirectionalLight(0xe8eeff, BASE.fill)
-    fill.position.set(-3, 4, 3)
-    this.scene.add(fill)
-    this.lights.fill = fill
+    const lab = createGlbLabRig(lightsRoot)
+    this.labRig = lab.labRig
+    Object.assign(this.lights, lab.lights)
 
-    // Links: Licht von links (negatives X), gleiche Tiefe wie Regale (z=0) → beleuchtet linke Regalseite
-    const sideLeft = new THREE.DirectionalLight(0xfffaf0, BASE.sideLeft)
-    sideLeft.position.set(-9, 1.5, 0)
-    sideLeft.target.position.set(-1, 1, 0)
-    this.scene.add(sideLeft.target)
-    this.scene.add(sideLeft)
-    this.lights.sideLeft = sideLeft
+    const er = createEurisRig(lightsRoot)
+    this.eurisRig = er.eurisRig
+    Object.assign(this.lights, er.lights)
+  }
 
-    // Rechts: Licht von rechts (positives X), z=0 → beleuchtet rechte Regalseite
-    const sideRight = new THREE.DirectionalLight(0xfffaf0, BASE.sideRight)
-    sideRight.position.set(9, 1.5, 0)
-    sideRight.target.position.set(1, 1, 0)
-    this.scene.add(sideRight.target)
-    this.scene.add(sideRight)
-    this.lights.sideRight = sideRight
+  _ensureLabEnvironmentMap() {
+    if (this._labEnvTexture) return
+    const renderer = SceneManager.getRenderer()
+    if (!renderer) return
+    if (!this._pmremGenerator) this._pmremGenerator = new PMREMGenerator(renderer)
+    const envScene = new THREE.Scene()
+    envScene.background = new THREE.Color(0xcccccc)
+    this._labEnvTexture = this._pmremGenerator.fromScene(envScene, 0).texture
+  }
 
-    // Flächenleuchte vorne (RectAreaLight)
-    const frontPanel = new THREE.RectAreaLight(0xffffff, BASE.frontPanel, 10, 4)
-    frontPanel.position.set(0, 2.5, 5.5)
-    frontPanel.lookAt(0, 1, 0)
-    this.scene.add(frontPanel)
-    this.lights.frontPanel = frontPanel
+  _disposeEurisHdri() {
+    if (this._eurisHdriTexture) {
+      this._eurisHdriTexture.dispose()
+      this._eurisHdriTexture = null
+    }
+  }
 
-    // Aus Richtung der (blauen) Pfeile: hinten links → zur Szene, hinten rechts → zur Szene
-    const backLeft = new THREE.DirectionalLight(0xfffaf0, BASE.backLeft)
-    backLeft.position.set(-6, 1.8, -4)
-    backLeft.target.position.set(0, 1, 0)
-    this.scene.add(backLeft.target)
-    this.scene.add(backLeft)
-    this.lights.backLeft = backLeft
+  _deactivateLab() {
+    if (!this._labActive) return
+    this._labActive = false
+    this._labPreset = null
+    if (this.labRig) this.labRig.visible = false
+    if (this.scene) {
+      this.scene.environment = this._environmentBeforeLab
+      this._environmentBeforeLab = null
+    }
+  }
 
-    const backRight = new THREE.DirectionalLight(0xfffaf0, BASE.backRight)
-    backRight.position.set(6, 1.8, -4)
-    backRight.target.position.set(0, 1, 0)
-    this.scene.add(backRight.target)
-    this.scene.add(backRight)
-    this.lights.backRight = backRight
+  _tryLoadEurisHdri() {
+    if (this._eurisEnvLoading || this._eurisHdriTexture) return
+    this._eurisEnvLoading = true
+    const loader = new RGBELoader()
+    loader.load(
+      EURIS.hdriPath,
+      (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping
+        this._eurisEnvLoading = false
+        if (!this._eurisActive) {
+          texture.dispose()
+          return
+        }
+        this._disposeEurisHdri()
+        this._eurisHdriTexture = texture
+        if (this.scene) this.scene.environment = texture
+      },
+      undefined,
+      () => {
+        this._eurisEnvLoading = false
+        if (!this._eurisActive || !this.scene) return
+        if (import.meta.env.DEV) {
+                    log.scoped("LightingManager").warn("Euris HDRI nicht geladen (", + EURIS.hdriPath + '), neutraler Fallback.')
+        }
+        this._ensureLabEnvironmentMap()
+        if (this._labEnvTexture) {
+          this._labEnvTexture.mapping = THREE.EquirectangularReflectionMapping
+          this.scene.environment = this._labEnvTexture
+        }
+      },
+    )
+  }
 
-    const topDown = new THREE.DirectionalLight(0xffffff, BASE.topDown)
-    topDown.position.set(0, 10, -4)
-    topDown.target.position.set(0, 0, 2)
-    topDown.castShadow = false
-    this.scene.add(topDown.target)
-    this.scene.add(topDown)
-    this.lights.topDown = topDown
+  /**
+   * Zentrale Umschaltung: Showroom | Euris | GLB-Lab-Preset.
+   * @param {string} profileId - 'showroom' | 'euris' | verzinkt | studio | …
+   */
+  applyLightingProfile(profileId) {
+    const labPreset = profileId && GLB_LAB_PRESETS[profileId] ? GLB_LAB_PRESETS[profileId] : null
+
+    if (profileId === 'euris') {
+      this._deactivateLab()
+      this._disposeEurisHdri()
+      if (this.showroomRig) this.showroomRig.visible = false
+      if (this.labRig) this.labRig.visible = false
+      if (this.eurisRig) this.eurisRig.visible = true
+      this._eurisActive = true
+      if (this.scene) {
+        this.scene.environment = null
+        this._tryLoadEurisHdri()
+      }
+      this.setIntensity(this.intensity)
+      return
+    }
+
+    this._eurisActive = false
+    if (this.eurisRig) this.eurisRig.visible = false
+    this._disposeEurisHdri()
+
+    if (labPreset) {
+      if (!this._labActive) {
+        this._environmentBeforeLab = this.scene?.environment ?? null
+      }
+      this._labActive = true
+      this._labPreset = labPreset
+      if (this.showroomRig) this.showroomRig.visible = false
+      if (this.labRig) this.labRig.visible = true
+
+      this._ensureLabEnvironmentMap()
+      if (this.scene && this._labEnvTexture) {
+        this._labEnvTexture.mapping = THREE.EquirectangularReflectionMapping
+        this.scene.environment = this._labEnvTexture
+      }
+
+      const k = this.lights.labKey
+      const f = this.lights.labFill
+      const h = this.lights.labHemi
+      if (k) {
+        k.position.set(labPreset.dX, labPreset.dY, labPreset.dZ)
+        k.color.set(labPreset.dC)
+      }
+      if (f) f.color.setHex(GLB_LAB_FILL_COLOR)
+      if (h) {
+        h.color.set(labPreset.hS)
+        h.groundColor.set(labPreset.hG)
+      }
+      this.setIntensity(this.intensity)
+      return
+    }
+
+    this._deactivateLab()
+    if (this.showroomRig) this.showroomRig.visible = true
+    if (this.scene) this.scene.environment = null
+    this.setIntensity(this.intensity)
+  }
+
+  /**
+   * @param {string|null} presetId - GLB-Lab-Key oder null (= Showroom)
+   */
+  setGlbLabPreset(presetId) {
+    if (!presetId) this.applyLightingProfile('showroom')
+    else this.applyLightingProfile(presetId)
+  }
+
+  /** @returns {boolean} */
+  isGlbLabActive() {
+    return this._labActive
+  }
+
+  /** @returns {boolean} */
+  isEurisActive() {
+    return this._eurisActive
+  }
+
+  /** Aktuelles Lab-Preset (nur wenn aktiv), sonst null */
+  getGlbLabPreset() {
+    return this._labActive ? this._labPreset : null
+  }
+
+  _syncLabLightIntensities() {
+    const p = this._labPreset
+    const s = this.intensity
+    if (!p || !this._labActive) return
+    if (this.lights.labKey) this.lights.labKey.intensity = p.dI * s
+    if (this.lights.labFill) this.lights.labFill.intensity = p.fI * s
+    if (this.lights.labHemi) this.lights.labHemi.intensity = p.hI * s
+  }
+
+  _syncEurisLightIntensities() {
+    const s = this.intensity
+    if (!this._eurisActive) return
+    if (this.lights.eurisHemi) this.lights.eurisHemi.intensity = EURIS.hemiIntensity * s
+    if (this.lights.eurisPoint) this.lights.eurisPoint.intensity = EURIS.pointIntensity * s
+    if (this.lights.eurisAmbient) this.lights.eurisAmbient.intensity = EURIS.ambientIntensity * s
+  }
+
+  /**
+   * Freies Flächenlicht: Position, Größe, Richtung (Yaw/Pitch), Stärke (0…1) – unabhängig vom globalen Regler.
+   */
+  setFreeLight(opts) {
+    applyFreeLightState(
+      {
+        freeArea: this.lights.freeArea,
+        freeAreaGroup: this.lights.freeAreaGroup,
+        freeAreaHelper: this.lights.freeAreaHelper,
+      },
+      this._freeLight,
+      opts,
+    )
   }
 
   /**
@@ -108,12 +262,22 @@ class LightingManager {
    */
   setIntensity(value) {
     this.intensity = Math.max(0, Math.min(1, value))
+    if (this._labActive && this._labPreset) {
+      this._syncLabLightIntensities()
+      return
+    }
+    if (this._eurisActive) {
+      this._syncEurisLightIntensities()
+      return
+    }
     if (this.lights.ambient) this.lights.ambient.intensity = BASE.ambient * this.intensity
     if (this.lights.main) this.lights.main.intensity = BASE.main * this.intensity
     if (this.lights.fill) this.lights.fill.intensity = BASE.fill * this.intensity
     if (this.lights.sideLeft) this.lights.sideLeft.intensity = BASE.sideLeft * this.intensity
     if (this.lights.sideRight) this.lights.sideRight.intensity = BASE.sideRight * this.intensity
     if (this.lights.frontPanel) this.lights.frontPanel.intensity = BASE.frontPanel * this.intensity
+    if (this.lights.frontKey) this.lights.frontKey.intensity = BASE.frontKey * this.intensity
+    if (this.lights.backKey) this.lights.backKey.intensity = BASE.backKey * this.intensity
     if (this.lights.backLeft) this.lights.backLeft.intensity = BASE.backLeft * this.intensity
     if (this.lights.backRight) this.lights.backRight.intensity = BASE.backRight * this.intensity
     if (this.lights.topDown) this.lights.topDown.intensity = BASE.topDown * this.intensity

@@ -1,9 +1,17 @@
+import '../lib/loggerInit.js'
+import { createLogger } from '../lib/logger.js'
+const log = createLogger('converter')
+
 import './converter.css'
-
-const API_BASE = '' // use Vite proxy: /api -> localhost:3000
-
-const $ = (id) => document.getElementById(id)
-const $$ = (sel) => document.querySelectorAll(sel)
+import ColorService from '../services/ColorService.js'
+import { usesProductDefaultSurfaceColor } from '../lib/defaultColorMapping.js'
+import { resolveEffectiveDefaultColorOrFallback } from '../lib/defaultColorMapping.js'
+import { buildColorOverridesFromMapping } from '../lib/hexMapping.js'
+import { parseJsonResponse, parseApiResponse, escapeHtml, fmtSize } from './modules/helpers.js'
+import { API_BASE, ACCEPT_EXT, MONITOR_JOB, PRODUCT_ID } from './modules/constants.js'
+import { $, $$ } from './modules/dom.js'
+import { checkHealth, checkAiHealth } from './modules/apiHealth.js'
+import { loadGtinConfig, bindGtinSection } from './modules/gtin.js'
 
 let selectedFiles = []
 let jobsCache = []
@@ -11,17 +19,27 @@ let currentJobId = null
 let pollInterval = null
 let jobsFilterStatus = 'all'
 
-// URL-Parameter
-const URL_PARAMS  = new URLSearchParams(location.search)
-const MONITOR_JOB = URL_PARAMS.get('monitor')   // direkt Job beobachten
-const PRODUCT_ID  = URL_PARAMS.get('productId') // Produkt-Kontext für Registrierung
+/** Cache für Produktdaten (lazy geladen, vermeidet 500 bei großem products.json). */
+let _productsData = null
 
-const ACCEPT_EXT = ['.obj', '.mtl', '.step', '.stp', '.zip', '.jpg', '.jpeg', '.png', '.tiff', '.tga', '.bmp']
-
-function fmtSize(bytes) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+/**
+ * Liefert die Hex-Farbe der Produkt-Standard-Farbe (defaultColor), wenn productId in der URL steht.
+ * Prefill, wenn in products.json eine Standardfarbe gesetzt ist (oder Automatik-Mapping).
+ */
+async function getProductDefaultHex() {
+  if (!PRODUCT_ID) return null
+  try {
+    if (!_productsData) {
+      _productsData = (await import('../data/products.json')).default
+    }
+    const product = (_productsData?.products || []).find((p) => p.id === PRODUCT_ID)
+    if (!usesProductDefaultSurfaceColor(product)) return null
+    const ralCode = resolveEffectiveDefaultColorOrFallback(product)
+    if (!ralCode || !ColorService.getRAL(ralCode)) return null
+    return ColorService.ralToHex(ralCode)
+  } catch (_) {
+    return null
+  }
 }
 
 function getOption(id) {
@@ -39,31 +57,172 @@ function setOption(id, value) {
   else el.value = value
 }
 
-/* ═══════════════════════════════════════════════
-   Health checks
-   ═══════════════════════════════════════════════ */
-async function checkHealth() {
-  let apiOk = false
-  let mcpOk = false
-  try {
-    const r = await fetch(`${API_BASE}/api/health`)
-    apiOk = r.ok
-  } catch (_) {}
-  try {
-    const r = await fetch(`${API_BASE}/api/health/mcp`)
-    mcpOk = r.ok
-  } catch (_) {}
-  const apiEl = $('healthApi')
-  const mcpEl = $('healthMcp')
-  if (apiEl) {
-    apiEl.classList.remove('ok', 'fail')
-    apiEl.classList.add(apiOk ? 'ok' : 'fail')
+/** Material-Slider: aus Preflight-Modal, sonst aus zuletzt angewendetem `conversionPreset` (productId). */
+let prefillSliderOverrides = null
+
+function getMaterialSliders() {
+  const pfS = $('pfSaturation')
+  if (pfS) {
+    return {
+      colorSaturation: String($('pfSaturation')?.value || '1'),
+      colorBrightness: String($('pfBrightness')?.value || '1'),
+      roughnessMultiplier: String($('pfRoughness')?.value || '1'),
+      metallicMultiplier: String($('pfMetallic')?.value || '1'),
+    }
   }
-  if (mcpEl) {
-    mcpEl.classList.remove('ok', 'fail')
-    mcpEl.classList.add(mcpOk ? 'ok' : 'fail')
+  if (prefillSliderOverrides) return { ...prefillSliderOverrides }
+  return {
+    colorSaturation: '1',
+    colorBrightness: '1',
+    roughnessMultiplier: '1',
+    metallicMultiplier: '1',
   }
-  return { apiOk, mcpOk }
+}
+
+function setCheckboxFromPreset(id, val) {
+  if (val == null || val === '') return
+  const el = $(id)
+  if (!el || el.type !== 'checkbox') return
+  el.checked = val === true || val === 'true'
+}
+
+/**
+ * Wendet gespeichertes conversionPreset auf Formular + Mapping an (GET /__api/products/:id).
+ */
+function applyConversionPresetToForm(preset) {
+  if (!preset || typeof preset !== 'object' || Array.isArray(preset)) return
+  prefillSliderOverrides = null
+
+  if (preset.outputFormat) setOption('optFormat', preset.outputFormat)
+  if (preset.scale != null && preset.scale !== '') setOption('optScale', String(preset.scale))
+  if (preset.importUpAxis) setOption('optUpAxis', preset.importUpAxis)
+  if (preset.tessellationQuality != null && preset.tessellationQuality !== '') {
+    setOption('optTessellation', String(preset.tessellationQuality))
+  }
+  if (preset.decimateRatio != null && preset.decimateRatio !== '') {
+    setOption('optDecimate', String(preset.decimateRatio))
+  }
+
+  if (preset.bakeYUp === 'true' || preset.bakeYUp === true) setOption('optBakeYUp', true)
+  else if (preset.bakeYUp === 'false' || preset.bakeYUp === false) setOption('optBakeYUp', false)
+
+  const ax = (preset.rotateAxis || '').trim()
+  if (ax === 'X' || ax === 'Y' || ax === 'Z') {
+    setOption('optBakeYUp', false)
+    setOption('optRotateAxis', ax)
+    const d = String(preset.rotateDegrees || '90')
+    if (['90', '180', '270'].includes(d)) setOption('optRotateDegrees', d)
+  }
+
+  setCheckboxFromPreset('optDraco', preset.useDraco)
+  setCheckboxFromPreset('optEmbedTextures', preset.embedTextures)
+  setCheckboxFromPreset('optStripLights', preset.stripCamerasLights)
+  setCheckboxFromPreset('optOverwrite', preset.overwriteExisting)
+  setCheckboxFromPreset('optAutoLabel', preset.autoLabelParts)
+  setCheckboxFromPreset('optClaudeAI', preset.useClaudeAI)
+  setCheckboxFromPreset('optUseGtin', preset.useGTINNaming)
+  setCheckboxFromPreset('optSkipPreflight', preset.skipPreflight)
+  setCheckboxFromPreset('optKeepOriginalColors', preset.keepOriginalColors)
+
+  if (preset.materialFinish) setOption('optMaterialFinish', preset.materialFinish)
+  if (preset.batchChunkSize != null && preset.batchChunkSize !== '') {
+    setOption('optBatchChunk', String(preset.batchChunkSize))
+  }
+  if (preset.gtin != null && preset.gtin !== '') setOption('optGtin', String(preset.gtin))
+  if (preset.articleNumber != null && preset.articleNumber !== '') {
+    setOption('optArticleNumber', String(preset.articleNumber))
+  }
+
+  if (
+    preset.colorSaturation != null ||
+    preset.colorBrightness != null ||
+    preset.roughnessMultiplier != null ||
+    preset.metallicMultiplier != null
+  ) {
+    prefillSliderOverrides = {
+      colorSaturation: String(preset.colorSaturation ?? '1'),
+      colorBrightness: String(preset.colorBrightness ?? '1'),
+      roughnessMultiplier: String(preset.roughnessMultiplier ?? '1'),
+      metallicMultiplier: String(preset.metallicMultiplier ?? '1'),
+    }
+  }
+
+  if (preset.colorOverrides && typeof preset.colorOverrides === 'object' && !Array.isArray(preset.colorOverrides)) {
+    const n = Object.keys(preset.colorOverrides).length
+    if (n > 0) {
+      const base = loadedColorMapping?.colorOverrides || {}
+      loadedColorMapping = {
+        ...(loadedColorMapping || {}),
+        colorOverrides: { ...base, ...preset.colorOverrides },
+      }
+      setColorMappingStatus(`Projekt + Preset: ${Object.keys(loadedColorMapping.colorOverrides).length} Farben`, true)
+    }
+  }
+
+  $('optBakeYUp')?.dispatchEvent(new Event('change'))
+  $('optRotateAxis')?.dispatchEvent(new Event('change'))
+}
+
+/** Optionen für products.json – Stand zum Start der Konvertierung (submit / Ordner-Konvertierung). */
+let lastSubmittedConversionPreset = null
+
+function buildConversionPresetForRegister() {
+  const ms = getMaterialSliders()
+  const ed = collectPreflightEdits()
+  const preset = {
+    colorSaturation: ms.colorSaturation,
+    colorBrightness: ms.colorBrightness,
+    roughnessMultiplier: ms.roughnessMultiplier,
+    metallicMultiplier: ms.metallicMultiplier,
+    materialFinishVerzinktMetallic: ed.materialFinishVerzinktMetallic,
+    materialFinishVerzinktRoughness: ed.materialFinishVerzinktRoughness,
+    materialFinishRalMetallic: ed.materialFinishRalMetallic,
+    materialFinishRalRoughness: ed.materialFinishRalRoughness,
+    outputFormat: ed.outputFormat,
+    scale: ed.scale,
+    importUpAxis: ed.importUpAxis,
+    tessellationQuality: ed.tessellationQuality,
+    decimateRatio: ed.decimateRatio,
+    bakeYUp: ed.bakeYUp,
+    useDraco: ed.useDraco,
+    embedTextures: ed.embedTextures,
+    stripCamerasLights: ed.stripCamerasLights,
+    overwriteExisting: ed.overwriteExisting,
+    materialFinish: ed.materialFinish,
+    autoLabelParts: ed.autoLabelParts,
+    useClaudeAI: ed.useClaudeAI,
+    useGTINNaming: ed.useGTINNaming,
+    batchChunkSize: ed.batchChunkSize,
+    skipPreflight: getOption('optSkipPreflight') ? 'true' : 'false',
+    keepOriginalColors: getOption('optKeepOriginalColors') ? 'true' : 'false',
+  }
+  const ra = (ed.rotateAxis || '').trim()
+  if (ra === 'X' || ra === 'Y' || ra === 'Z') {
+    preset.rotateAxis = ra
+    const rd = String(ed.rotateDegrees || '').trim()
+    if (['90', '180', '270'].includes(rd)) preset.rotateDegrees = rd
+  }
+  if (ed.gtin) preset.gtin = ed.gtin
+  if (ed.articleNumber) preset.articleNumber = ed.articleNumber
+
+  let co = {}
+  if (!getOption('optKeepOriginalColors')) {
+    if (ed.colorOverrides) {
+      try {
+        const parsed = JSON.parse(ed.colorOverrides)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) co = { ...parsed }
+      } catch (_) {}
+    }
+    if (!Object.keys(co).length && loadedColorMapping?.colorOverrides) {
+      co = { ...loadedColorMapping.colorOverrides }
+    }
+  }
+  if (Object.keys(co).length) preset.colorOverrides = co
+
+  Object.keys(preset).forEach((k) => {
+    if (preset[k] === undefined) delete preset[k]
+  })
+  return preset
 }
 
 /* ═══════════════════════════════════════════════
@@ -108,10 +267,11 @@ function renderFileList() {
     .join('')
 }
 
-function escapeHtml(s) {
-  const div = document.createElement('div')
-  div.textContent = s
-  return div.innerHTML
+function hasStepLikeInput(files) {
+  return (files || []).some((f) => {
+    const name = typeof f === 'string' ? f : f?.name
+    return /\.(step|stp|p21)$/i.test(String(name || ''))
+  })
 }
 
 function bindUpload() {
@@ -143,7 +303,9 @@ function bindUpload() {
    ═══════════════════════════════════════════════ */
 function buildFormData(extraFiles) {
   const form = new FormData()
-  ;(extraFiles || selectedFiles).forEach((f) => form.append('files', f))
+  const filesForRequest = extraFiles || selectedFiles
+  ;filesForRequest.forEach((f) => form.append('files', f))
+  const disableExcelNamingForStep = hasStepLikeInput(filesForRequest)
 
   form.append('outputFormat',       getOption('optFormat') || 'glb')
   form.append('scale',              String(getOption('optScale') || '0.001'))
@@ -151,6 +313,12 @@ function buildFormData(extraFiles) {
   form.append('tessellationQuality',String(getOption('optTessellation') || '0.1'))
   form.append('decimateRatio',      String(getOption('optDecimate') || '1.0'))
   form.append('bakeYUp',            getOption('optBakeYUp') ? 'true' : 'false')
+  const rotateAxis = (getOption('optRotateAxis') || '').trim()
+  const rotateDegrees = (getOption('optRotateDegrees') || '').trim()
+  if (rotateAxis === 'X' || rotateAxis === 'Y' || rotateAxis === 'Z') {
+    form.append('rotateAxis', rotateAxis)
+    if (['90', '180', '270'].includes(rotateDegrees)) form.append('rotateDegrees', rotateDegrees)
+  }
   form.append('useDraco',           getOption('optDraco') ? 'true' : 'false')
   form.append('embedTextures',      getOption('optEmbedTextures') ? 'true' : 'false')
   form.append('stripCamerasLights', getOption('optStripLights') ? 'true' : 'false')
@@ -158,18 +326,28 @@ function buildFormData(extraFiles) {
   form.append('materialFinish',     getOption('optMaterialFinish') || 'auto')
   form.append('autoLabelParts',     getOption('optAutoLabel') ? 'true' : 'false')
   form.append('useClaudeAI',        getOption('optClaudeAI') ? 'true' : 'false')
-  form.append('useGTINNaming',      getOption('optUseGtin') ? 'true' : 'false')
+  form.append('useGTINNaming',      getOption('optUseGtin') && !disableExcelNamingForStep ? 'true' : 'false')
   form.append('batchChunkSize',     String(getOption('optBatchChunk') || '20'))
 
-  form.append('colorSaturation',     '1')
-  form.append('colorBrightness',     '1')
-  form.append('roughnessMultiplier', '1')
-  form.append('metallicMultiplier',  '1')
+  const ms = getMaterialSliders()
+  form.append('colorSaturation',     ms.colorSaturation)
+  form.append('colorBrightness',     ms.colorBrightness)
+  form.append('roughnessMultiplier', ms.roughnessMultiplier)
+  form.append('metallicMultiplier',  ms.metallicMultiplier)
+  form.append('materialFinishVerzinktMetallic',  '0.75')
+  form.append('materialFinishVerzinktRoughness', '0.25')
+  form.append('materialFinishRalMetallic',  '0')
+  form.append('materialFinishRalRoughness', '0.35')
 
   const gtin          = (getOption('optGtin') || '').trim()
   const articleNumber = (getOption('optArticleNumber') || '').trim()
   if (gtin)          form.append('gtin', gtin)
   if (articleNumber) form.append('articleNumber', articleNumber)
+
+  const keepOriginalColors = getOption('optKeepOriginalColors')
+  if (!keepOriginalColors && loadedColorMapping?.colorOverrides && Object.keys(loadedColorMapping.colorOverrides).length) {
+    form.append('colorOverrides', JSON.stringify(loadedColorMapping.colorOverrides))
+  }
 
   return form
 }
@@ -187,14 +365,94 @@ function showProgress(text) {
   if (b) { b.hidden = true; b.innerHTML = 'GLB herunterladen' }
 }
 
+/* ─── Farb-Mapping (MTL → RAL aus Colormatching-Tool) ─── */
+let loadedColorMapping = null  // { colorOverrides: { "#HEX": "#HEX", ... }, matchRal?: {...} }
+
+/**
+ * Baut colorOverrides aus Mapping-JSON (shared mit Vite convert-product).
+ */
+function loadColorMappingFromJson(data) {
+  const getRalHex = (ralKey) => ColorService.getRAL(ralKey)?.hex ?? null
+  const colorOverrides = buildColorOverridesFromMapping(data, getRalHex)
+  return { colorOverrides, matchRal: data.matchRal || null }
+}
+
+const PROJECT_MAPPING_URL = '/mtl-ral-color-mapping.json'
+
+async function loadProjectColorMapping() {
+  const status = $('colorMappingStatus')
+  try {
+    const res = await fetch(PROJECT_MAPPING_URL)
+    if (!res.ok) return
+    const data = await res.json()
+    const mapping = loadColorMappingFromJson(data)
+    const n = Object.keys(mapping.colorOverrides).length
+    if (n > 0) {
+      const prevCo = loadedColorMapping?.colorOverrides
+      if (prevCo && Object.keys(prevCo).length) {
+        loadedColorMapping = {
+          ...mapping,
+          colorOverrides: { ...mapping.colorOverrides, ...prevCo },
+        }
+      } else {
+        loadedColorMapping = mapping
+      }
+      const total = Object.keys(loadedColorMapping.colorOverrides).length
+      if (status) {
+        status.textContent = `Projekt-Mapping: ${total} Farben`
+        status.className = 'color-mapping-status ok'
+      }
+    }
+  } catch (_) {
+    // Kein Projekt-Mapping oder ungültig – kein Fehler anzeigen
+  }
+}
+
+function setColorMappingStatus(text, isOk = true) {
+  const status = $('colorMappingStatus')
+  if (status) {
+    status.textContent = text || ''
+    status.className = text ? `color-mapping-status ${isOk ? 'ok' : ''}` : 'color-mapping-status'
+  }
+}
+
+function bindColorMapping() {
+  const fileInput = $('colorMappingFile')
+  const btn = $('btnLoadColorMapping')
+  const status = $('colorMappingStatus')
+  if (!btn || !fileInput) return
+  btn.addEventListener('click', () => fileInput.click())
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files?.[0]
+    if (!f) return
+    const r = new FileReader()
+    r.onload = async () => {
+      try {
+        const data = JSON.parse(r.result)
+        loadedColorMapping = loadColorMappingFromJson(data)
+        const n = Object.keys(loadedColorMapping.colorOverrides).length
+        setColorMappingStatus(n ? `${n} Farben (geladen)` : 'Keine Zuordnungen', !!n)
+        if (n === 0) loadedColorMapping = null
+      } catch (e) {
+        loadedColorMapping = null
+        setColorMappingStatus('Ungültige JSON', false)
+      }
+    }
+    r.readAsText(f)
+  })
+}
+
 /* ─── Preflight + Color-Mapping ─── */
 let preflightData = null  // stores preflight result for confirm step
 
 async function startConversion() {
   if (selectedFiles.length === 0) return
-  const usePreflight = selectedFiles.length <= 10  // skip preflight for large batches
+  const skipPreflight = getOption('optSkipPreflight')
+  const usePreflight = !skipPreflight && selectedFiles.length <= 10  // skip for large batches or if option set
 
   showProgress(usePreflight ? 'Preflight-Analyse läuft …' : 'Konvertierung wird gestartet …')
+  const fallbackEl = $('progressPreflightFallback')
+  if (fallbackEl) fallbackEl.hidden = true
 
   try {
     const form = buildFormData()
@@ -203,23 +461,49 @@ async function startConversion() {
     if (usePreflight) {
       // Step 1: preflight analysis
       const res = await fetch(`${API_BASE}/api/v1/preflight`, { method: 'POST', body: form })
-      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
-      const data = await res.json()
+      const data = await parseApiResponse(res)
       preflightData = data
-      openPreflightModal(data)
+      await openPreflightModal(data)
     } else {
-      // Direct conversion for large batches
+      // Direct conversion for large batches or "skip preflight" option
       await submitConversion(form)
     }
   } catch (err) {
     const s = $('progressStatus')
     const l = $('progressLog')
-    if (s) s.textContent = 'Fehler: ' + (err.message || 'Unbekannt')
-    if (l) l.textContent = err.stack || err.message
+    const msg = err.message || 'Unbekannt'
+    if (s) s.textContent = 'Fehler: ' + msg
+    let logText = err.stack || msg
+    if (/failed to run preflight|failed to fetch|network error|connection refused|ECONNREFUSED/i.test(msg)) {
+      logText += '\n\nHinweis: Läuft die Konverter-API? (z. B. npm run start:api und npm run start:mcp im Projektordner.)'
+    }
+    // Bei Preflight-Fehler: Button zum direkten Konvertieren anbieten (wenn Preflight versucht wurde)
+    if (usePreflight && fallbackEl && selectedFiles.length > 0) {
+      fallbackEl.hidden = false
+      const btn = $('btnConvertWithoutPreflight')
+      if (btn && !btn.dataset.bound) {
+        btn.dataset.bound = '1'
+        btn.addEventListener('click', async () => {
+          fallbackEl.hidden = true
+          if (s) s.textContent = 'Konvertierung wird gestartet …'
+          if (l) l.textContent = ''
+          try {
+            const formDirect = buildFormData()
+            formDirect.set('enablePreflight', 'false')
+            await submitConversion(formDirect)
+          } catch (e) {
+            if (s) s.textContent = 'Fehler: ' + (e.message || 'Unbekannt')
+            if (l) l.textContent = e.stack || e.message
+          }
+        })
+      }
+    }
+    if (l) l.textContent = logText
   }
 }
 
 async function submitConversion(formOrJobId) {
+  lastSubmittedConversionPreset = buildConversionPresetForRegister()
   let jobId
   if (typeof formOrJobId === 'string') {
     // Confirm existing preflight job
@@ -229,13 +513,13 @@ async function submitConversion(formOrJobId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobId: formOrJobId, ...opts }),
     })
-    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
     jobId = data.jobId || formOrJobId
   } else {
     const res = await fetch(`${API_BASE}/api/v1/convert`, { method: 'POST', body: formOrJobId })
-    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
     jobId = data.jobId
   }
   if (jobId) {
@@ -243,19 +527,18 @@ async function submitConversion(formOrJobId) {
     jobsCache.unshift({ jobId, status: 'queued' })
     renderJobs()
     pollJobProgress(jobId)
+    void ensureNotificationPermission()
+    setConvIndicator('running')
   }
 }
 
 /* ─── Preflight Modal ─── */
 function rgbToHex(rgb) {
-  if (!rgb || rgb.length < 3) return '#888888'
-  const r = Math.round(Math.min(1, Math.max(0, rgb[0])) * 255)
-  const g = Math.round(Math.min(1, Math.max(0, rgb[1])) * 255)
-  const b = Math.round(Math.min(1, Math.max(0, rgb[2])) * 255)
-  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
+  if (!rgb || !Array.isArray(rgb) || rgb.length < 3) return '#888888'
+  return ColorService.rgbToHex(rgb[0], rgb[1], rgb[2])
 }
 
-function openPreflightModal(data) {
+async function openPreflightModal(data) {
   const pf = data.preflight || {}
   const summary = pf.summary || {}
 
@@ -264,14 +547,21 @@ function openPreflightModal(data) {
   const warnings = pf.warnings || []
   const jobId = data.jobId
 
-  // Build color list from colorUsage (preferred), materials, or legacy uniqueColors/colors
+  // Build color list from colorUsage (preferred), materials, or legacy uniqueColors/colors; ensure each has r255,g255,b255 for auto-match
   let colors = pf.uniqueColors || pf.colors || []
   if (!colors.length && pf.colorUsage?.length) {
-    colors = pf.colorUsage.map((cu, i) => ({
-      hex: rgbToHex(cu.rgb),
-      name: cu.materials?.[0] || `Farbe ${i + 1}`,
-      objects: cu.objects || [],
-    }))
+    colors = pf.colorUsage.map((cu, i) => {
+      const rgb = cu.rgb || [0.5, 0.5, 0.5]
+      const r255 = Math.round(Math.max(0, Math.min(1, Number(rgb[0]))) * 255)
+      const g255 = Math.round(Math.max(0, Math.min(1, Number(rgb[1]))) * 255)
+      const b255 = Math.round(Math.max(0, Math.min(1, Number(rgb[2]))) * 255)
+      return {
+        hex: rgbToHex(cu.rgb),
+        r255, g255, b255,
+        name: cu.materials?.[0] || `Farbe ${i + 1}`,
+        objects: cu.objects || [],
+      }
+    })
   } else if (!colors.length && pf.materials?.length) {
     const seen = new Set()
     for (const m of pf.materials) {
@@ -279,24 +569,65 @@ function openPreflightModal(data) {
         const hex = rgbToHex(m.baseColor)
         if (!seen.has(hex)) {
           seen.add(hex)
-          colors.push({ hex, name: m.name })
+          const bc = m.baseColor
+          const r255 = Math.round((bc[0] ?? 0.5) * 255)
+          const g255 = Math.round((bc[1] ?? 0.5) * 255)
+          const b255 = Math.round((bc[2] ?? 0.5) * 255)
+          colors.push({ hex, name: m.name, r255, g255, b255 })
         }
       }
     }
+  } else {
+    colors = colors.map((c) => {
+      const hex = c.hex || c.color || (typeof c === 'string' ? c : rgbToHex(c.rgb || c))
+      let r255 = c.r255 ?? c.r
+      let g255 = c.g255 ?? c.g
+      let b255 = c.b255 ?? c.b
+      if (typeof r255 !== 'number' || typeof g255 !== 'number' || typeof b255 !== 'number') {
+        const rgb = ColorService.hexToRgb(hex)
+        if (rgb) {
+          r255 = rgb.r
+          g255 = rgb.g
+          b255 = rgb.b
+        } else {
+          r255 = 128
+          g255 = 128
+          b255 = 128
+        }
+      }
+      return { ...c, hex, r255, g255, b255 }
+    })
   }
 
+  const keepOriginalColors = getOption('optKeepOriginalColors')
+  const autoColorMatch = localStorage.getItem('converter_autoColorMatch') !== 'false'
+  const applyProductDefaultFirstRow = localStorage.getItem('converter_preflightProductDefaultFirstRow') !== 'false'
+  const productDefaultHex = await getProductDefaultHex()
   let colorRows = ''
   if (colors.length) {
     colorRows = colors.slice(0, 40).map((c, i) => {
       const hex = c.hex || c.color || (typeof c === 'string' ? c : rgbToHex(c.rgb || c))
       const name = c.name || c.materialName || `Farbe ${i+1}`
       const objHint = c.objects?.length ? ` (${c.objects.length} Objekte)` : ''
+      let initialHex = hex
+      if (!keepOriginalColors) {
+        if (loadedColorMapping?.colorOverrides) {
+          const normalized = ColorService.normalizeHex(hex)
+          if (loadedColorMapping.colorOverrides[normalized]) initialHex = loadedColorMapping.colorOverrides[normalized]
+        } else if (autoColorMatch && c.r255 != null && c.g255 != null && c.b255 != null) {
+          const matched = ColorService.nearestRALFromRgbRgb(c.r255, c.g255, c.b255)
+          if (matched) initialHex = matched.hex
+        }
+        if (i === 0 && productDefaultHex && applyProductDefaultFirstRow) initialHex = productDefaultHex
+      }
+      const originalHex = (hex || '').replace(/^#?/, '#').toUpperCase()
+      if (originalHex.length !== 7 || !/^#[0-9A-F]{6}$/.test(originalHex)) return ''
       return `
-        <div class="pf-color-row" data-idx="${i}">
-          <span class="pf-color-swatch" style="background:${escapeHtml(hex)}" title="${escapeHtml(hex)}"></span>
+        <div class="pf-color-row" data-idx="${i}" data-original-hex="${escapeHtml(originalHex)}">
+          <span class="pf-color-swatch" style="background:${escapeHtml(initialHex)}" title="${escapeHtml(initialHex)}"></span>
           <span class="pf-color-name">${escapeHtml(name)}${escapeHtml(objHint)}</span>
-          <code class="pf-color-hex">${escapeHtml(hex)}</code>
-          <input type="color" class="pf-color-override" data-color-idx="${i}" value="${escapeHtml(hex)}" title="Farbe überschreiben">
+          <code class="pf-color-hex">${escapeHtml(initialHex)}</code>
+          <input type="color" class="pf-color-override" data-color-idx="${i}" value="${escapeHtml(initialHex)}" title="Farbe überschreiben">
         </div>`
     }).join('')
     if (colors.length > 40) colorRows += `<div class="pf-color-more">… und ${colors.length - 40} weitere</div>`
@@ -307,6 +638,12 @@ function openPreflightModal(data) {
   const warnHtml = warnings.length
     ? `<div class="pf-warnings">${warnings.map(w => `<div class="pf-warn-item">⚠ ${escapeHtml(String(w))}</div>`).join('')}</div>`
     : ''
+
+  const pfSl = getMaterialSliders()
+  const pfLbl = (v) => {
+    const x = parseFloat(String(v))
+    return Number.isFinite(x) ? x.toFixed(2) : '1.00'
+  }
 
   const modal = document.createElement('div')
   modal.id = 'preflightModal'
@@ -323,15 +660,25 @@ function openPreflightModal(data) {
         <div class="pf-stat"><span class="pf-stat-val">${colors.length}</span><span class="pf-stat-label">Farben</span></div>
       </div>
       ${warnHtml}
+      <p class="pf-order-hint">Farben aus MTL/OBJ werden bei Auto-Matching auf RAL gemappt. „Mapping speichern“ speichert die Zuordnung für spätere Exporte.</p>
       <div class="pf-section-title">Farbkorrekturen</div>
+      <label class="pf-slider-row pf-auto-match-row">
+        <input type="checkbox" id="pfAutoColorMatch" ${autoColorMatch ? 'checked' : ''} title="Quellfarben automatisch auf nächste RAL-Farbe mappen (für gleiche Farben im GLB)">
+        <span>Auto-Matching: Quellfarben auf nächste RAL-Farbe mappen</span>
+      </label>
+      ${productDefaultHex ? `<label class="pf-slider-row pf-auto-match-row">
+        <input type="checkbox" id="pfProductDefaultFirstRow" ${applyProductDefaultFirstRow ? 'checked' : ''} title="Wenn deaktiviert: erste Farbe folgt nur Projekt-Mapping bzw. Auto-Matching (reproduzierbar mit Mapping)">
+        <span>Produkt-Standard (RAL) für erste Farbe verwenden</span>
+      </label>` : ''}
       <div class="pf-sliders">
-        <label class="pf-slider-row"><span>Sättigung</span><input type="range" class="pf-range" id="pfSaturation" min="0.5" max="2" step="0.05" value="1"><span id="pfSaturationVal">1.00</span></label>
-        <label class="pf-slider-row"><span>Helligkeit</span><input type="range" class="pf-range" id="pfBrightness" min="0.5" max="2" step="0.05" value="1"><span id="pfBrightnessVal">1.00</span></label>
-        <label class="pf-slider-row"><span>Rauheit ×</span><input type="range" class="pf-range" id="pfRoughness" min="0.1" max="3" step="0.05" value="1"><span id="pfRoughnessVal">1.00</span></label>
-        <label class="pf-slider-row"><span>Metallic ×</span><input type="range" class="pf-range" id="pfMetallic" min="0" max="2" step="0.05" value="1"><span id="pfMetallicVal">1.00</span></label>
+        <label class="pf-slider-row"><span>Sättigung</span><input type="range" class="pf-range" id="pfSaturation" min="0.5" max="2" step="0.05" value="${escapeHtml(String(pfSl.colorSaturation))}"><span id="pfSaturationVal">${pfLbl(pfSl.colorSaturation)}</span></label>
+        <label class="pf-slider-row"><span>Helligkeit</span><input type="range" class="pf-range" id="pfBrightness" min="0.5" max="2" step="0.05" value="${escapeHtml(String(pfSl.colorBrightness))}"><span id="pfBrightnessVal">${pfLbl(pfSl.colorBrightness)}</span></label>
+        <label class="pf-slider-row"><span>Rauheit ×</span><input type="range" class="pf-range" id="pfRoughness" min="0.1" max="3" step="0.05" value="${escapeHtml(String(pfSl.roughnessMultiplier))}"><span id="pfRoughnessVal">${pfLbl(pfSl.roughnessMultiplier)}</span></label>
+        <label class="pf-slider-row"><span>Metallic ×</span><input type="range" class="pf-range" id="pfMetallic" min="0" max="2" step="0.05" value="${escapeHtml(String(pfSl.metallicMultiplier))}"><span id="pfMetallicVal">${pfLbl(pfSl.metallicMultiplier)}</span></label>
       </div>
-      ${colors.length ? `<div class="pf-section-title">Farben (${colors.length})</div><div class="pf-color-list">${colorRows}</div>` : ''}
+      ${colors.length ? `<div class="pf-section-title">Farben (${colors.length})${productDefaultHex && applyProductDefaultFirstRow ? ' – erste Farbe = Produkt-Standard (RAL)' : ''}</div><div class="pf-color-list">${colorRows}</div>` : ''}
       <div class="pf-modal-footer">
+        <button type="button" class="btn btn-ghost" id="pfExportMappingBtn" title="Aktuelles MTL→RAL-Mapping als JSON speichern, für zukünftige Exporte laden">Mapping speichern</button>
         <button type="button" class="btn btn-ghost" id="pfCancelBtn">Abbrechen</button>
         <button type="button" class="btn btn-primary" id="pfConfirmBtn">Konvertierung starten</button>
       </div>
@@ -346,8 +693,22 @@ function openPreflightModal(data) {
     if (el && lbl) el.addEventListener('input', () => { lbl.textContent = parseFloat(el.value).toFixed(2) })
   })
 
+  const pfAutoColorMatchEl = $('pfAutoColorMatch')
+  if (pfAutoColorMatchEl) {
+    pfAutoColorMatchEl.addEventListener('change', () => {
+      localStorage.setItem('converter_autoColorMatch', pfAutoColorMatchEl.checked ? 'true' : 'false')
+    })
+  }
+  const pfProductDefaultFirstRowEl = $('pfProductDefaultFirstRow')
+  if (pfProductDefaultFirstRowEl) {
+    pfProductDefaultFirstRowEl.addEventListener('change', () => {
+      localStorage.setItem('converter_preflightProductDefaultFirstRow', pfProductDefaultFirstRowEl.checked ? 'true' : 'false')
+    })
+  }
+
   $('pfCloseBtn')?.addEventListener('click', closePreflightModal)
   $('pfCancelBtn')?.addEventListener('click', closePreflightModal)
+  $('pfExportMappingBtn')?.addEventListener('click', exportPreflightMapping)
   $('pfConfirmBtn')?.addEventListener('click', async () => {
     closePreflightModal()
     showProgress('Konvertierung wird gestartet …')
@@ -360,32 +721,85 @@ function openPreflightModal(data) {
   })
 }
 
+/** Exportiert das aktuelle Preflight-Mapping (MTL-Farben → RAL) als JSON zum Laden bei zukünftigen Exporten. */
+function exportPreflightMapping() {
+  const rows = document.querySelectorAll('.pf-color-row')
+  const matchPalette = []
+  const sourcePalette = []
+  const matchRal = {}
+  rows.forEach((row, i) => {
+    const originalHex = row?.dataset?.originalHex
+    const inp = row?.querySelector('.pf-color-override')
+    const matchHex = (inp?.value || '').replace(/^#?/, '#').toUpperCase()
+    if (originalHex && matchHex.length === 7) {
+      matchPalette.push({ originalHex, matchHex })
+      const id = i + 1
+      sourcePalette.push({ id, hex: originalHex })
+      const ralCode = ColorService.getRALCodeFromHex(matchHex)
+      if (ralCode) matchRal[String(id)] = ralCode
+    }
+  })
+  const out = {
+    sourcePalette,
+    matchPalette,
+    ...(Object.keys(matchRal).length ? { matchRal } : {}),
+    _comment: 'MTL→RAL-Mapping aus Preflight. In Konvertierung unter „Farb-Mapping laden“ verwenden.',
+  }
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'mtl-ral-color-mapping.json'
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 function closePreflightModal() {
   const m = $('preflightModal')
   if (m) m.remove()
 }
 
 function collectPreflightEdits() {
+  const disableExcelNamingForStep = hasStepLikeInput(selectedFiles)
+  const keepOriginalColors = getOption('optKeepOriginalColors')
   const colorOverrides = {}
-  document.querySelectorAll('.pf-color-override').forEach(inp => {
-    const idx = inp.dataset.colorIdx
-    colorOverrides[idx] = inp.value
-  })
+  if (!keepOriginalColors) {
+    document.querySelectorAll('.pf-color-override').forEach(inp => {
+      const row = inp.closest('.pf-color-row')
+      const originalHex = row?.dataset?.originalHex
+      const targetHex = (inp.value || '').replace(/^#?/, '#').toUpperCase()
+      if (originalHex && targetHex.length === 7) {
+        const key = ColorService.normalizeHex(originalHex)
+        const value = ColorService.normalizeHex(targetHex)
+        if (key && value) colorOverrides[key] = value
+      }
+    })
+    // Case-robust: Backend kann MTL-Hex lowercase vergleichen
+    for (const [key, value] of Object.entries(colorOverrides)) {
+      if (key && key.toLowerCase() !== key) colorOverrides[key.toLowerCase()] = value
+    }
+  }
 
   const bool = v => v ? 'true' : 'false'
+  const ms = getMaterialSliders()
 
   return {
-    colorSaturation:     String($('pfSaturation')?.value || '1'),
-    colorBrightness:     String($('pfBrightness')?.value || '1'),
-    roughnessMultiplier: String($('pfRoughness')?.value  || '1'),
-    metallicMultiplier:  String($('pfMetallic')?.value   || '1'),
-    colorOverrides:      Object.keys(colorOverrides).length ? JSON.stringify(colorOverrides) : undefined,
+    colorSaturation:     ms.colorSaturation,
+    colorBrightness:     ms.colorBrightness,
+    roughnessMultiplier: ms.roughnessMultiplier,
+    metallicMultiplier:  ms.metallicMultiplier,
+    materialFinishVerzinktMetallic:  '0.75',
+    materialFinishVerzinktRoughness: '0.25',
+    materialFinishRalMetallic:  '0',
+    materialFinishRalRoughness: '0.35',
+    colorOverrides:      keepOriginalColors ? undefined : (Object.keys(colorOverrides).length ? JSON.stringify(colorOverrides) : undefined),
     outputFormat:        getOption('optFormat') || 'glb',
     scale:               String(getOption('optScale') || '0.001'),
     importUpAxis:        getOption('optUpAxis') || 'AUTO',
     tessellationQuality: String(getOption('optTessellation') || '0.1'),
     decimateRatio:       String(getOption('optDecimate') || '1.0'),
     bakeYUp:             bool(getOption('optBakeYUp')),
+    rotateAxis:          (getOption('optRotateAxis') || '').trim() || undefined,
+    rotateDegrees:      (getOption('optRotateDegrees') || '').trim() || undefined,
     useDraco:            bool(getOption('optDraco')),
     embedTextures:       bool(getOption('optEmbedTextures')),
     stripCamerasLights:  bool(getOption('optStripLights')),
@@ -393,10 +807,130 @@ function collectPreflightEdits() {
     materialFinish:      getOption('optMaterialFinish') || 'auto',
     autoLabelParts:      bool(getOption('optAutoLabel')),
     useClaudeAI:         bool(getOption('optClaudeAI')),
-    useGTINNaming:       bool(getOption('optUseGtin')),
+    useGTINNaming:       bool(getOption('optUseGtin') && !disableExcelNamingForStep),
     batchChunkSize:      String(getOption('optBatchChunk') || '20'),
     gtin:                (getOption('optGtin') || '').trim() || undefined,
     articleNumber:       (getOption('optArticleNumber') || '').trim() || undefined,
+  }
+}
+
+/* ─── Top-Bar: Konvertierung läuft + Desktop-Benachrichtigung ─── */
+let convIndicatorStartedAt = null
+let convIndicatorTimer = null
+let convIndicatorHideTimer = null
+
+function formatElapsedMs(ms) {
+  const s = Math.floor(Math.max(0, ms) / 1000)
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return `${m}:${String(sec).padStart(2, '0')}`
+}
+
+function updateConvIndicatorElapsed() {
+  const el = $('convIndicatorElapsed')
+  if (!el || convIndicatorStartedAt == null) return
+  el.textContent = formatElapsedMs(Date.now() - convIndicatorStartedAt)
+}
+
+function clearConvIndicatorTimers() {
+  if (convIndicatorTimer) {
+    clearInterval(convIndicatorTimer)
+    convIndicatorTimer = null
+  }
+  if (convIndicatorHideTimer) {
+    clearTimeout(convIndicatorHideTimer)
+    convIndicatorHideTimer = null
+  }
+}
+
+/**
+ * @param {'idle'|'running'|'completed'|'failed'} state
+ * @param {{ partial?: boolean }} [opts]
+ */
+function setConvIndicator(state, opts = {}) {
+  const wrap = $('convIndicator')
+  const label = $('convIndicatorLabel')
+  if (!wrap) return
+
+  if (state === 'idle') {
+    clearConvIndicatorTimers()
+    wrap.hidden = true
+    wrap.classList.remove('is-running', 'is-completed', 'is-failed')
+    convIndicatorStartedAt = null
+    return
+  }
+
+  if (state === 'running') {
+    clearConvIndicatorTimers()
+    convIndicatorStartedAt = Date.now()
+    wrap.hidden = false
+    wrap.classList.remove('is-completed', 'is-failed')
+    wrap.classList.add('is-running')
+    if (label) label.textContent = 'Konvertierung läuft'
+    updateConvIndicatorElapsed()
+    convIndicatorTimer = setInterval(updateConvIndicatorElapsed, 1000)
+    return
+  }
+
+  if (state === 'completed' || state === 'failed') {
+    clearConvIndicatorTimers()
+    const durationMs = convIndicatorStartedAt != null ? Date.now() - convIndicatorStartedAt : 0
+    const elapsedEl = $('convIndicatorElapsed')
+    if (elapsedEl) elapsedEl.textContent = formatElapsedMs(durationMs)
+
+    wrap.hidden = false
+    wrap.classList.remove('is-running')
+    if (state === 'completed') {
+      wrap.classList.remove('is-failed')
+      wrap.classList.add('is-completed')
+      if (label) label.textContent = opts.partial ? 'Teilweise fertig' : 'Konvertierung fertig'
+    } else {
+      wrap.classList.remove('is-completed')
+      wrap.classList.add('is-failed')
+      if (label) label.textContent = 'Konvertierung fehlgeschlagen'
+    }
+
+    const hideMs = state === 'failed' ? 5000 : 3000
+    convIndicatorHideTimer = setTimeout(() => setConvIndicator('idle'), hideMs)
+  }
+}
+
+function notifyConversionDone(jobId, kind, outputs, errorText) {
+  if (!('Notification' in window)) return
+  if (Notification.permission !== 'granted') return
+  try {
+    const idStr = jobId != null ? String(jobId) : ''
+    const jobShort = idStr.length > 14 ? `${idStr.slice(0, 12)}…` : idStr
+    let title = 'META – Konvertierung'
+    let body = ''
+    if (kind === 'completed') {
+      title = 'META – Konvertierung fertig'
+      const n = Array.isArray(outputs) ? outputs.length : 0
+      if (n > 1) body = `${n} Ausgabe-Dateien bereit.`
+      else if (n === 1) body = `Datei: ${outputs[0].split(/[/\\]/).pop()}`
+      else body = 'Job abgeschlossen.'
+      if (jobShort) body += ` Job: ${jobShort}`
+    } else if (kind === 'partial') {
+      title = 'META – Konvertierung teilweise fertig'
+      const n = Array.isArray(outputs) ? outputs.length : 0
+      body = n ? `${n} Datei(en) fertig.` : 'Teilweise abgeschlossen.'
+      if (jobShort) body += ` Job: ${jobShort}`
+    } else {
+      title = 'META – Konvertierung fehlgeschlagen'
+      body = jobShort ? `Job ${jobShort}. ` : ''
+      const err = errorText && String(errorText).trim()
+      body += err ? err.slice(0, 200) : 'Bitte Konverter-Log prüfen.'
+    }
+    new Notification(title, { body, tag: idStr || 'meta-conv', silent: false })
+  } catch (_) {}
+}
+
+async function ensureNotificationPermission() {
+  if (!('Notification' in window)) return
+  if (Notification.permission === 'default') {
+    try {
+      await Notification.requestPermission()
+    } catch (_) {}
   }
 }
 
@@ -411,9 +945,17 @@ function pollJobProgress(jobId) {
     try {
       const res = await fetch(`${API_BASE}/api/v1/status/${jobId}`)
       if (!res.ok) return
-      const data = await res.json()
-      const pct = Math.min(100, Number(data.progress) ?? 0)
-      progressFill.style.width = pct + '%'
+      let data
+      try {
+        data = await parseJsonResponse(res)
+      } catch (_) {
+        return
+      }
+      const rawProgress = Number(data.progress)
+      const pct = Number.isFinite(rawProgress)
+        ? Math.min(100, Math.max(0, rawProgress))
+        : 0
+      if (progressFill) progressFill.style.width = pct + '%'
       progressStatus.textContent = data.status || 'Verarbeite …'
       const logLines = Array.isArray(data.logs) ? data.logs : (data.log ? [data.log] : [])
       if (logLines.length) progressLog.textContent = logLines.join('\n')
@@ -475,13 +1017,39 @@ function pollJobProgress(jobId) {
         if (outputs.length) {
           await registerConverted(outputs, jobId)
         }
+
+        const partial = data.status === 'partially_completed'
+        setConvIndicator('completed', { partial })
+        notifyConversionDone(jobId, partial ? 'partial' : 'completed', outputs)
       }
       if (data.status === 'failed') {
+        const errMsg = data.error || data.message || 'Unbekannter Fehler'
+        log.scoped('Converter').error('Job fehlgeschlagen (API/MCP/Blender)', {
+          jobId,
+          error: errMsg,
+          status: data.status,
+          progress: data.progress,
+          outputPaths: data.outputPaths,
+          outputPath: data.outputPath,
+          logs: data.logs,
+          log: data.log,
+          detail: data.detail,
+          stderr: data.stderr,
+          stdout: data.stdout,
+        })
+        const prog = data.progress != null ? String(data.progress) : ''
+        log.scoped('Converter').warn(
+          'Diagnose: Status-API liefert meist keine Blender-Logs — Terminal von MCP (8001) + API (3000) prüfen.',
+          '\n· BLENDER_PATH, BLENDER_OUTPUT_DIR, freier Speicher, Pfadlänge (externe Platte), STEP-Import in Blender.',
+          prog ? `\n· Fortschritt zuletzt: ${prog}%.` : '',
+        )
         clearInterval(pollInterval)
         pollInterval = null
         progressStatus.textContent = 'Fehlgeschlagen'
-        if (data.error) progressLog.textContent = (progressLog.textContent || '') + '\n' + data.error
+        if (errMsg) progressLog.textContent = (progressLog.textContent || '') + '\n' + errMsg
         renderJobs()
+        setConvIndicator('failed')
+        notifyConversionDone(jobId, 'failed', [], errMsg)
       }
     } catch (_) {}
   }
@@ -497,8 +1065,13 @@ async function loadUploadFolders() {
   if (!section || !list) return
   try {
     const res = await fetch(`${API_BASE}/api/v1/uploads`)
+    let data
+    try {
+      data = await parseJsonResponse(res)
+    } catch (_) {
+      return
+    }
     if (!res.ok) return
-    const data = await res.json()
     const folders = data.uploads || data.jobs || []
     if (!folders.length) { section.hidden = true; return }
     section.hidden = false
@@ -520,19 +1093,22 @@ async function loadUploadFolders() {
 async function startFolderConversion(folderName) {
   showProgress(`Konvertierung aus Ordner: ${folderName} …`)
   try {
+    lastSubmittedConversionPreset = buildConversionPresetForRegister()
     const opts = collectPreflightEdits()
     const res = await fetch(`${API_BASE}/api/v1/convert/from-folder`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder: folderName, ...opts }),
     })
-    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
     const jobId = data.jobId || folderName
     currentJobId = jobId
     jobsCache.unshift({ jobId, status: 'queued' })
     renderJobs()
     pollJobProgress(jobId)
+    void ensureNotificationPermission()
+    setConvIndicator('running')
   } catch (err) {
     const s = $('progressStatus')
     if (s) s.textContent = 'Fehler: ' + err.message
@@ -545,8 +1121,13 @@ async function startFolderConversion(folderName) {
 async function loadJobs() {
   try {
     const res = await fetch(`${API_BASE}/api/v1/uploads`)
+    let data
+    try {
+      data = await parseJsonResponse(res)
+    } catch (_) {
+      return
+    }
     if (!res.ok) return
-    const data = await res.json()
     jobsCache = data.jobs || data.uploads || []
   } catch (_) {
     jobsCache = []
@@ -618,20 +1199,28 @@ async function registerConverted(outputPaths, jobId) {
   if (PRODUCT_ID) {
     try {
       const r = await fetch(`/__api/products/${encodeURIComponent(PRODUCT_ID)}`)
-      if (r.ok) {
-        const p = await r.json()
-        if (p?.cadFiles) cadFileUrls = p.cadFiles
-      }
+      const p = await parseJsonResponse(r)
+      if (r.ok && p?.cadFiles) cadFileUrls = p.cadFiles
     } catch (_) {}
   }
+
+  const conversionPreset =
+    PRODUCT_ID && lastSubmittedConversionPreset && Object.keys(lastSubmittedConversionPreset).length
+      ? lastSubmittedConversionPreset
+      : undefined
 
   try {
     const res = await fetch('/__api/register-converted', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ outputPaths, cadFileUrls, productId: PRODUCT_ID || undefined }),
+      body: JSON.stringify({
+        outputPaths,
+        cadFileUrls,
+        productId: PRODUCT_ID || undefined,
+        ...(conversionPreset ? { conversionPreset } : {}),
+      }),
     })
-    const data = await res.json()
+    const data = await parseJsonResponse(res)
     if (data.ok && data.added?.length) {
       showDashboardLink(data.added)
     }
@@ -656,9 +1245,13 @@ async function showProductContext() {
   if (!PRODUCT_ID) return
   try {
     const r = await fetch(`/__api/products/${encodeURIComponent(PRODUCT_ID)}`)
+    const p = await parseJsonResponse(r)
     if (!r.ok) return
-    const p = await r.json()
     if (!p) return
+
+    if (p.conversionPreset && typeof p.conversionPreset === 'object' && !Array.isArray(p.conversionPreset)) {
+      applyConversionPresetToForm(p.conversionPreset)
+    }
 
     const banner = document.createElement('div')
     banner.className = 'product-context-banner'
@@ -686,132 +1279,8 @@ async function showProductContext() {
 }
 
 /* ═══════════════════════════════════════════════
-   GTIN / Artikelstammdaten
-   ═══════════════════════════════════════════════ */
-async function loadGtinConfig() {
-  const dot  = $('gtinStatusDot')
-  const text = $('gtinStatusText')
-  if (!dot || !text) return
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/gtin/config`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const cfg = await res.json()
-
-    if (cfg.enabled && cfg.rowCount > 0) {
-      dot.className  = 'gtin-status-dot ok'
-      const name = cfg.databasePath ? cfg.databasePath.split(/[/\\]/).pop() : '–'
-      text.textContent = `${cfg.rowCount} Einträge · ${name}`
-    } else if (cfg.enabled && cfg.rowCount === 0) {
-      dot.className  = 'gtin-status-dot warn'
-      text.textContent = 'Aktiviert – keine Daten geladen'
-    } else {
-      dot.className  = 'gtin-status-dot off'
-      text.textContent = 'Deaktiviert (GTIN_ENABLED=false)'
-    }
-  } catch (_) {
-    if (dot) { dot.className = 'gtin-status-dot fail'; }
-    if (text) text.textContent = 'Status nicht abrufbar'
-  }
-}
-
-async function uploadGtinDatabase(file) {
-  const statusEl = $('gtinUploadStatus')
-  if (statusEl) { statusEl.hidden = false; statusEl.className = 'gtin-upload-status loading'; statusEl.textContent = `„${file.name}" wird hochgeladen …` }
-
-  const form = new FormData()
-  form.append('file', file)
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/gtin/upload`, { method: 'POST', body: form })
-    const data = await res.json()
-    if (res.ok && data.success) {
-      if (statusEl) { statusEl.className = 'gtin-upload-status ok'; statusEl.textContent = `✓ ${data.rowCount} Einträge importiert` }
-    } else {
-      if (statusEl) { statusEl.className = 'gtin-upload-status fail'; statusEl.textContent = `Fehler: ${data.error || res.status}` }
-    }
-    await loadGtinConfig()
-  } catch (err) {
-    if (statusEl) { statusEl.className = 'gtin-upload-status fail'; statusEl.textContent = `Upload fehlgeschlagen: ${err.message}` }
-  }
-}
-
-async function lookupGtin() {
-  const input  = $('gtinLookupInput')
-  const result = $('gtinLookupResult')
-  if (!input || !result) return
-  const q = input.value.trim()
-  if (!q) return
-
-  result.hidden = false
-  result.className = 'gtin-lookup-result loading'
-  result.textContent = 'Suche …'
-
-  const isGtin = /^\d{8,14}$/.test(q)
-  const param  = isGtin ? `gtin=${encodeURIComponent(q)}` : `articleNumber=${encodeURIComponent(q)}`
-  try {
-    const res  = await fetch(`${API_BASE}/api/v1/gtin/filename?${param}`)
-    const data = await res.json()
-    if (res.ok && data.filename) {
-      result.className = 'gtin-lookup-result ok'
-      result.innerHTML = `
-        <span class="gtin-result-label">Dateiname:</span>
-        <code class="gtin-result-filename">${escapeHtml(data.filename)}</code>
-        ${data.productName ? `<span class="gtin-result-meta">${escapeHtml(data.productName)}</span>` : ''}
-        ${data.source === 'fallback' ? `<span class="gtin-result-warn">Kein Eintrag gefunden – Fallback</span>` : ''}
-      `
-    } else {
-      result.className = 'gtin-lookup-result fail'
-      result.textContent = data.error || 'Nicht gefunden'
-    }
-  } catch (err) {
-    result.className = 'gtin-lookup-result fail'
-    result.textContent = `Fehler: ${err.message}`
-  }
-}
-
-function bindGtinSection() {
-  const uploadZone = $('gtinDbUpload')
-  const fileInput  = $('gtinFileInput')
-  const lookupBtn  = $('btnGtinLookup')
-  const lookupInput = $('gtinLookupInput')
-
-  if (uploadZone) {
-    uploadZone.addEventListener('click', () => fileInput?.click())
-    uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('drag-over') })
-    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'))
-    uploadZone.addEventListener('drop', (e) => {
-      e.preventDefault(); uploadZone.classList.remove('drag-over')
-      const file = [...e.dataTransfer.files].find(f => /\.(csv|xlsx)$/i.test(f.name))
-      if (file) uploadGtinDatabase(file)
-    })
-  }
-  if (fileInput) fileInput.addEventListener('change', (e) => {
-    const file = e.target.files?.[0]
-    if (file) uploadGtinDatabase(file)
-    fileInput.value = ''
-  })
-  if (lookupBtn) lookupBtn.addEventListener('click', lookupGtin)
-  if (lookupInput) lookupInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') lookupGtin() })
-}
-
-/* ═══════════════════════════════════════════════
    Init
    ═══════════════════════════════════════════════ */
-async function checkAiHealth() {
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/ai/health`)
-    const ok = res.ok && (await res.json())?.available !== false
-    const row = $('optClaudeRow')
-    const cb  = $('optClaudeAI')
-    const hint = $('optClaudeHint')
-    if (row) row.style.opacity = ok ? '1' : '0.4'
-    if (cb)  cb.disabled = !ok
-    if (hint) hint.textContent = ok ? 'verfügbar' : 'nicht verfügbar'
-  } catch (_) {
-    const row = $('optClaudeRow')
-    if (row) row.style.opacity = '0.4'
-  }
-}
-
 function bindOptions() {
   $('optAutoLabel')?.addEventListener('change', (e) => {
     const row = $('optClaudeRow')
@@ -819,16 +1288,53 @@ function bindOptions() {
     const cb = $('optClaudeAI')
     if (cb && !e.target.checked) cb.checked = false
   })
+
+  // Export rotation vs Y-up: mutually exclusive
+  function syncExportRotationVsYUp() {
+    const bakeYUp = $('optBakeYUp')
+    const rotateAxis = $('optRotateAxis')
+    const rotateDegrees = $('optRotateDegrees')
+    if (!bakeYUp || !rotateAxis) return
+    if (bakeYUp.checked) {
+      rotateAxis.value = ''
+      if (rotateDegrees) rotateDegrees.disabled = true
+    } else {
+      if (rotateDegrees) rotateDegrees.disabled = !(rotateAxis.value === 'X' || rotateAxis.value === 'Y' || rotateAxis.value === 'Z')
+    }
+  }
+  function onYUpChange() {
+    const bakeYUp = $('optBakeYUp')
+    const rotateAxis = $('optRotateAxis')
+    if (bakeYUp?.checked && rotateAxis) {
+      rotateAxis.value = ''
+      const rd = $('optRotateDegrees')
+      if (rd) rd.disabled = true
+    }
+  }
+  function onRotateAxisChange() {
+    const bakeYUp = $('optBakeYUp')
+    const axis = $('optRotateAxis')
+    const rd = $('optRotateDegrees')
+    if (axis?.value === 'X' || axis?.value === 'Y' || axis?.value === 'Z') {
+      if (bakeYUp) bakeYUp.checked = false
+      if (rd) rd.disabled = false
+    } else if (rd) rd.disabled = true
+  }
+  $('optBakeYUp')?.addEventListener('change', onYUpChange)
+  $('optRotateAxis')?.addEventListener('change', onRotateAxisChange)
+  syncExportRotationVsYUp()
 }
 
 function init() {
   bindUpload()
+  bindColorMapping()
   bindJobsFilters()
   bindGtinSection()
   bindOptions()
   checkHealth()
   loadGtinConfig()
   checkAiHealth()
+  const mappingLoaded = loadProjectColorMapping()
   loadUploadFolders()
   setInterval(checkHealth, 30000)
   renderJobs()
@@ -840,9 +1346,11 @@ function init() {
     jobsCache.unshift({ jobId: MONITOR_JOB, status: 'processing' })
     renderJobs()
     pollJobProgress(MONITOR_JOB)
+    void ensureNotificationPermission()
+    setConvIndicator('running')
   }
   if (PRODUCT_ID) {
-    showProductContext()
+    void mappingLoaded.then(() => showProductContext())
   }
 }
 
