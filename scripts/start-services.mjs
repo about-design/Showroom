@@ -126,7 +126,8 @@ async function ensureApiDeps() {
   const nodeModules = path.join(apiDir, 'node_modules')
   if (!(await pathExists(nodeModules))) {
     log.info('Installing API Gateway dependencies...')
-    const { ok } = run('npm', ['install'], { cwd: apiDir, stdio: 'inherit' })
+    // Windows: npm ist npm.cmd – spawnSync ohne shell wirft EINVAL (Node 20.12+).
+    const { ok } = run('npm', ['install'], { cwd: apiDir, stdio: 'inherit', shell: process.platform === 'win32' })
     if (!ok) {
       log.error('API Gateway npm install failed.')
       return false

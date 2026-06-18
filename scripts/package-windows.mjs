@@ -86,7 +86,8 @@ function run(cmd, args, opts = {}) {
 function ensureBuild() {
   if (!existsSync(join(ROOT, 'dist', 'index.html'))) {
     console.log('dist/ fehlt – fuehre npm run build aus...')
-    run('npm', ['run', 'build'], { cwd: ROOT })
+    // Windows: npm ist npm.cmd – spawnSync ohne shell wirft EINVAL (Node 20.12+).
+    run('npm', ['run', 'build'], { cwd: ROOT, shell: process.platform === 'win32' })
   }
 }
 

@@ -5,6 +5,9 @@ export async function parseJsonResponse(res) {
     return raw ? JSON.parse(raw) : {}
   } catch (_) {
     const msg = (raw || res.statusText || `HTTP ${res.status}`).trim()
+    if (/^\s*<!DOCTYPE/i.test(msg) || /^\s*<html/i.test(msg)) {
+      throw new Error('Server lieferte HTML statt JSON — bitte Showroom neu starten (stop-showroom.cmd, dann start-showroom.cmd) und Seite mit Strg+F5 laden.')
+    }
     if (/too many requests|try again later/i.test(msg)) {
       throw new Error('Zu viele Anfragen von dieser Adresse. Bitte in einigen Minuten erneut versuchen.')
     }

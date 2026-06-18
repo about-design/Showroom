@@ -28,11 +28,27 @@ async function pathExists(abs) {
   }
 }
 
+/** public/models/output muss ein Verzeichnis sein (auf Windows manchmal Mac-Pfad-Stub-Datei). */
+async function ensureGlbOutputDir(dirPath, log) {
+  try {
+    const st = await stat(dirPath)
+    if (st.isDirectory()) return
+    if (st.isFile()) {
+      const backup = `${dirPath}.bak-${Date.now()}`
+      await rename(dirPath, backup)
+      log?.warn?.(`[dashboard-api] ${dirPath} war eine Datei – umbenannt nach ${backup}`)
+    }
+  } catch (e) {
+    if (e?.code !== 'ENOENT') throw e
+  }
+  await mkdir(dirPath, { recursive: true })
+}
+
 function headerAllowsOverwrite(req) {
   const v = String(req.headers['x-overwrite'] ?? '').trim().toLowerCase()
   return v === '1' || v === 'true' || v === 'yes'
 }
-import { watch as fsWatch } from 'node:fs'
+import { watch as fsWatch, createReadStream } from 'node:fs'
 import tailwindcss from '@tailwindcss/vite'
 import { createBlenderRenderMiddleware } from '../render/blenderRenderRoute.mjs'
 import { createLogger, withRequestLogger } from '../lib/logger.mjs'
@@ -210,6 +226,87 @@ async function bakeSpawnArgsMtlTextures(product, ROOT) {
   return args
 }
 
+/** Content-Type nach Dateiendung für statisch ausgelieferte Modell-/Asset-Dateien. */
+const STATIC_CONTENT_TYPES = {
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.usdz': 'model/vnd.usdz+zip',
+  '.bin': 'application/octet-stream',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.json': 'application/json',
+  '.obj': 'text/plain; charset=utf-8',
+  '.mtl': 'text/plain; charset=utf-8',
+}
+
+function staticContentType(filePath) {
+  const dot = filePath.lastIndexOf('.')
+  const ext = dot >= 0 ? filePath.slice(dot).toLowerCase() : ''
+  return STATIC_CONTENT_TYPES[ext] || 'application/octet-stream'
+}
+
+/**
+ * Liefert eine Datei statisch aus (GET/HEAD) inkl. Range-Unterstützung für große GLBs.
+ * Gibt true zurück, wenn die Anfrage bedient wurde; false, wenn der Aufrufer next() rufen soll.
+ */
+async function serveStaticFile(req, res, absPath) {
+  let st
+  try {
+    st = await stat(absPath)
+  } catch {
+    return false
+  }
+  if (!st.isFile()) return false
+
+  const total = st.size
+  const contentType = staticContentType(absPath)
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Accept-Ranges', 'bytes')
+  res.setHeader('Cache-Control', 'no-cache')
+
+  if (req.method === 'HEAD') {
+    res.setHeader('Content-Length', String(total))
+    res.statusCode = 200
+    res.end()
+    return true
+  }
+
+  const range = req.headers['range']
+  if (range) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim())
+    if (m) {
+      let start = m[1] === '' ? null : parseInt(m[1], 10)
+      let end = m[2] === '' ? null : parseInt(m[2], 10)
+      if (start === null && end !== null) {
+        start = Math.max(0, total - end)
+        end = total - 1
+      } else {
+        if (start === null || Number.isNaN(start)) start = 0
+        if (end === null || Number.isNaN(end)) end = total - 1
+      }
+      if (start > end || start >= total) {
+        res.statusCode = 416
+        res.setHeader('Content-Range', `bytes */${total}`)
+        res.end()
+        return true
+      }
+      end = Math.min(end, total - 1)
+      res.statusCode = 206
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`)
+      res.setHeader('Content-Length', String(end - start + 1))
+      createReadStream(absPath, { start, end }).pipe(res)
+      return true
+    }
+  }
+
+  res.statusCode = 200
+  res.setHeader('Content-Length', String(total))
+  createReadStream(absPath).pipe(res)
+  return true
+}
+
 export function dashboardApi() {
   const httpLog = createLogger('http')
   const frontendIngestLog = createLogger('frontend')
@@ -374,11 +471,38 @@ export function dashboardApi() {
     return results
   }
 
-  return {
-    name: 'dashboard-api',
-    configureServer(server) {
+  function attachDashboardApi(server, { isPreview = false } = {}) {
+      const serverPort = server.config?.server?.port ?? server.config?.preview?.port ?? 5050
+
+      // Im Preview-Modus liefert Vite nur `dist/` aus. Frisch konvertierte GLBs werden
+      // aber nach `public/models/output` registriert (siehe /__api/register-converted) und
+      // wären sonst nie sichtbar (der SPA-Fallback liefert index.html statt der GLB).
+      // Deshalb hier `/models/*` direkt aus `public/models` bedienen – wie im Dev-Modus.
+      if (isPreview) {
+        // Kaputte Mac-Pfad-Stub-„Dateien" (statt Verzeichnis) beim Start reparieren.
+        ensureGlbOutputDir(resolve(ROOT, 'public/models/output'), log).catch((e) =>
+          log.warn?.(`[dashboard-api] models/output-Reparatur fehlgeschlagen: ${e?.message || e}`),
+        )
+
+        server.middlewares.use('/models', async (req, res, next) => {
+          try {
+            if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+            const urlPath = decodeURIComponent((req.url || '').split('?')[0])
+            // req.url ist relativ zum Mount-Pfad '/models' → führender '/<rest>'.
+            const relPath = urlPath.replace(/^\/+/, '')
+            if (!relPath || relPath.includes('\0')) return next()
+            const absPath = resolve(MODELS_BASE, relPath)
+            if (!isSafePath(MODELS_BASE, absPath)) return next()
+            const served = await serveStaticFile(req, res, absPath)
+            if (!served) return next()
+          } catch (e) {
+            log.warn?.(`[dashboard-api] /models statisch fehlgeschlagen: ${e?.message || e}`)
+            return next()
+          }
+        })
+      }
       /** Basis-URL für Puppeteer-Thumbnails (muss mit Vite-Host/Port übereinstimmen). */
-      let viteServerOrigin = `http://127.0.0.1:${server.config?.server?.port ?? 5050}`
+      let viteServerOrigin = `http://127.0.0.1:${serverPort}`
       server.httpServer?.once('listening', () => {
         const addr = server.httpServer?.address()
         if (addr && typeof addr === 'object') {
@@ -408,8 +532,8 @@ export function dashboardApi() {
       // schicken und Produktdaten / Uploads manipulieren. Wir lassen nur
       // Requests mit passendem Origin/Referer oder gültigem Shared-Secret zu.
       const ALLOWED_ORIGINS = new Set([
-        `http://127.0.0.1:${server.config?.server?.port ?? 5050}`,
-        `http://localhost:${server.config?.server?.port ?? 5050}`,
+        `http://127.0.0.1:${serverPort}`,
+        `http://localhost:${serverPort}`,
         'http://127.0.0.1:5050',
         'http://localhost:5050',
       ])
@@ -1114,7 +1238,7 @@ export function dashboardApi() {
           const productForRal = productId ? data.products.find((x) => x.id === productId) : null
           const converterApiBase = process.env.CONVERTER_API_URL || 'http://localhost:3000'
 
-          await mkdir(outputDir, { recursive: true })
+          await ensureGlbOutputDir(outputDir, log)
 
           const added = []
           /** @type {{ absPath: string, safe: string, rawBasename: string, glbUrl: string, localPath: string, p: object }[]} */
@@ -1243,7 +1367,7 @@ export function dashboardApi() {
                         log.info(`[register-converted] Bake-RAL ${ralCode} (Quelle: ${ralSource})`)
           }
           try {
-            await mkdir(outputDir, { recursive: true })
+            await ensureGlbOutputDir(outputDir, log)
             await stat(bakeScript)
           } catch (e) {
                         log.scoped("register-converted").warn("Output-Verzeichnis/Bake-Skript:", e.message)
@@ -1376,8 +1500,8 @@ export function dashboardApi() {
                   needBake = true
                 } catch (_) {}
               }
-              // Direkter Kopier-Fallback: Konverter gibt absoluten Pfad zurück, symlink zeigt eventuell woanders hin.
-              if (!needBake && typeof absPath === 'string' && absPath.startsWith('/')) {
+              // Direkter Kopier-Fallback: Konverter gibt absoluten Pfad zurück (Unix + Windows).
+              if (!needBake && typeof absPath === 'string' && isAbsolute(absPath)) {
                 try {
                   const st = await stat(absPath)
                   if (st.isFile()) {
@@ -2367,6 +2491,15 @@ export function dashboardApi() {
           res.end(JSON.stringify({ error: e.message }))
         }
       })
+    }
+
+  return {
+    name: 'dashboard-api',
+    configureServer(server) {
+      attachDashboardApi(server, { isPreview: false })
+    },
+    configurePreviewServer(server) {
+      attachDashboardApi(server, { isPreview: true })
     },
     async closeBundle() {
       const ROOT = process.cwd()

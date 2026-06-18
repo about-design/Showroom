@@ -1,0 +1,53 @@
+META SHOWROOM – UEBERGABE FUER KOLLEGE (VOLLER STACK)
+========================================================
+
+Ziel: Showroom ansehen + Dashboard + CAD-Konvertierung (STEP/OBJ -> GLB)
+
+
+WAS DU DER IT GIBST
+--------------------
+Ordner: windows-rollout\
+
+  installer (hier ablegen nach Build)\
+    meta-showroom-1.0.0-win-x64.zip   (~618 MB)  <- HAUPTPAKET
+    META Showroom Setup 1.0.0.exe       (~88 MB)   <- optional, nur Viewer
+
+  anleitungen\
+    2 - IT-Rollout (voller Stack).md    <- Schritt-fuer-Schritt fuer IT
+    4 - Bedienung fuer Anwender.md      <- fuer den Kollegen
+
+  windows-it-rollout.md                 <- technische IT-Doku (Kopie)
+
+  Drittsoftware-Installer (IT legt selbst ab, Versionen pinnen):
+    - Node.js 20.11+ LTS (x64 MSI)
+    - Python 3.11+ (x64)
+    - Blender 4.2 LTS oder 5.x (x64 MSI)
+    - FreeCAD 1.1+ (x64)                <- fuer STEP-Konvertierung
+    - Memurai Developer Edition (Redis)
+
+
+ABLAUF BEI DER IT (KURZ)
+-------------------------
+1. Node, Python, Blender, FreeCAD, Memurai installieren (als Admin)
+2. ZIP nach C:\meta\showroom entpacken
+3. PowerShell als Admin:
+     cd C:\meta\showroom
+     powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Unattended
+4. Memurai-Dienst: Autostart + Start-Recht fuer Anwender (siehe IT-Anleitung)
+5. AV-Ausnahmen fuer C:\meta\showroom und %LOCALAPPDATA%\meta-showroom\
+
+
+ABLAUF FUER DEN KOLLEGEN (NACH IT-INSTALLATION)
+-------------------------------------------------
+1. Desktop-Verknuepfung "META Showroom" doppelklicken
+   (oder start-showroom.cmd in C:\meta\showroom)
+2. Browser oeffnet http://localhost:5050/
+3. Konverter: http://localhost:5050/converter.html
+4. Beenden: "META Showroom stoppen" auf dem Desktop
+
+
+WICHTIG
+-------
+- Voller Stack braucht Memurai (Redis). Ohne Memurai startet die Konvertierung nicht.
+- SmartScreen-Hinweis bei .exe: mit IT "Trotzdem ausfuehren" (nicht signiert).
+- ZIP enthaelt bereits blender-exporter / Converter – kein Extra-Ordner noetig.

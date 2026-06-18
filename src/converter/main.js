@@ -477,6 +477,9 @@ async function startConversion() {
     if (/failed to run preflight|failed to fetch|network error|connection refused|ECONNREFUSED/i.test(msg)) {
       logText += '\n\nHinweis: Läuft die Konverter-API? (z. B. npm run start:api und npm run start:mcp im Projektordner.)'
     }
+    if (/exit code 1|no objects found|step conversion|freecad|generic_error/i.test(msg)) {
+      logText += '\n\nHinweis STEP: Die Datei enthält vermutlich keine importierbare 3D-Geometrie. Bitte echte CAD-Datei (Solid) verwenden — nicht den Demo-Platzhalter test_cube.step. OBJ/ZIP mit Mesh funktionieren.'
+    }
     // Bei Preflight-Fehler: Button zum direkten Konvertieren anbieten (wenn Preflight versucht wurde)
     if (usePreflight && fallbackEl && selectedFiles.length > 0) {
       fallbackEl.hidden = false

@@ -23,24 +23,26 @@ const ROOT = path.resolve(__dirname, '..')
 const API_DIR = path.join(ROOT, 'blender-exporter', 'blender-mcp-converter', 'api-gateway')
 
 const WATCH = process.env.WATCH_MODE === '1' || process.env.API_WATCH === '1'
-const IS_WIN = process.platform === 'win32'
 
-function resolveBinary(name) {
-  const bin = path.join(API_DIR, 'node_modules', '.bin', IS_WIN ? `${name}.cmd` : name)
-  return fs.existsSync(bin) ? bin : null
+function resolveNodeModuleEntry(rel) {
+  const entry = path.join(API_DIR, 'node_modules', ...rel)
+  return fs.existsSync(entry) ? entry : null
 }
 
 let cmd
 let args
 
 if (WATCH) {
-  const nodemon = resolveBinary('nodemon')
+  // JS-Entry direkt mit node starten statt nodemon.cmd: Windows kann .cmd nicht
+  // ohne shell:true spawnen (EINVAL ab Node 20.12).
+  const nodemon = resolveNodeModuleEntry(['nodemon', 'bin', 'nodemon.js'])
   if (!nodemon) {
         log.scoped("run-api").error("nodemon nicht gefunden – führe `npm install` im api-gateway aus.")
     process.exit(1)
   }
-  cmd = nodemon
+  cmd = process.execPath
   args = [
+    nodemon,
     '--watch', 'src',
     '--ext', 'js,mjs,cjs,json',
     '--ignore', 'src/logs/*',
@@ -48,13 +50,15 @@ if (WATCH) {
     'src/server.js',
   ]
 } else {
-  cmd = IS_WIN ? 'npm.cmd' : 'npm'
-  args = ['start']
+  // Windows: npm.cmd spawn ohne shell wirft EINVAL – direkt node src/server.js
+  cmd = process.execPath
+  args = [path.join(API_DIR, 'src', 'server.js')]
 }
 
 const child = spawn(cmd, args, {
   cwd: API_DIR,
   stdio: 'inherit',
+  shell: false,
   env: {
     ...process.env,
     BLENDER_OUTPUT_DIR: ensureDir(resolveBlenderOutputDir()),

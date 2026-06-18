@@ -174,7 +174,14 @@ function showroomApp() {
 
       const urlProduct = new URLSearchParams(window.location.search).get('product')
       this._resolveInitialProduct(urlProduct).then((initial) => {
-        if (initial) this.selectProduct(initial)
+        if (initial) {
+          this.selectProduct(initial)
+        } else {
+          this.isLoading = false
+          this.loadStatus = this.products.length
+            ? 'Kein Startprodukt gefunden'
+            : 'Keine Produkte – GLB-Dateien nach public/models/ legen und npm run products:update'
+        }
       })
     },
 

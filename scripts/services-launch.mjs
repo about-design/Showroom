@@ -33,7 +33,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 const SYMLINK = join(homedir(), '.meta-showroom')
 const ECOSYSTEM = 'ecosystem.config.cjs'
-const PM2_BIN = join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'pm2.cmd' : 'pm2')
+// pm2 JS-Entry direkt mit node starten statt pm2.cmd: Windows kann .cmd nicht
+// ohne shell:true spawnen (EINVAL ab Node 20.12).
+const PM2_BIN = join(ROOT, 'node_modules', 'pm2', 'bin', 'pm2')
 
 if (!existsSync(PM2_BIN)) {
   log.error(`[services] pm2 nicht gefunden unter ${PM2_BIN}. Bitte \`npm install\` ausführen.`)
@@ -80,7 +82,7 @@ function preflight() {
 
 function pm2(args, { cwd = ROOT, interactive = false } = {}) {
   return new Promise((res) => {
-    const child = spawn(PM2_BIN, args, {
+    const child = spawn(process.execPath, [PM2_BIN, ...args], {
       cwd,
       stdio: 'inherit',
       env: { ...process.env },

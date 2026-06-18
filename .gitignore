@@ -9,5 +9,11 @@ logs/
 public/models/output/
 public/models/obj/
 public/models/products/
+public/models/*.bak-*
 src/data/products.json
 src/data/cad-index.json
+
+# Windows-Runtime/Build-Artefakte (nicht ins Repo)
+dump.rdb
+/query
+windows-rollout/installer*/

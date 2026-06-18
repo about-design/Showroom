@@ -66,7 +66,7 @@ export default defineConfig({
   },
   preview: {
     port: 5050,
-    strictPort: false,
+    strictPort: true,
     host: process.env.SHOWROOM_HOST || '127.0.0.1',
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
