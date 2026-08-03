@@ -40,6 +40,7 @@ import {
   measureGlbDimensionsMm,
   applyDimensionsToProductSpecs,
 } from '../lib/measureGlbDimensions.mjs'
+import { writePublicProducts } from '../lib/publicProducts.mjs'
 
 /** RAL-Vergleich für Mapping-Zielfilter (z. B. "RAL 7035", "ral7035"). */
 function normalizeRalFilterKey(s) {
@@ -210,11 +211,21 @@ async function bakeSpawnArgsMtlTextures(product, ROOT) {
   return args
 }
 
-export function dashboardApi() {
+/**
+ * Registriert alle Dashboard-/__api-Handler auf einer connect-kompatiblen Middleware-Instanz.
+ * Wird vom Vite-Plugin (Dev) und vom Standalone-Server (Produktion/Docker) genutzt.
+ *
+ * @param {import('connect').IncomingMessage} middlewares
+ * @param {{ root?: string, port?: number, serverOrigin?: string, getServerOrigin?: () => string }} [opts]
+ */
+export function registerDashboardApi(middlewares, opts = {}) {
   const httpLog = createLogger('http')
   const frontendIngestLog = createLogger('frontend')
   const log = createLogger('dashboard-api')
-  const ROOT = process.cwd()
+  const ROOT = opts.root ?? process.cwd()
+  const port = opts.port ?? Number(process.env.DASHBOARD_API_PORT || process.env.PORT || 5050)
+  const getServerOrigin = opts.getServerOrigin ?? (() => opts.serverOrigin ?? `http://127.0.0.1:${port}`)
+  const converterApiBase = (process.env.CONVERTER_API_URL || 'http://localhost:3000').replace(/\/$/, '')
   const PRODUCTS_PATH = resolve(ROOT, 'src/data/products.json')
   const MODELS_BASE = resolve(ROOT, 'public/models')
   const MODELS_UPLOAD_DIR = resolve(ROOT, 'public/models/products')
@@ -374,28 +385,8 @@ export function dashboardApi() {
     return results
   }
 
-  return {
-    name: 'dashboard-api',
-    configureServer(server) {
-      /** Basis-URL für Puppeteer-Thumbnails (muss mit Vite-Host/Port übereinstimmen). */
-      let viteServerOrigin = `http://127.0.0.1:${server.config?.server?.port ?? 5050}`
-      server.httpServer?.once('listening', () => {
-        const addr = server.httpServer?.address()
-        if (addr && typeof addr === 'object') {
-          const rawHost = addr.address
-          const host =
-            rawHost === '::' || rawHost === '0.0.0.0' || rawHost === '::1' ? '127.0.0.1' : rawHost
-          viteServerOrigin = `http://${host}:${addr.port}`
-        }
-      })
-      server.httpServer?.on('close', () => {
-        import('../thumbnail/headlessThumbnail.mjs')
-          .then((m) => m.closeThumbnailBrowser?.())
-          .catch(() => {})
-      })
-
-      // ── Request-Logging (alle /__api/*, inkl. 403) ─────────────────────
-      server.middlewares.use((req, res, next) => {
+  // ── Request-Logging (alle /__api/*, inkl. 403) ─────────────────────
+  middlewares.use((req, res, next) => {
         if (!req.url || !req.url.startsWith('/__api/')) return next()
         withRequestLogger(req, res, httpLog)
         next()
@@ -407,9 +398,9 @@ export function dashboardApi() {
       // JS Cross-Origin-Requests auf die unauthentifizierten __api-Endpoints
       // schicken und Produktdaten / Uploads manipulieren. Wir lassen nur
       // Requests mit passendem Origin/Referer oder gültigem Shared-Secret zu.
-      const ALLOWED_ORIGINS = new Set([
-        `http://127.0.0.1:${server.config?.server?.port ?? 5050}`,
-        `http://localhost:${server.config?.server?.port ?? 5050}`,
+  const ALLOWED_ORIGINS = new Set([
+        `http://127.0.0.1:${port}`,
+        `http://localhost:${port}`,
         'http://127.0.0.1:5050',
         'http://localhost:5050',
       ])
@@ -447,7 +438,7 @@ export function dashboardApi() {
         return false
       }
 
-      server.middlewares.use((req, res, next) => {
+      middlewares.use((req, res, next) => {
         if (!req.url || !req.url.startsWith('/__api/')) return next()
         if (isTrustedOrigin(req)) return next()
         res.statusCode = 403
@@ -476,7 +467,7 @@ export function dashboardApi() {
         return true
       }
 
-      server.middlewares.use(async (req, res, next) => {
+      middlewares.use(async (req, res, next) => {
         const pathOnly = req.url ? req.url.split('?')[0] : ''
         if (pathOnly !== '/__api/log' || req.method !== 'POST') return next()
         res.setHeader('Cache-Control', 'no-store')
@@ -527,7 +518,7 @@ export function dashboardApi() {
       })
 
       const blenderRenderMw = createBlenderRenderMiddleware({ ROOT, readBody, isSafePath })
-      server.middlewares.use('/__api/blender-render', blenderRenderMw)
+      middlewares.use('/__api/blender-render', blenderRenderMw)
 
       // ── Produkte: Cache + Mutex + atomares Schreiben ────────────────────
       let _productsCache = null
@@ -543,8 +534,7 @@ export function dashboardApi() {
         }
       }
 
-      /** Liefert immer eine tiefe Kopie – verhindert Mutationen am gecachten Graphen durch parallele Handler. */
-      async function loadProducts() {
+      async function ensureProductsCache() {
         if (_loadPromise) await _loadPromise
         if (!_productsCache) {
           _loadPromise = (async () => {
@@ -563,7 +553,23 @@ export function dashboardApi() {
           })()
           await _loadPromise
         }
-        return cloneProductsData(_productsCache)
+        return _productsCache
+      }
+
+      /** Liefert immer eine tiefe Kopie – verhindert Mutationen am gecachten Graphen durch parallele Handler. */
+      async function loadProducts() {
+        return cloneProductsData(await ensureProductsCache())
+      }
+
+      /**
+       * Nur-Lese-Zugriff ohne Deep-Clone – für GET-Handler, die aus den Produkten
+       * abgeleitete Kopien bilden (enrichProduct*) statt sie zu mutieren. Vermeidet
+       * den vollen JSON.stringify/parse-Durchlauf über den ganzen Katalog bei jedem
+       * Request (Liste/Suche/Pagination sind die mit Abstand häufigsten Aufrufe).
+       * Niemals `.products`-Einträge dieses Rückgabewerts direkt mutieren!
+       */
+      async function loadProductsRef() {
+        return ensureProductsCache()
       }
 
       // Atomares Write + Serialisierung: verhindert Race-Conditions bei
@@ -581,6 +587,7 @@ export function dashboardApi() {
             throw err
           }
           _productsCache = cloneProductsData(data)
+          void writePublicProducts(ROOT)
         })
         _saveQueue = task.catch(() => {}) // Queue darf nicht brechen
         return task
@@ -589,14 +596,20 @@ export function dashboardApi() {
       loadProducts().then((d) => {
                 log.info(`[dashboard-api] ${d?.products?.length ?? 0} Produkte geladen.`)
       }).catch(() => {})
+      // Dev-Server-Start: öffentliches (interne Felder gestrippt) products.public.json
+      // bereitstellen, das src/main.js statisch importiert.
+      void writePublicProducts(ROOT)
 
       // Invalidierung, wenn products.json extern (z.B. durch Scripts) geändert wurde
       try {
-        fsWatch(PRODUCTS_PATH, { persistent: false }, () => { _productsCache = null })
+        fsWatch(PRODUCTS_PATH, { persistent: false }, () => {
+          _productsCache = null
+          void writePublicProducts(ROOT)
+        })
       } catch {}
 
       // RAL-Palette unter /ralColors.json (für MTL-Colormatching-Tool)
-      server.middlewares.use(async (req, res, next) => {
+      middlewares.use(async (req, res, next) => {
         if (req.method !== 'GET' || (req.url && req.url.split('?')[0] !== '/ralColors.json')) return next()
         try {
           const ralPath = resolve(ROOT, 'src/data/ralColors.json')
@@ -609,7 +622,7 @@ export function dashboardApi() {
       })
 
       const PRODUCTS_SAVE_MAX_BYTES = 10 * 1024 * 1024 // 10 MB reicht für tausende Produkte
-      server.middlewares.use('/__api/save-products', async (req, res) => {
+      middlewares.use('/__api/save-products', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         res.setHeader('Content-Type', 'application/json')
         try {
@@ -650,7 +663,7 @@ export function dashboardApi() {
         }
       })
 
-      server.middlewares.use('/__api/upload-glb', async (req, res) => {
+      middlewares.use('/__api/upload-glb', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
           const rawName = decodeURIComponent(req.headers['x-filename'] || 'upload.glb')
@@ -685,7 +698,7 @@ export function dashboardApi() {
         }
       })
 
-      server.middlewares.use('/__api/upload-cad', async (req, res) => {
+      middlewares.use('/__api/upload-cad', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
           const rawName = decodeURIComponent(req.headers['x-filename'] || 'upload.obj')
@@ -721,7 +734,7 @@ export function dashboardApi() {
       })
 
       // POST /__api/delete-uploaded-cad  Body: { path: "/models/products/…" } — nur unter public/models/products
-      server.middlewares.use('/__api/delete-uploaded-cad', async (req, res) => {
+      middlewares.use('/__api/delete-uploaded-cad', async (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405
           res.end()
@@ -765,7 +778,7 @@ export function dashboardApi() {
       // Speichert unter public/mtl-ral-color-mapping.json – sofort für Konverter und Massenexport nutzbar.
       const MAPPING_FILE = resolve(ROOT, 'public', 'mtl-ral-color-mapping.json')
       const MAPPING_SAVE_MAX_BYTES = 1024 * 1024 // 1 MB
-      server.middlewares.use('/__api/save-mapping', async (req, res) => {
+      middlewares.use('/__api/save-mapping', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         res.setHeader('Content-Type', 'application/json')
         try {
@@ -802,7 +815,7 @@ export function dashboardApi() {
       })
 
       // POST /__api/save-vertex-reduction-rules  Body: { vertexReductionRules: [...] } — merged in public/mtl-ral-color-mapping.json
-      server.middlewares.use('/__api/save-vertex-reduction-rules', async (req, res) => {
+      middlewares.use('/__api/save-vertex-reduction-rules', async (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405
           res.end()
@@ -836,7 +849,7 @@ export function dashboardApi() {
       })
 
       // POST /__api/save-name-color-rules  Body: { nameColorRules: [...] } — merged in public/mtl-ral-color-mapping.json
-      server.middlewares.use('/__api/save-name-color-rules', async (req, res) => {
+      middlewares.use('/__api/save-name-color-rules', async (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405
           res.end()
@@ -909,7 +922,7 @@ export function dashboardApi() {
         })
       }
 
-      server.middlewares.use('/__api/mtl', async (req, res) => {
+      middlewares.use('/__api/mtl', async (req, res) => {
         res.setHeader('Content-Type', 'application/json')
         const method = String(req.method || '').toUpperCase()
         if (method !== 'GET' && method !== 'POST') {
@@ -1004,7 +1017,7 @@ export function dashboardApi() {
         return abs
       }
 
-      server.middlewares.use('/__api/obj-mtllib', async (req, res) => {
+      middlewares.use('/__api/obj-mtllib', async (req, res) => {
         res.setHeader('Content-Type', 'application/json')
         const method = String(req.method || '').toUpperCase()
         if (method !== 'GET' && method !== 'POST') {
@@ -1095,7 +1108,7 @@ export function dashboardApi() {
       // ── Konvertiertes GLB registrieren ──────────────────────────────────
       // POST /__api/register-converted
       // Body: { outputPaths: string[], cadFileUrls?: string[], productId?: string, conversionPreset?: object }
-      server.middlewares.use('/__api/register-converted', async (req, res) => {
+      middlewares.use('/__api/register-converted', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
           const body = JSON.parse((await readBody(req)).toString('utf-8'))
@@ -1270,17 +1283,30 @@ export function dashboardApi() {
                   if (!ralKey || !ralPalette[ralKey]?.hex) return null
                   return normalizeMappingHex(ralPalette[ralKey].hex)
                 }
-                mergedBakeOverrides = buildColorOverridesFromMapping(mapping, getRalHex)
-                const presetCo = productForRal.conversionPreset?.colorOverrides
-                if (presetCo && typeof presetCo === 'object' && !Array.isArray(presetCo)) {
-                  mergedBakeOverrides = { ...mergedBakeOverrides, ...presetCo }
-                }
-                if (!mergedBakeOverrides || Object.keys(mergedBakeOverrides).length === 0) {
+                // Hex-Mapping (Datei-Hexwerte) ist die Basisfarbe nur im Automatisch-Modus
+                // (defaultColor === __mapping__) bzw. wenn keine Produkt-Standardfarbe gesetzt ist.
+                // Bei explizit gesetztem RAL ist die Standardfarbe (--ral) die einheitliche Basis;
+                // das Hex-Mapping würde sie sonst verdrängen. Namens-/Geometrie-Regeln laufen in beiden Modi.
+                const dcTrim = String(productForRal?.defaultColor || '').trim()
+                const explicitColorMode = dcTrim !== '' && !isDefaultColorMappingAuto(dcTrim)
+                if (explicitColorMode) {
                   mergedBakeOverrides = null
-                } else {
                   log.scoped('register-converted').info(
-                    `Bake-Overrides aus Mapping/Preset: ${Object.keys(mergedBakeOverrides).length} Hex-Regel(n)`,
+                    `Explizite Standardfarbe (${dcTrim}) → Hex-Mapping übersprungen, --ral ist Basis`,
                   )
+                } else {
+                  mergedBakeOverrides = buildColorOverridesFromMapping(mapping, getRalHex)
+                  const presetCo = productForRal.conversionPreset?.colorOverrides
+                  if (presetCo && typeof presetCo === 'object' && !Array.isArray(presetCo)) {
+                    mergedBakeOverrides = { ...mergedBakeOverrides, ...presetCo }
+                  }
+                  if (!mergedBakeOverrides || Object.keys(mergedBakeOverrides).length === 0) {
+                    mergedBakeOverrides = null
+                  } else {
+                    log.scoped('register-converted').info(
+                      `Automatisch-Modus: Bake-Overrides aus Mapping/Preset: ${Object.keys(mergedBakeOverrides).length} Hex-Regel(n)`,
+                    )
+                  }
                 }
               } else {
                 mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, productForRal.conversionPreset)
@@ -1585,7 +1611,7 @@ export function dashboardApi() {
             const { refreshProductThumbnailsAfterConvert } = await import('../thumbnail/registerThumbnailHook.mjs')
             await refreshProductThumbnailsAfterConvert({
               ROOT,
-              viteServerOrigin,
+              viteServerOrigin: getServerOrigin(),
               glbRows,
               outputDir,
             })
@@ -1633,7 +1659,7 @@ export function dashboardApi() {
       // ── Produkt direkt aus Dashboard konvertieren ────────────────────────
       // POST /__api/convert-product
       // Body: { productId: string, options?: object }
-      server.middlewares.use('/__api/convert-product', async (req, res) => {
+      middlewares.use('/__api/convert-product', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         let debugProductId = ''
         try {
@@ -1777,10 +1803,16 @@ export function dashboardApi() {
           }
 
           const MAPPING_MAX_BYTES = 2 * 1024 * 1024 // 2 MB – größere Dateien führen zu „invalid request“
+          // Hex-Mapping (Datei-Hexwerte) nur im Automatisch-Modus (defaultColor === __mapping__)
+          // bzw. wenn keine Produkt-Standardfarbe gesetzt ist. Bei explizitem RAL ist die
+          // Standardfarbe (defaultColorHex) die einheitliche Basis; das distincte Mapping würde sie
+          // sonst schon in der Blender-Stufe verdrängen (identisch zur Bake-Logik in register-converted).
+          const dcTrimCp = String(rawProduct?.defaultColor || '').trim()
+          const explicitColorModeCp = dcTrimCp !== '' && !isDefaultColorMappingAuto(dcTrimCp)
           let colorOverridesFromMapping = null
           try {
             const mappingPath = resolve(ROOT, 'public', 'mtl-ral-color-mapping.json')
-            const mappingRaw = await readFile(mappingPath, 'utf-8').catch(() => null)
+            const mappingRaw = explicitColorModeCp ? null : await readFile(mappingPath, 'utf-8').catch(() => null)
             if (mappingRaw && mappingRaw.length <= MAPPING_MAX_BYTES) {
               const mapping = JSON.parse(mappingRaw)
               let ralPalette = null
@@ -1800,6 +1832,11 @@ export function dashboardApi() {
                             log.warn(`[convert-product] mtl-ral-color-mapping.json zu groß (${(mappingRaw.length / 1024 / 1024).toFixed(1)} MB), wird ignoriert. Bitte nur die nötigen Farben mappen (typisch < 100).`)
             }
           } catch (_) {}
+          if (explicitColorModeCp) {
+            log.scoped('convert-product').info(
+              `Explizite Standardfarbe (${dcTrimCp}) → Hex-Mapping übersprungen, defaultColorHex ist Basis`,
+            )
+          }
 
           const presetFull =
             rawProduct.conversionPreset && typeof rawProduct.conversionPreset === 'object' && !Array.isArray(rawProduct.conversionPreset)
@@ -1879,7 +1916,7 @@ export function dashboardApi() {
             }
             formPreflight.append('enablePreflight', 'true')
             try {
-              const preflightRes = await fetch('http://localhost:3000/api/v1/preflight', { method: 'POST', body: formPreflight })
+              const preflightRes = await fetch(`${converterApiBase}/api/v1/preflight`, { method: 'POST', body: formPreflight })
               const preflightData = await preflightRes.json()
               if (preflightRes.ok && preflightData.preflight && Array.isArray(preflightData.preflight.colorUsage)) {
                 const rgbToHex = (rgb) => {
@@ -1990,7 +2027,7 @@ export function dashboardApi() {
           if (debugEnabled) fetch('http://127.0.0.1:7616/ingest/17b72368-3f2f-4773-9ae3-6cdbf2000fca',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'96177d'},body:JSON.stringify({sessionId:'96177d',runId:debugRunId,hypothesisId:'H4',location:'scripts/vite-plugin/dashboardApi.mjs:convert-product:before-converter',message:'requesting converter API',data:{productId,filesToAppend:filesToAppend.length,hasStepCadInput,useGTINNaming,hasColorOverrides:Object.keys(mergedColorOverrides).length>0,defaultColorOverride:merged.defaultColorOverride==='true'},timestamp:Date.now()})}).catch(()=>{});
           // #endregion
 
-          const apiRes = await fetch('http://localhost:3000/api/v1/convert', { method: 'POST', body: form })
+          const apiRes = await fetch(`${converterApiBase}/api/v1/convert`, { method: 'POST', body: form })
           const raw = await apiRes.text()
           let apiData = {}
           try {
@@ -2019,7 +2056,7 @@ export function dashboardApi() {
 
       // ── Warteschlange leeren ───────────────────────────────────────────────
       // POST /__api/clear-queue
-      server.middlewares.use('/__api/clear-queue', async (req, res) => {
+      middlewares.use('/__api/clear-queue', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
           const Redis = (await import('ioredis')).default
@@ -2041,7 +2078,7 @@ export function dashboardApi() {
       })
 
       // GET /__api/mapping-target-options → sortierte RAL-Liste (Produkte + Mapping-JSON)
-      server.middlewares.use('/__api/mapping-target-options', async (req, res) => {
+      middlewares.use('/__api/mapping-target-options', async (req, res) => {
         if (req.method !== 'GET') { res.statusCode = 405; res.end(); return }
         try {
           const data = await loadProducts()
@@ -2091,7 +2128,7 @@ export function dashboardApi() {
       })
 
       // GET /__api/product-categories → distinct mainCategory (trimmed, non-empty)
-      server.middlewares.use('/__api/product-categories', async (req, res) => {
+      middlewares.use('/__api/product-categories', async (req, res) => {
         if (req.method !== 'GET') { res.statusCode = 405; res.end(); return }
         try {
           const data = await loadProducts()
@@ -2111,7 +2148,7 @@ export function dashboardApi() {
 
       // ── Paginierte Produkt-API ────────────────────────────────────────────
       // GET /__api/products?page=1&limit=24&search=&filter=all&status=all&targetRal=all&category=all
-      server.middlewares.use('/__api/products', async (req, res) => {
+      middlewares.use('/__api/products', async (req, res) => {
         if (req.method === 'PATCH') {
           // PATCH /__api/products/ID  (URL endet auf /ID)
           try {
@@ -2238,7 +2275,7 @@ export function dashboardApi() {
 
           // GET /__api/products/ID  →  einzelnes Produkt
           if (idParam && idParam !== '') {
-            const data = await loadProducts()
+            const data = await loadProductsRef()
             const p = data.products.find(x => x.id === idParam)
             if (!p) { res.statusCode = 404; res.end(JSON.stringify({ error: 'Nicht gefunden' })); return }
             const cadIdx = await getCadIndex()
@@ -2259,7 +2296,7 @@ export function dashboardApi() {
           const targetRalParam = (qs.get('targetRal') || 'all').trim()
           const categoryParam = (qs.get('category') || 'all').trim()
 
-          const data = await loadProducts()
+          const data = await loadProductsRef()
 
           // CAD-Index + Orientierungs-Erkennung
           const cadIdx = await getCadIndex()
@@ -2339,15 +2376,15 @@ export function dashboardApi() {
           const pages = Math.max(1, Math.ceil(total / limit))
           const safePage = Math.min(page, pages)
           const items = list.slice((safePage - 1) * limit, safePage * limit)
-          const stats = {
-            total:      allProducts.length,
-            withGlb:    allProducts.filter(p => p.glbFile).length,
-            withoutGlb: allProducts.filter(p => !p.glbFile).length,
-            withCad:    allProducts.filter(p => p.cadFiles?.length).length,
-            approved:   allProducts.filter(p => p._review?.status === 'approved').length,
-            rejected:   allProducts.filter(p => p._review?.status === 'rejected').length,
-            inReview:   allProducts.filter(p => p._review?.status === 'review').length,
-            withIssues: allProducts.filter(p => p._review?.issues?.length).length,
+          const stats = { total: allProducts.length, withGlb: 0, withoutGlb: 0, withCad: 0, approved: 0, rejected: 0, inReview: 0, withIssues: 0 }
+          for (const p of allProducts) {
+            if (p.glbFile) stats.withGlb++
+            else stats.withoutGlb++
+            if (p.cadFiles?.length) stats.withCad++
+            if (p._review?.status === 'approved') stats.approved++
+            else if (p._review?.status === 'rejected') stats.rejected++
+            else if (p._review?.status === 'review') stats.inReview++
+            if (p._review?.issues?.length) stats.withIssues++
           }
 
           res.setHeader('Content-Type', 'application/json')
@@ -2355,7 +2392,7 @@ export function dashboardApi() {
         } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })) }
       })
 
-      server.middlewares.use('/__api/list-models', async (req, res) => {
+      middlewares.use('/__api/list-models', async (req, res) => {
         if (req.method !== 'GET') { res.statusCode = 405; res.end(); return }
         try {
           await mkdir(MODELS_BASE, { recursive: true })
@@ -2366,6 +2403,34 @@ export function dashboardApi() {
           res.statusCode = 500
           res.end(JSON.stringify({ error: e.message }))
         }
+      })
+}
+
+/** Vite-Plugin: Dashboard-API nur im Dev-Server (configureServer). */
+export function dashboardApi() {
+  return {
+    name: 'dashboard-api',
+    configureServer(server) {
+      const port = server.config?.server?.port ?? 5050
+      const originRef = { value: `http://127.0.0.1:${port}` }
+      server.httpServer?.once('listening', () => {
+        const addr = server.httpServer?.address()
+        if (addr && typeof addr === 'object') {
+          const rawHost = addr.address
+          const host =
+            rawHost === '::' || rawHost === '0.0.0.0' || rawHost === '::1' ? '127.0.0.1' : rawHost
+          originRef.value = `http://${host}:${addr.port}`
+        }
+      })
+      server.httpServer?.on('close', () => {
+        import('../thumbnail/headlessThumbnail.mjs')
+          .then((m) => m.closeThumbnailBrowser?.())
+          .catch(() => {})
+      })
+      registerDashboardApi(server.middlewares, {
+        root: process.cwd(),
+        port,
+        getServerOrigin: () => originRef.value,
       })
     },
     async closeBundle() {

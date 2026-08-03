@@ -1,5 +1,6 @@
 import '../lib/loggerInit.js'
 import { createLogger } from '../lib/logger.js'
+import { resolveAssetUrl } from '../lib/resolveAssetUrl.js'
 const log = createLogger('dashboard')
 
 import './dashboard.css'
@@ -58,9 +59,11 @@ const productCache = new Map()
 let products = []          // wird NICHT mehr für das gesamte Laden genutzt
 let filteredProducts = []  // nur noch als lokaler Hilfspuffer
 
-let currentFilter = 'all'
-let currentStatus = 'all'
-let currentSort = 'default'
+/** Filter/Sortierung/Ansicht überleben einen Reload (localStorage) – Suche + Typ-/Status-Filter
+ *  + Sortierung + Grid/Liste, analog zu Zielfarbe/Kategorie/Seitengröße weiter unten. */
+let currentFilter = (typeof localStorage !== 'undefined' && localStorage.getItem('dash_filter')) || 'all'
+let currentStatus = (typeof localStorage !== 'undefined' && localStorage.getItem('dash_status')) || 'all'
+let currentSort = (typeof localStorage !== 'undefined' && localStorage.getItem('dash_sort')) || 'newest'
 /** Filter: all | __none__ | RAL xxxx (MTL-dominant oder explizite Standard-Farbe) */
 let mappingTargetFilter =
   (typeof localStorage !== 'undefined' && localStorage.getItem('dash_mappingTarget')) || 'all'
@@ -69,9 +72,9 @@ let categoryFilter =
   (typeof localStorage !== 'undefined' && localStorage.getItem('dash_mainCategory')) || 'all'
 /** Hauptkategorien: feste fünf + ggf. Legacy aus API; für Toolbar, Karten-Schnellwahl */
 let productCategoriesCache = []
-let currentView = 'grid'
+let currentView = (typeof localStorage !== 'undefined' && localStorage.getItem('dash_view')) || 'grid'
 let selectedProductId = null
-let searchQuery = ''
+let searchQuery = (typeof localStorage !== 'undefined' && localStorage.getItem('dash_search')) || ''
 let _searchDebounce = null
 let dirty = false
 
@@ -150,7 +153,7 @@ async function measureProductDimensionsMm(product, modelOverride = null) {
   if (!product?.glbFile) return null
   try {
     const gltf = await new Promise((resolve, reject) => {
-      gltfLoader.load(product.glbFile, resolve, undefined, reject)
+      gltfLoader.load(resolveAssetUrl(product.glbFile), resolve, undefined, reject)
     })
     const model = gltf.scene
     const toRad = Math.PI / 180
@@ -832,10 +835,24 @@ async function init() {
   }
 }
 
+/** Spiegelt die aus localStorage wiederhergestellten Filter/Sort/Ansicht-Werte in die Toolbar-UI. */
+function syncToolbarUiFromState() {
+  searchInput.value = searchQuery
+  filterGroup.querySelectorAll('.filter-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.filter === currentFilter))
+  statusFilterGroup.querySelectorAll('.filter-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.status === currentStatus))
+  sortSelect.value = currentSort
+  viewToggle.querySelectorAll('.view-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === currentView))
+  productGrid.classList.toggle('list-view', currentView === 'list')
+}
+
 /* ═══════════════════════════════════════════════
    Events
    ═══════════════════════════════════════════════ */
 function bindEvents() {
+  syncToolbarUiFromState()
   if (glbFileInput) {
     glbFileInput.accept = `.glb,.GLB,${CAD_ACCEPT_PICKER}`
   }
@@ -851,6 +868,7 @@ function bindEvents() {
     currentFilter = chip.dataset.filter
     filterGroup.querySelectorAll('.filter-chip').forEach(c =>
       c.classList.toggle('active', c.dataset.filter === currentFilter))
+    try { localStorage.setItem('dash_filter', currentFilter) } catch (_) {}
     applyFilters()
   })
 
@@ -860,11 +878,13 @@ function bindEvents() {
     currentStatus = chip.dataset.status
     statusFilterGroup.querySelectorAll('.filter-chip').forEach(c =>
       c.classList.toggle('active', c.dataset.status === currentStatus))
+    try { localStorage.setItem('dash_status', currentStatus) } catch (_) {}
     applyFilters()
   })
 
   sortSelect.addEventListener('change', () => {
     currentSort = sortSelect.value
+    try { localStorage.setItem('dash_sort', currentSort) } catch (_) {}
     currentPage = 1
     fetchPage()
   })
@@ -896,6 +916,7 @@ function bindEvents() {
     viewToggle.querySelectorAll('.view-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.view === currentView))
     productGrid.classList.toggle('list-view', currentView === 'list')
+    try { localStorage.setItem('dash_view', currentView) } catch (_) {}
   })
 
   productGrid.addEventListener('click', (e) => {
@@ -911,6 +932,8 @@ function bindEvents() {
   detailOverlay.addEventListener('click', closeDetail)
   $('#detailClose').addEventListener('click', closeDetail)
   $('#btnCancelDetail').addEventListener('click', closeDetail)
+  $('#detailPrev').addEventListener('click', () => navigateDetail(-1))
+  $('#detailNext').addEventListener('click', () => navigateDetail(1))
   $('#btnSaveDetail').addEventListener('click', saveDetail)
   $('#btnDeleteProduct').addEventListener('click', deleteProduct)
   $('#btnSave').addEventListener('click', saveToServer)
@@ -1025,6 +1048,11 @@ function bindEvents() {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault()
       saveToServer()
+    }
+    if (selectedProductId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return
+      e.preventDefault()
+      navigateDetail(e.key === 'ArrowLeft' ? -1 : 1)
     }
   })
 
@@ -1317,6 +1345,7 @@ function getReviewStatus(p) {
 
 function applyFilters() {
   searchQuery = searchInput.value.toLowerCase().trim()
+  try { localStorage.setItem('dash_search', searchQuery) } catch (_) {}
   currentPage = 1
   fetchPage()
 }
@@ -1413,7 +1442,7 @@ function renderGrid() {
     <div class="product-card" data-id="${p.id}" style="animation-delay:${Math.min(i, 12) * 25}ms">
       <div class="card-preview${hasThumb ? ' has-thumb' : ''}"${hasThumb ? '' : ` data-glb="${p.glbFile || ''}"`} data-product-id="${p.id}" data-default-color="${esc(p.defaultColor || '')}" data-surface-finish="${esc(p.surfaceFinish || 'auto')}">
         ${hasThumb
-          ? `<img class="card-preview-img" src="${esc(p.previewImage)}" loading="lazy" decoding="async" alt="" width="640" height="400">`
+          ? `<img class="card-preview-img" src="${esc(resolveAssetUrl(p.previewImage))}" loading="lazy" decoding="async" alt="" width="640" height="400">`
           : `<div class="card-preview-placeholder">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -1444,7 +1473,7 @@ function renderGrid() {
         <div class="card-tags">${tags}</div>
         <div class="card-actions">
           ${p.cadFiles?.length ? `<label class="card-action card-convert-select" onclick="event.stopPropagation()" title="Für Konvertierung auswählen"><input type="checkbox" class="convert-checkbox" data-product-id="${esc(p.id)}"><span class="convert-check-label">Auswählen</span></label>
-          <button class="card-action converter-link btn-convert-cad" data-product-id="${esc(p.id)}" onclick="event.stopPropagation()" title="${p.glbFile ? 'Neu konvertieren' : 'CAD → GLB konvertieren'}">
+          <button class="card-action converter-link btn-convert-cad" data-product-id="${esc(p.id)}" title="${p.glbFile ? 'Neu konvertieren' : 'CAD → GLB konvertieren'}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           </button>` : ''}
           ${p.glbFile ? `<a href="/?product=${encodeURIComponent(p.id)}" class="card-action showroom-link" onclick="event.stopPropagation()" title="Im Showroom öffnen" target="_blank">
@@ -1483,6 +1512,25 @@ function getOrientationInfo(p) {
   return null
 }
 
+/** z. B. "X+90°" / "Z-90°" / "Y+180°" – null, wenn die Achse nicht gedreht ist. */
+function formatAxisRotationTag(axis, deg) {
+  const v = Number(deg) || 0
+  if (!v) return null
+  const sign = v > 0 ? '+' : ''
+  return `${axis}${sign}${v}°`
+}
+
+/** Ein Tag pro Achse mit Live-Drehungs-Offset (rotationOffset) – zeigt Achse + Winkel direkt in der Karte. */
+function buildRotationTags(p) {
+  const ro = p?.rotationOffset
+  if (!ro) return ''
+  return ['x', 'y', 'z']
+    .map((axis) => formatAxisRotationTag(axis.toUpperCase(), ro[axis]))
+    .filter(Boolean)
+    .map((label) => `<span class="card-tag tag-rotation" title="Live-Drehungs-Offset – wird beim nächsten Konvertieren in die GLB eingebrannt">${label}</span>`)
+    .join('')
+}
+
 function buildTags(p) {
   let t = ''
   if (p.glbFile) t += '<span class="card-tag tag-glb">GLB</span>'
@@ -1490,6 +1538,7 @@ function buildTags(p) {
   if (p.cadFiles?.length) t += `<span class="card-tag tag-cad">CAD ${p.cadFiles.length}</span>`
   const ori = getOrientationInfo(p)
   if (ori) t += `<span class="card-tag ${ori.css}">${ori.label}</span>`
+  t += buildRotationTags(p)
   if (p.colorableMeshes?.length) t += '<span class="card-tag tag-colorable">Farben</span>'
   if (p.hotspots?.length > 1) t += `<span class="card-tag tag-hotspots">${p.hotspots.length} HS</span>`
   if (p.shopwareProductId) t += '<span class="card-tag tag-shopware">SW</span>'
@@ -1777,7 +1826,7 @@ async function persistCardThumbnailFromRenderer(product, renderer, container) {
     container.removeAttribute('data-glb')
     const img = document.createElement('img')
     img.className = 'card-preview-img'
-    img.src = data.previewImage
+    img.src = resolveAssetUrl(data.previewImage)
     img.loading = 'lazy'
     img.decoding = 'async'
     img.alt = ''
@@ -1818,7 +1867,7 @@ function loadPreview(product, container) {
   // Pool-Zähler sofort erhöhen – damit parallele IntersectionObserver-Bursts nicht erneut laden.
   previewRenderers.set(product.id, { renderer, scene, camera, animId: null, resizeObs: null, pending: true })
 
-  gltfLoader.load(product.glbFile, async (gltf) => {
+  gltfLoader.load(resolveAssetUrl(product.glbFile), async (gltf) => {
     const current = previewRenderers.get(product.id)
     if (!current || current.renderer !== renderer) {
       // Inzwischen via LRU evakuiert oder durch neuen Load ersetzt → alles verwerfen.
@@ -2650,6 +2699,70 @@ let detailPreviewCamera = null
 let detailPreviewModelRoot = null
 let detailMeshIsolateIndex = null
 /**
+ * Einzelteil-Auswahl (Meshes → GLB): Indizes der Meshes, die NICHT ins GLB
+ * exportiert werden sollen. Wird beim Speichern in Sichtbarkeits-Regeln mit
+ * `source: 'meshSelect'` übersetzt (analog zu manuell getippten Regex-Regeln,
+ * nur schneller per Checkbox).
+ */
+let detailMeshExcluded = new Set()
+/** true, sobald die Mesh-Checkbox-UI aus der geladenen Vorschau gebaut wurde. */
+let detailMeshSelectionReady = false
+
+/** Marker, der Checkbox-generierte Sichtbarkeits-Regeln von manuellen trennt. */
+const MESH_SELECT_RULE_SOURCE = 'meshSelect'
+
+/** Escaped einen String für die Verwendung als exakter Regex-Literal. */
+function escapeRegExpLiteral(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Exaktes `^Name$`-Pattern für eine Mesh-Auswahl-Regel. */
+function meshSelectPattern(name) {
+  return '^' + escapeRegExpLiteral(name) + '$'
+}
+
+/**
+ * Trennt gespeicherte Sichtbarkeits-Regeln in manuell getippte (Regex-Editor)
+ * und Checkbox-generierte (`source: 'meshSelect'`).
+ */
+function splitVisibilityRules(rules) {
+  const manual = []
+  const meshSelect = []
+  ;(Array.isArray(rules) ? rules : []).forEach((r) => {
+    if (r && typeof r === 'object' && r.source === MESH_SELECT_RULE_SOURCE) meshSelect.push(r)
+    else if (r) manual.push(r)
+  })
+  return { manual, meshSelect }
+}
+
+/**
+ * Baut die Sichtbarkeits-Regeln aus der aktuellen Mesh-Checkbox-Auswahl.
+ * Ist die Vorschau nicht geladen, bleiben die zuvor gespeicherten
+ * meshSelect-Regeln unverändert erhalten (nicht verwerfen!).
+ */
+function collectMeshSelectVisibilityRules() {
+  const prod = productCache.get(selectedProductId)
+  const existing = splitVisibilityRules(prod?.conversionPreset?.visibilityRules).meshSelect
+  if (!detailMeshSelectionReady || !detailPreviewModelRoot) return existing
+  const meshes = collectMeshesFromGroup(detailPreviewModelRoot)
+  const seen = new Set()
+  const out = []
+  meshes.forEach((m, i) => {
+    if (!detailMeshExcluded.has(i)) return
+    const name = (m.name || '').trim()
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    out.push({
+      action: 'hide',
+      target: 'mesh',
+      pattern: meshSelectPattern(name),
+      source: MESH_SELECT_RULE_SOURCE,
+      name,
+    })
+  })
+  return out
+}
+/**
  * Live-Drehung im Detail (Grad) – zentrale Quelle. Wird auch im Header gespiegelt
  * und beim nächsten Konvertieren als rotateAxis/rotateDegrees in die GLB eingebrannt.
  * Während der Übergangsphase (vor dem Konvertieren) wird sie weiterhin als
@@ -2816,6 +2929,7 @@ async function openDetail(id) {
   productGrid.querySelectorAll('.product-card').forEach(c => c.classList.toggle('selected', c.dataset.id === id))
 
   detailTitle.textContent = p.name
+  updateDetailNavState()
   detailOverlay.classList.add('open')
   detailPanel.classList.add('open')
 
@@ -2851,7 +2965,17 @@ async function openDetail(id) {
     </div>
     <div class="detail-section detail-mesh-parts" id="detailMeshPartsSection" hidden>
       <div class="detail-section-title">Einzelteile (Meshes)</div>
-      <p class="cc-muted" style="font-size:.72rem;margin:0 0 .5rem">Zeile: nur dieses Teil anzeigen · Kamera-Symbol: Ansicht · erneut: alle Teile.</p>
+      <p class="cc-muted" style="font-size:.72rem;margin:0 0 .5rem;line-height:1.4">
+        <strong>Häkchen</strong> = Teil kommt beim nächsten <strong>Neu konvertieren</strong> ins GLB. Häkchen entfernen = Teil wird aus dem Export entfernt
+        (schneller Weg für die <em>Sichtbarkeit beim Export</em> unten – erzeugt beim Speichern automatisch die passenden Regeln).<br>
+        Zeile anklicken: nur dieses Teil anzeigen · Kamera-Symbol: Ansicht · erneut: alle Teile.
+      </p>
+      <div class="detail-mesh-toolbar">
+        <span class="detail-mesh-sel-count" id="detailMeshSelCount"></span>
+        <span class="detail-mesh-toolbar-spacer"></span>
+        <button type="button" class="btn btn-ghost btn-sm" id="detailMeshSelectAll">Alle</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="detailMeshSelectNone">Keine</button>
+      </div>
       <div id="detailMeshPartsList" class="detail-mesh-parts-list"></div>
       <button type="button" class="detail-mesh-clear-btn" id="detailMeshClearBtn" hidden>Alle Teile anzeigen</button>
     </div>
@@ -2999,8 +3123,11 @@ async function openDetail(id) {
         <strong>Unabhängig</strong> von <em>Namens-Farbregeln</em> und <em>Vertex-Reduktion</em>: alle drei Systeme
         sind isoliert. Namens-Farbregeln werden auf das gelaufen, was nach dem Ausblenden/Reduzieren noch übrig ist —
         und werden auch dann angewandt, wenn Sichtbarkeit oder Reduktion (z. B. wegen Konfigurationsfehler) übersprungen werden.
+        <br>
+        <strong>Tipp:</strong> Zum reinen Ein-/Ausschließen einzelner Teile ist die Liste <strong>„Einzelteile (Meshes)"</strong> oben schneller –
+        deren Häkchen erzeugen beim Speichern automatisch die passenden Regeln. Hier bleiben nur die von Hand getippten Regex-Regeln.
       </p>
-      <div id="detailVisibilityRulesRows" class="detail-visibility-rules-rows">${renderVisibilityRuleRowsHtml(p.conversionPreset?.visibilityRules)}</div>
+      <div id="detailVisibilityRulesRows" class="detail-visibility-rules-rows">${renderVisibilityRuleRowsHtml(splitVisibilityRules(p.conversionPreset?.visibilityRules).manual)}</div>
       <button type="button" class="btn btn-ghost btn-sm" id="detailVisibilityRuleAdd">+ Regel hinzufügen</button>
     </div>
 
@@ -3961,7 +4088,9 @@ function applyDetailMeshVisibility() {
   const meshes = collectMeshesFromGroup(detailPreviewModelRoot)
   const idx = detailMeshIsolateIndex
   meshes.forEach((m, i) => {
-    m.visible = idx === null || i === idx
+    // Isolation (Klick auf Zeile) hat Vorrang, damit man auch ausgeschlossene
+    // Teile inspizieren kann. Sonst: sichtbar = ins GLB aufgenommen.
+    m.visible = idx === null ? !detailMeshExcluded.has(i) : i === idx
   })
 }
 
@@ -3971,9 +4100,19 @@ function updateDetailMeshRowClasses() {
   list.querySelectorAll('.detail-mesh-row').forEach((row) => {
     const i = parseInt(row.dataset.meshIdx, 10)
     row.classList.toggle('is-active', detailMeshIsolateIndex === i)
+    row.classList.toggle('is-excluded', detailMeshExcluded.has(i))
   })
   const clearBtn = document.getElementById('detailMeshClearBtn')
   if (clearBtn) clearBtn.hidden = detailMeshIsolateIndex === null
+  updateDetailMeshSelectionCount()
+}
+
+function updateDetailMeshSelectionCount() {
+  const el = document.getElementById('detailMeshSelCount')
+  if (!el || !detailPreviewModelRoot) return
+  const total = collectMeshesFromGroup(detailPreviewModelRoot).length
+  const included = total - detailMeshExcluded.size
+  el.textContent = `${included}/${total} im GLB`
 }
 
 function clearDetailMeshIsolate() {
@@ -4023,6 +4162,8 @@ function buildDetailMeshPartsUI() {
   const clearBtn = document.getElementById('detailMeshClearBtn')
   if (!detailPreviewModelRoot || !listEl) return
   detailMeshIsolateIndex = null
+  detailMeshExcluded = new Set()
+  detailMeshSelectionReady = false
   const meshes = collectMeshesFromGroup(detailPreviewModelRoot)
   if (section) section.hidden = meshes.length === 0
   if (!meshes.length) {
@@ -4030,11 +4171,29 @@ function buildDetailMeshPartsUI() {
     if (clearBtn) clearBtn.hidden = true
     return
   }
+
+  // Vorauswahl aus gespeicherten Checkbox-Regeln (source: meshSelect) ableiten.
+  const prod = productCache.get(selectedProductId)
+  const savedMeshSelect = splitVisibilityRules(prod?.conversionPreset?.visibilityRules).meshSelect
+  const excludedNames = new Set(
+    savedMeshSelect
+      .map((r) => (typeof r?.name === 'string' ? r.name.trim() : ''))
+      .filter(Boolean),
+  )
+  meshes.forEach((mesh, i) => {
+    const name = (mesh.name || '').trim()
+    if (name && excludedNames.has(name)) detailMeshExcluded.add(i)
+  })
+
   listEl.innerHTML = meshes
     .map((mesh, i) => {
       const name = mesh.name || '(ohne Namen)'
       const vc = mesh.geometry?.attributes?.position?.count ?? 0
-      return `<div class="detail-mesh-row" data-mesh-idx="${i}">
+      const checked = detailMeshExcluded.has(i) ? '' : 'checked'
+      return `<div class="detail-mesh-row${detailMeshExcluded.has(i) ? ' is-excluded' : ''}" data-mesh-idx="${i}">
+        <label class="detail-mesh-inc" title="Ins GLB aufnehmen" data-mesh-inc-wrap>
+          <input type="checkbox" class="detail-mesh-inc-cb" data-mesh-inc="${i}" ${checked}>
+        </label>
         <span class="detail-mesh-name" title="${esc(name)}">${esc(name)}</span>
         <span class="detail-mesh-v">${vc.toLocaleString('de-DE')} V</span>
         <button type="button" class="detail-mesh-focus-btn" data-mesh-focus="${i}" title="Kamera auf dieses Teil">
@@ -4044,6 +4203,10 @@ function buildDetailMeshPartsUI() {
     })
     .join('')
   if (clearBtn) clearBtn.hidden = true
+  detailMeshSelectionReady = true
+  applyDetailMeshVisibility()
+  updateDetailMeshRowClasses()
+
   listEl.onclick = (e) => {
     const focusBtn = e.target.closest('[data-mesh-focus]')
     if (focusBtn) {
@@ -4051,12 +4214,45 @@ function buildDetailMeshPartsUI() {
       focusDetailMeshPart(parseInt(focusBtn.getAttribute('data-mesh-focus'), 10))
       return
     }
+    // Klicks auf die Checkbox nicht als Zeilen-Isolation behandeln.
+    if (e.target.closest('[data-mesh-inc-wrap]')) return
     const row = e.target.closest('.detail-mesh-row')
     if (row) toggleDetailMeshIsolate(parseInt(row.dataset.meshIdx, 10))
+  }
+  listEl.onchange = (e) => {
+    const cb = e.target.closest('.detail-mesh-inc-cb')
+    if (!cb) return
+    const i = parseInt(cb.getAttribute('data-mesh-inc'), 10)
+    if (cb.checked) detailMeshExcluded.delete(i)
+    else detailMeshExcluded.add(i)
+    applyDetailMeshVisibility()
+    updateDetailMeshRowClasses()
   }
   if (clearBtn) {
     clearBtn.onclick = () => clearDetailMeshIsolate()
   }
+
+  const allBtn = document.getElementById('detailMeshSelectAll')
+  const noneBtn = document.getElementById('detailMeshSelectNone')
+  if (allBtn) allBtn.onclick = () => setAllDetailMeshIncluded(true)
+  if (noneBtn) noneBtn.onclick = () => setAllDetailMeshIncluded(false)
+}
+
+/** Alle Meshes ins GLB aufnehmen (true) oder ausschließen (false). */
+function setAllDetailMeshIncluded(included) {
+  if (!detailPreviewModelRoot) return
+  const meshes = collectMeshesFromGroup(detailPreviewModelRoot)
+  detailMeshExcluded = new Set()
+  if (!included) meshes.forEach((_, i) => detailMeshExcluded.add(i))
+  const listEl = document.getElementById('detailMeshPartsList')
+  if (listEl) {
+    listEl.querySelectorAll('.detail-mesh-inc-cb').forEach((cb) => {
+      const i = parseInt(cb.getAttribute('data-mesh-inc'), 10)
+      cb.checked = !detailMeshExcluded.has(i)
+    })
+  }
+  applyDetailMeshVisibility()
+  updateDetailMeshRowClasses()
 }
 
 function applyPreviewImageToProductCard(productId, previewImageUrl) {
@@ -4086,7 +4282,7 @@ function applyPreviewImageToProductCard(productId, previewImageUrl) {
     img.height = 400
     wrap.insertBefore(img, wrap.firstChild)
   }
-  img.src = previewImageUrl
+  img.src = resolveAssetUrl(previewImageUrl)
   const ph = wrap.querySelector('.card-preview-placeholder')
   if (ph) ph.style.display = 'none'
 }
@@ -4176,7 +4372,7 @@ function loadDetailPreview(product) {
   controls.autoRotateSpeed = 1.2
   detailControls = controls
 
-  gltfLoader.load(product.glbFile, async (gltf) => {
+  gltfLoader.load(resolveAssetUrl(product.glbFile), async (gltf) => {
     const model = gltf.scene
     stripModelLights(model)
     enableShadowsOnModel(model)
@@ -4261,6 +4457,8 @@ function loadDetailPreview(product) {
 
 function disposeDetailPreview() {
   detailMeshIsolateIndex = null
+  detailMeshExcluded = new Set()
+  detailMeshSelectionReady = false
   detailPreviewModelRoot = null
   detailPreviewCamera = null
   if (detailPreviewScene) {
@@ -4292,6 +4490,34 @@ function disposeDetailPreview() {
     safeForceWebGLContextLoss(detailRenderer)
   }
   detailRenderer = null
+}
+
+/** Wechselt im offenen Detail-Panel zum vorherigen (-1) / nächsten (+1) Produkt der aktuellen Seite. */
+function navigateDetail(delta) {
+  if (!selectedProductId || !currentPageProducts.length) return
+  const idx = currentPageProducts.findIndex((p) => p.id === selectedProductId)
+  if (idx === -1) return
+  const nextIdx = idx + delta
+  if (nextIdx < 0 || nextIdx >= currentPageProducts.length) return
+  void openDetail(currentPageProducts[nextIdx].id)
+}
+
+/** Aktualisiert Vor/Zurück-Buttons + Positionsanzeige ("12 / 24") im Detail-Header. */
+function updateDetailNavState() {
+  const prevBtn = document.getElementById('detailPrev')
+  const nextBtn = document.getElementById('detailNext')
+  const posEl = document.getElementById('detailPosition')
+  if (!prevBtn || !nextBtn) return
+  const idx = currentPageProducts.findIndex((p) => p.id === selectedProductId)
+  if (idx === -1) {
+    prevBtn.disabled = true
+    nextBtn.disabled = true
+    if (posEl) posEl.textContent = ''
+    return
+  }
+  prevBtn.disabled = idx <= 0
+  nextBtn.disabled = idx >= currentPageProducts.length - 1
+  if (posEl) posEl.textContent = `${idx + 1} / ${currentPageProducts.length}`
 }
 
 function closeDetail() {
@@ -4370,7 +4596,11 @@ async function saveDetail() {
       next.vertexReductionRules = collectReductionRulesFromContainer(vrContainer)
     }
     if (visContainer) {
-      next.visibilityRules = collectVisibilityRulesFromContainer(visContainer)
+      // Manuelle Regex-Regeln aus dem Editor + Checkbox-Auswahl (meshSelect).
+      // meshSelect-Regeln stehen danach, damit sie bei last-wins gewinnen.
+      const manualRules = collectVisibilityRulesFromContainer(visContainer)
+      const meshSelectRules = collectMeshSelectVisibilityRules()
+      next.visibilityRules = [...manualRules, ...meshSelectRules]
     }
     changes.conversionPreset = next
   }
@@ -4420,21 +4650,53 @@ async function saveDetail() {
   }
 }
 
-async function deleteProduct() {
+/** productId → { timeoutId, cardEl } – Löschungen, die noch per Toast rückgängig gemacht werden können. */
+const pendingDeletes = new Map()
+const DELETE_UNDO_MS = 6000
+
+/**
+ * Löschen ohne blockierenden Browser-Dialog: Karte wird sofort deaktiviert/abgeblendet
+ * ("Wird gelöscht …"), der eigentliche DELETE-Request läuft erst nach einem Zeitfenster
+ * mit Undo-Toast. Klick auf „Rückgängig" storniert ihn vollständig, es wurde nie etwas
+ * an den Server geschickt.
+ */
+function deleteProduct() {
   if (!selectedProductId) return
   const p = productCache.get(selectedProductId)
   if (!p) return
-  if (!confirm(`Produkt „${p.name}" wirklich löschen?`)) return
+  const id = selectedProductId
+  closeDetail()
 
+  const cardEl = productGrid.querySelector(`.product-card[data-id="${cssEscapeId(id)}"]`)
+  if (cardEl) cardEl.classList.add('pending-delete')
+
+  const timeoutId = setTimeout(() => void finalizeDelete(id), DELETE_UNDO_MS)
+  pendingDeletes.set(id, { timeoutId, cardEl })
+
+  undoToast(`Produkt „${p.name}" wird gelöscht …`, () => cancelPendingDelete(id), DELETE_UNDO_MS)
+}
+
+function cancelPendingDelete(id) {
+  const pending = pendingDeletes.get(id)
+  if (!pending) return
+  clearTimeout(pending.timeoutId)
+  pendingDeletes.delete(id)
+  pending.cardEl?.classList.remove('pending-delete')
+}
+
+async function finalizeDelete(id) {
+  const pending = pendingDeletes.get(id)
+  pendingDeletes.delete(id)
+  const p = productCache.get(id)
   try {
-    const res = await fetch(`/__api/products/${encodeURIComponent(selectedProductId)}`, { method: 'DELETE' })
+    const res = await fetch(`/__api/products/${encodeURIComponent(id)}`, { method: 'DELETE' })
     const data = await parseJsonResponse(res)
     if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
-    productCache.delete(selectedProductId)
-    closeDetail()
-    toast(`Produkt „${p.name}" gelöscht`, 'info')
-    fetchPage()
+    productCache.delete(id)
+    pending?.cardEl?.remove()
+    toast(`Produkt „${p?.name || id}" gelöscht`, 'info')
   } catch (err) {
+    pending?.cardEl?.classList.remove('pending-delete')
     toast(`Löschen fehlgeschlagen: ${err.message}`, 'error')
   }
 }
@@ -5187,6 +5449,36 @@ function toast(msg, type = 'info', duration = 3000) {
     el.classList.add('removing')
     setTimeout(() => el.remove(), 200)
   }, ms)
+}
+
+/**
+ * Toast mit "Rückgängig"-Aktion (z. B. für Löschen). `onUndo` wird beim Klick
+ * aufgerufen und der Toast sofort entfernt; ohne Klick verschwindet er nach `duration`.
+ * @returns {() => void} Schließt den Toast programmatisch (z. B. wenn das Zeitfenster anderweitig endet).
+ */
+function undoToast(msg, onUndo, duration = 6000) {
+  const el = document.createElement('div')
+  el.className = 'toast toast-info'
+  const label = document.createElement('span')
+  label.textContent = msg
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'toast-undo-btn'
+  btn.textContent = 'Rückgängig'
+  el.append(label, btn)
+  toastContainer.appendChild(el)
+
+  const remove = () => {
+    el.classList.add('removing')
+    setTimeout(() => el.remove(), 200)
+  }
+  const timeoutId = setTimeout(remove, duration)
+  btn.addEventListener('click', () => {
+    clearTimeout(timeoutId)
+    onUndo()
+    remove()
+  })
+  return remove
 }
 
 /* esc, formatDate: ./modules/helpers.js */

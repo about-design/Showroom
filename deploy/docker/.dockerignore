@@ -1,0 +1,14 @@
+# META Showroom – Docker Build-Kontext (Repo-Root)
+node_modules/
+dist/
+release/
+logs/
+.git/
+.cursor/
+vendor/
+public/models/
+**/.DS_Store
+*.log
+.env
+.env.*
+!deploy/docker/.env.example

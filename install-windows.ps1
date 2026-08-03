@@ -1,2 +1,2 @@
-# Wrapper – IT-Installation aus Projektroot
+# Wrapper - IT-Installation aus Projektroot
 & "$PSScriptRoot\scripts\install-windows.ps1" @args

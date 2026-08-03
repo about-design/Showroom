@@ -1,4 +1,4 @@
-# META Showroom – IT-Installation (Windows, voller Stack)
+# META Showroom - IT-Installation (Windows, voller Stack)
 # Aufruf (Admin empfohlen):
 #   powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -Unattended
 #   powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -Update -Unattended
@@ -187,7 +187,7 @@ function Install-Shortcuts {
     $startCmd = Join-Path $ProjectRoot "start-showroom.cmd"
     $stopCmd = Join-Path $ProjectRoot "stop-showroom.cmd"
     if (-not (Test-Path $startCmd)) {
-        Write-Warn "start-showroom.cmd fehlt – Verknuepfungen uebersprungen"
+        Write-Warn "start-showroom.cmd fehlt - Verknuepfungen uebersprungen"
         return
     }
     New-DesktopShortcut -Name "META Showroom" -TargetPath $startCmd
@@ -215,7 +215,7 @@ function Install-Shortcuts {
 
 # --- Hauptablauf ---
 Write-Host ""
-Write-Host "META Showroom – IT-Installation" -ForegroundColor White
+Write-Host "META Showroom - IT-Installation" -ForegroundColor White
 Write-Host "Projektroot: $ProjectRoot" -ForegroundColor Gray
 if ($Update) { Write-Host "Modus: Update (venv wird neu aufgebaut falls noetig)" -ForegroundColor Gray }
 Write-Host ""
@@ -281,7 +281,7 @@ if (Test-Path $mcpDir) {
 Write-Step "Production-Build pruefen"
 Set-Location $ProjectRoot
 if (-not (Test-Path (Join-Path $ProjectRoot "dist\index.html"))) {
-    Write-Host "  dist/ fehlt – fuehre npm run build aus..."
+    Write-Host "  dist/ fehlt - fuehre npm run build aus..."
     npm run build
     if ($LASTEXITCODE -ne 0) { Write-Err "npm run build fehlgeschlagen"; exit 1 }
     Write-Ok "dist/ erstellt"
@@ -292,7 +292,7 @@ if (-not (Test-Path (Join-Path $ProjectRoot "dist\index.html"))) {
 Write-Step "Pre-Flight"
 node scripts/start-services.mjs
 if ($LASTEXITCODE -ne 0) {
-    Write-Warn "Pre-Flight mit Warnungen/Fehlern – siehe Ausgabe oben"
+    Write-Warn "Pre-Flight mit Warnungen/Fehlern - siehe Ausgabe oben"
 }
 
 Write-Step "Verknuepfungen"

@@ -456,6 +456,12 @@
       "finish": "verzinkt"
     },
     {
+      "target": "mesh",
+      "pattern": "vzk|verzinkt",
+      "ral": "RAL 9007",
+      "finish": "verzinkt"
+    },
+    {
       "target": "material",
       "pattern": "__plain|Fussplatte",
       "ral": "RAL 9007",
@@ -470,12 +476,6 @@
     {
       "target": "material",
       "pattern": "_M4|_M6|_M8{_M10",
-      "ral": "RAL 9007",
-      "finish": "verzinkt"
-    },
-    {
-      "target": "mesh",
-      "pattern": "vzk|verzinkt",
       "ral": "RAL 9007",
       "finish": "verzinkt"
     },

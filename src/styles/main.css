@@ -354,6 +354,9 @@ html, body {
 .sr-settings {
   position: fixed; top: 60px; right: 12px; z-index: 30;
   width: 240px; padding: 1rem;
+  max-height: calc(100vh - 72px);
+  overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain;
   background: var(--sr-glass);
   backdrop-filter: var(--sr-blur);
   border: 1px solid var(--sr-border);
@@ -362,6 +365,13 @@ html, body {
   transform: translateX(calc(100% + 20px));
   opacity: 0; pointer-events: none;
   transition: transform .25s cubic-bezier(.32,.72,0,1), opacity .2s;
+}
+.sr-settings::-webkit-scrollbar { width: 6px; }
+.sr-settings::-webkit-scrollbar-thumb {
+  background: var(--sr-border-hover); border-radius: 3px;
+}
+.sr-settings::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,.2);
 }
 .sr-settings.open {
   transform: translateX(0); opacity: 1; pointer-events: auto;
@@ -1096,7 +1106,7 @@ html, body {
   .sr-topbar-center { display: none; }
   .sr-colors { bottom: 210px; }
   .sr-color-filter { bottom: 268px; max-width: calc(100vw - 16px); }
-  .sr-settings { width: 100%; right: 0; top: 52px; border-radius: 0 0 var(--sr-radius) var(--sr-radius); }
+  .sr-settings { width: 100%; right: 0; top: 52px; max-height: calc(100vh - 52px); border-radius: 0 0 var(--sr-radius) var(--sr-radius); }
   .sr-perf {
     top: auto;
     bottom: 12px;

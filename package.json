@@ -6,12 +6,12 @@
   "author": "META",
   "description": "META Online – 3D Showroom",
   "scripts": {
-    "check": "vite build",
+    "check": "node scripts/generate-public-products.mjs && VITE_ONLINE_BUILD=1 vite build",
     "logs:tail": "node scripts/logs-tail.mjs",
     "logs:clear": "node scripts/logs-clear.mjs",
     "migrate:logger": "node scripts/migrate-console-to-logger.mjs",
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/generate-public-products.mjs && vite build",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
     "products:update": "node scripts/update-products-from-models.js",
@@ -47,13 +47,21 @@
     "build:win": "npm run build && electron-builder --win",
     "dist:win": "npm run build && electron-builder --win --publish never",
     "package:win": "node scripts/package-windows.mjs",
-    "start:showroom": "node scripts/start-services.mjs && concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"npm run preview\""
+    "start:showroom": "node scripts/start-services.mjs && concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"npm run preview\"",
+    "start:dashboard-api": "node server/dashboard-server.mjs",
+    "vendor:converter": "node scripts/vendor-converter.mjs",
+    "docker:htpasswd": "docker run --rm httpd:2.4-alpine htpasswd -nbB",
+    "docker:build": "npm run vendor:converter && docker compose -f deploy/docker/docker-compose.yml build",
+    "docker:up": "docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env up -d",
+    "docker:down": "docker compose -f deploy/docker/docker-compose.yml down"
   },
   "dependencies": {
     "@google/model-viewer": "^4.0.0",
     "alpinejs": "^3.14.0",
+    "connect": "^3.7.0",
     "gsap": "^3.12.0",
     "meshoptimizer": "^1.0.1",
+    "serve-static": "^2.2.1",
     "three": "^0.172.0"
   },
   "devDependencies": {

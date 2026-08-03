@@ -1,5 +1,6 @@
 import './lib/loggerInit.js'
 import { createLogger } from './lib/logger.js'
+import { resolveAssetUrl } from './lib/resolveAssetUrl.js'
 const log = createLogger('showroom')
 
 import './styles/main.css'
@@ -18,7 +19,10 @@ import LightDebugView from './showroom/LightDebugView.js'
 import PivotDebugView from './showroom/PivotDebugView.js'
 import performanceMonitor from './showroom/PerformanceMonitor.js'
 
-import productsData from './data/products.json'
+// products.public.json = products.json ohne interne Dashboard/Konverter-Felder
+// (_review, _mtlColors, cadFiles, …) – wird von scripts/lib/publicProducts.mjs
+// generiert (Dev-Server-Start + bei jedem Speichern; Build: npm run build/check).
+import productsData from './data/products.public.json'
 import roomsData from './data/rooms.json'
 import ColorService from './services/ColorService.js'
 import CameraPresetService from './services/CameraPresetService.js'
@@ -486,8 +490,8 @@ function showroomApp() {
     },
 
     openAR() {
-      const glb = this.currentProduct?.glbFile || ''
-      const usdz = this.currentProduct?.usdzFile || ''
+      const glb = resolveAssetUrl(this.currentProduct?.glbFile || '')
+      const usdz = resolveAssetUrl(this.currentProduct?.usdzFile || '')
       const hex = ColorService.ralToHex(this.currentColor)
       ARManager.showAR(glb, hex, usdz)
     },
@@ -632,9 +636,7 @@ function showroomApp() {
           const h = ColorService.ralToHex(this.currentColor)
           hex = h && h.startsWith('#') ? h : `#${String(h || '').replace(/^#/, '')}`
         }
-        const glbPath = this.currentProduct.glbFile.startsWith('/')
-          ? this.currentProduct.glbFile
-          : `/${this.currentProduct.glbFile}`
+        const glbPath = resolveAssetUrl(this.currentProduct.glbFile)
 
         const col16 = (m) => (m && m.matrixWorld ? Array.from(m.matrixWorld.elements) : null)
         const IDENTITY_COL = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
