@@ -65,6 +65,11 @@ export default defineConfig({
         '**/public/**',
         '**/src/data/products.json',
         '**/src/data/cad-index.json',
+        // Generierte Ableitung von products.json (bei jedem Speichern neu geschrieben,
+        // siehe scripts/lib/publicProducts.mjs). Ohne diesen Eintrag löst jedes einzelne
+        // Speichern einen Vite-Full-Reload auf ALLEN verbundenen Tabs aus – killt damit
+        // z. B. die Konvertierungs-Queue im Dashboard nach dem ersten Produkt.
+        '**/src/data/products.public.json',
       ],
     },
   },

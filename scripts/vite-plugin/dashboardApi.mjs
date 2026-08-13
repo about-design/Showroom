@@ -522,6 +522,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
 
       // ── Produkte: Cache + Mutex + atomares Schreiben ────────────────────
       let _productsCache = null
+      let _productsCacheMtime = 0
       let _loadPromise = null
       let _saveQueue = Promise.resolve()
 
@@ -534,9 +535,24 @@ export function registerDashboardApi(middlewares, opts = {}) {
         }
       }
 
+      /**
+       * Cache-Invalidierung per mtime-Vergleich statt fs.watch: auf manchen
+       * Volumes (z. B. externe/USB-Laufwerke) feuert fs.watch nicht zuverlässig
+       * für Schreibzugriffe fremder Prozesse (Batch-Skripte etc.) – das führte
+       * dazu, dass saveProducts() einen veralteten Cache zurückschrieb und
+       * externe Änderungen (z. B. per Skript generierte previewImage-Felder)
+       * stillschweigend überschrieb. Ein billiger stat() pro Request ist robust
+       * gegen beide Fälle, unabhängig vom Dateisystem.
+       */
       async function ensureProductsCache() {
         if (_loadPromise) await _loadPromise
-        if (!_productsCache) {
+        let currentMtime = 0
+        try {
+          currentMtime = (await stat(PRODUCTS_PATH)).mtimeMs
+        } catch {
+          currentMtime = 0
+        }
+        if (!_productsCache || currentMtime !== _productsCacheMtime) {
           _loadPromise = (async () => {
             try {
               const raw = await readFile(PRODUCTS_PATH, 'utf-8')
@@ -545,8 +561,10 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 parsed && typeof parsed === 'object' && Array.isArray(parsed.products)
                   ? parsed
                   : { products: [] }
+              _productsCacheMtime = currentMtime
             } catch {
               _productsCache = { products: [] }
+              _productsCacheMtime = 0
             } finally {
               _loadPromise = null
             }
@@ -587,6 +605,11 @@ export function registerDashboardApi(middlewares, opts = {}) {
             throw err
           }
           _productsCache = cloneProductsData(data)
+          try {
+            _productsCacheMtime = (await stat(PRODUCTS_PATH)).mtimeMs
+          } catch {
+            _productsCacheMtime = 0
+          }
           void writePublicProducts(ROOT)
         })
         _saveQueue = task.catch(() => {}) // Queue darf nicht brechen

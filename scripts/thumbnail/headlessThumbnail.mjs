@@ -13,6 +13,15 @@ let page = null
 
 const CAPTURE_PATH = '/src/thumbnail/dashboardThumbCapture.html'
 
+/** Rennt gegen ein Timeout, damit ein hängender page.close()/browser.close() (z. B. nach
+ *  kaputter CDP-Verbindung) einen Batch-Lauf nicht für immer blockiert. */
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ])
+}
+
 async function resolveChromePath() {
   const fromEnv = String(process.env.PUPPETEER_EXECUTABLE_PATH || '').trim()
   if (fromEnv) return fromEnv
@@ -28,7 +37,7 @@ async function resolveChromePath() {
 export async function closeThumbnailBrowser() {
   try {
     if (page) {
-      await page.close()
+      await withTimeout(page.close(), 5000)
     }
   } catch {
     /* ignore */
@@ -36,7 +45,7 @@ export async function closeThumbnailBrowser() {
   page = null
   try {
     if (browser) {
-      await browser.close()
+      await withTimeout(browser.close(), 5000)
     }
   } catch {
     /* ignore */
@@ -127,6 +136,11 @@ export async function captureDashboardThumbnailPng({
     return true
   } catch (e) {
         log.scoped("thumbnail").warn("captureDashboardThumbnailPng:", e?.message || e)
+    // Browser/Seite können nach einem Navigations-/Kontextfehler in einem kaputten
+    // Zustand hängen bleiben (z. B. "Execution context was destroyed") — sonst würden
+    // alle Folgeaufrufe im selben Prozess kaskadierend fehlschlagen oder sogar hängen
+    // (close() selbst kann blockieren, daher mit Timeout).
+    await closeThumbnailBrowser()
     return false
   }
 }
