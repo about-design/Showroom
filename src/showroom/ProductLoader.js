@@ -1,4 +1,5 @@
 import { createLogger } from '../lib/logger.js'
+import { resolveAssetUrl } from '../lib/resolveAssetUrl.js'
 const log = createLogger("ProductLoader")
 
 import * as THREE from 'three'
@@ -44,20 +45,21 @@ class ProductLoader {
    * @returns {Promise<THREE.Group>}
    */
   async loadProduct(glbPath) {
-    const cacheKey = glbPath
+    const resolvedPath = resolveAssetUrl(glbPath)
+    const cacheKey = resolvedPath
     if (this.cache.has(cacheKey)) {
       const master = this.cache.get(cacheKey)
       return master.clone(true)
     }
 
-    this.emit('load-progress', { progress: 0, path: glbPath })
+    this.emit('load-progress', { progress: 0, path: resolvedPath })
 
     // Platzhalter nur, wenn ausdrücklich kein Pfad oder "placeholder" angegeben
     const usePlaceholder = !glbPath || glbPath.includes('placeholder')
     if (usePlaceholder) {
       const placeholder = this.createPlaceholder(glbPath || 'placeholder')
-      this.emit('load-progress', { progress: 100, path: glbPath })
-      this.emit('load-complete', { path: glbPath, model: placeholder })
+      this.emit('load-progress', { progress: 100, path: resolvedPath })
+      this.emit('load-complete', { path: resolvedPath, model: placeholder })
       this.cache.set(cacheKey, placeholder)
       return placeholder.clone(true)
     }
@@ -65,11 +67,11 @@ class ProductLoader {
     try {
       const gltf = await new Promise((resolve, reject) => {
         this.gltfLoader.load(
-          glbPath,
+          resolvedPath,
           resolve,
           (xhr) => {
             const progress = xhr.lengthComputable ? (xhr.loaded / xhr.total) * 100 : 50
-            this.emit('load-progress', { progress, path: glbPath })
+            this.emit('load-progress', { progress, path: resolvedPath })
           },
           reject
         )
@@ -91,15 +93,15 @@ class ProductLoader {
         model.traverse((o) => { names.push({ name: o.name || '(unnamed)', type: o.type }) })
                 log.scoped("ProductLoader").info("Szenenstruktur:", glbPath, names)
       }
-      this.emit('load-progress', { progress: 100, path: glbPath })
-      this.emit('load-complete', { path: glbPath, model })
+      this.emit('load-progress', { progress: 100, path: resolvedPath })
+      this.emit('load-complete', { path: resolvedPath, model })
       this.cache.set(cacheKey, model)
       return model.clone(true)
     } catch (err) {
-      if (import.meta.env.DEV) log.scoped("ProductLoader").warn("GLB fehlgeschlagen, nutze Platzhalter:", glbPath, err)
-      this.emit('load-error', { path: glbPath, error: err })
+      if (import.meta.env.DEV) log.scoped("ProductLoader").warn("GLB fehlgeschlagen, nutze Platzhalter:", resolvedPath, err)
+      this.emit('load-error', { path: resolvedPath, error: err })
       const placeholder = this.createPlaceholder(glbPath)
-      this.emit('load-complete', { path: glbPath, model: placeholder })
+      this.emit('load-complete', { path: resolvedPath, model: placeholder })
       this.cache.set(cacheKey, placeholder)
       return placeholder
     }

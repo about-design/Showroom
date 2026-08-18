@@ -6,6 +6,7 @@ import { existsSync, rmSync } from 'fs'
 import { platform } from 'os'
 import tailwindcss from '@tailwindcss/vite'
 import { dashboardApi } from './scripts/vite-plugin/dashboardApi.mjs'
+import { onlinePublicAssetsPlugin } from './scripts/vite-plugin/onlinePublicAssets.mjs'
 import { createLogger } from './scripts/lib/logger.mjs'
 
 const log = createLogger('vite')
@@ -40,9 +41,12 @@ function forceCleanDistPlugin() {
   }
 }
 
+const isOnlineBuild = process.env.VITE_ONLINE_BUILD === '1'
+
 export default defineConfig({
-  plugins: [forceCleanDistPlugin(), tailwindcss(), dashboardApi()],
-  publicDir: 'public',
+  plugins: [forceCleanDistPlugin(), tailwindcss(), dashboardApi(), onlinePublicAssetsPlugin()],
+  // Online-Build: keine lokalen Modelle (CDN via VITE_ASSET_BASE_URL)
+  publicDir: isOnlineBuild ? false : 'public',
   server: {
     port: 5050,
     strictPort: false,
@@ -61,6 +65,11 @@ export default defineConfig({
         '**/public/**',
         '**/src/data/products.json',
         '**/src/data/cad-index.json',
+        // Generierte Ableitung von products.json (bei jedem Speichern neu geschrieben,
+        // siehe scripts/lib/publicProducts.mjs). Ohne diesen Eintrag löst jedes einzelne
+        // Speichern einen Vite-Full-Reload auf ALLEN verbundenen Tabs aus – killt damit
+        // z. B. die Konvertierungs-Queue im Dashboard nach dem ersten Produkt.
+        '**/src/data/products.public.json',
       ],
     },
   },

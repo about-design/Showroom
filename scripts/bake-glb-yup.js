@@ -453,8 +453,9 @@ function ralPaletteKeyFromCli(ralArg) {
 
 /**
  * Wendet projekt-Mapping (Quell-#hex → Ziel-#hex) auf Materialien ohne Base-Color-Textur an.
- * Schicht (1): Farbe aus der Datei / Mapping — `remappedWeakSet` markiert Treffer nur für
- * applyCliRalBaseColor (2), damit die Dashboard-Standardfarbe dort nicht darüberfährt.
+ * Basis-Schicht im Automatisch-Modus (`__mapping__`): Farbe aus den Datei-Hexwerten.
+ * Überspringt bereits durch höher-priorisierte Regeln (Namen/Geometrie) gelockte Materialien
+ * und lockt eigene Treffer, damit der Auto-Alias-Fallback sie nicht mehr anfasst.
  */
 function applyMtlColorOverrides(doc, overrides, remappedWeakSet) {
   if (!overrides || typeof overrides !== 'object') return 0
@@ -649,12 +650,12 @@ async function applyMtlDeclaredBaseTexturesFromMtl(document) {
 }
 
 /**
- * Schreibt Base Color (glTF-Faktor) aus ralColors.json für alle Materialien ohne Base-Color-Textur.
- * glTF baseColorFactor ist im **linearen** Farbraum definiert → sRGB-Hex aus der Palette wird konvertiert.
- * Nur bei explizitem --ral (z. B. register-converted / Produkt-Standard), damit die GLB die Farbe physisch enthält.
- * @param {WeakSet<object>|null} mappingRemapped — Materialien mit Mapping-Treffer (1); --ral (2) überspringt sie.
+ * Schreibt Base Color (glTF-Faktor) aus ralColors.json für alle noch ungefärbten Materialien
+ * (ohne Base-Color-Textur). Basis-Schicht: explizite Standardfarbe (--ral), bzw. dominanter
+ * RAL-Fallback im Automatisch-Modus. glTF baseColorFactor ist **linear** → sRGB-Hex konvertiert.
+ * @param {WeakSet<object>|null} lockedSet — bereits durch höhere Schichten gefärbte Materialien; werden übersprungen und eigene Treffer gelockt.
  */
-function applyCliRalBaseColor(doc, mappingRemapped = null) {
+function applyCliRalBaseColor(doc, lockedSet = null) {
   if (!cliRalCode) return
   const key = ralPaletteKeyFromCli(cliRalCode)
   if (!key) return
@@ -668,9 +669,10 @@ function applyCliRalBaseColor(doc, mappingRemapped = null) {
   const srgbHex = '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('').toUpperCase()
   let n = 0
   for (const mat of doc.getRoot().listMaterials()) {
-    if (mappingRemapped?.has(mat)) continue
+    if (lockedSet?.has(mat)) continue
     if (mat.getBaseColorTexture()) continue
     mat.setBaseColorFactor([rLin, gLin, bLin, 1])
+    lockedSet?.add(mat)
     n++
   }
   if (n) log.info(`    Base Color → ${key} ${srgbHex} (${n} Materialien, linear: [${rLin.toFixed(4)}, ${gLin.toFixed(4)}, ${bLin.toFixed(4)}])`)
@@ -1232,25 +1234,30 @@ function applyVertexReductionRules(doc, rules, simplifier) {
 }
 
 /**
- * Farb-Schichten (Konvertierung / Bake):
- * (1) Hex-Mapping (Dateifarben → Ziel-Hex aus mtl-ral-color-mapping + Preset-Overrides),
- * (2) Dashboard-Standardfarbe (--ral), nur wo (1) nicht gegriffen hat,
- * (3) Geometrie-Regeln (global, dann Produkt — letzte passende Regel gewinnt),
- * (4) Namens-/Szenen-Regeln (global, dann Produkt — letzte passende Regel gewinnt).
+ * Farb-Schichten (Bake) — Priorität hoch → niedrig. Es wird die HÖCHSTE Priorität zuerst
+ * gefärbt und gelockt; niedrigere Schichten überspringen bereits gelockte Materialien.
+ *
+ * (1) Namensregeln (Produkt + global gemerged, last-wins) — gewinnen immer
+ * (2) Geometrie-Regeln (wie globale Regeln)
+ * (3) Hex-Mapping — nur im Automatisch-Modus (`__mapping__`); bei explizitem RAL wird
+ *     `colorOverridesForBake` nicht übergeben und die Schicht ist leer
+ * (4) Auto-Alias (Farbwort im Namen) — nur für noch ungefärbte Materialien
+ * (5) Standardfarbe (--ral) — Basis für alle noch ungefärbten Materialien
+ *     (explizit gesetzt; im Automatisch-Modus dominanter RAL als Fallback)
  */
 function applyMappingAndCliRalBaseColors(doc) {
-  const mappingRemapped = new WeakSet()
-  if (colorOverridesForBake && Object.keys(colorOverridesForBake).length > 0) {
-    applyMtlColorOverrides(doc, colorOverridesForBake, mappingRemapped)
-  }
-  applyCliRalBaseColor(doc, mappingRemapped)
-  if (geometryColorRulesCompiled && geometryColorRulesCompiled.length > 0) {
-    applyGeometryColorRules(doc, geometryColorRulesCompiled, mappingRemapped)
-  }
+  const locked = new WeakSet()
   if (nameColorRulesCompiled && nameColorRulesCompiled.length > 0) {
-    applyNameColorRules(doc, nameColorRulesCompiled, mappingRemapped)
+    applyNameColorRules(doc, nameColorRulesCompiled, locked)
   }
-  applyAutomaticColorAliasRules(doc, mappingRemapped)
+  if (geometryColorRulesCompiled && geometryColorRulesCompiled.length > 0) {
+    applyGeometryColorRules(doc, geometryColorRulesCompiled, locked)
+  }
+  if (colorOverridesForBake && Object.keys(colorOverridesForBake).length > 0) {
+    applyMtlColorOverrides(doc, colorOverridesForBake, locked)
+  }
+  applyAutomaticColorAliasRules(doc, locked)
+  applyCliRalBaseColor(doc, locked)
 }
 
 /**
@@ -1668,16 +1675,26 @@ function applyMaterialFinishFromRegistry(doc, registryEntry, surfaceMode = null)
       continue
     }
     if (reg && typeof reg.metallic === 'number' && typeof reg.roughness === 'number') {
-      mat.setMetallicFactor(reg.metallic)
-      mat.setRoughnessFactor(reg.roughness)
-      result.materials.push({
-        name,
-        ral: reg.ral ?? null,
-        metallic: reg.metallic,
-        roughness: reg.roughness,
-        finish: reg.finish ?? (reg.metallic > 0.5 ? 'verzinkt' : 'matt'),
-      })
-            log.info(`    Material "${name}" → ${reg.ral ?? '–'} (Registry: ${reg.metallic}/${reg.roughness})`)
+      // Eine explizit gewählte Produkt-Oberfläche (--surface) hat Vorrang vor der
+      // (evtl. veralteten) Registry: Ein als „Pulver" konfiguriertes Produkt darf
+      // nicht metallisch werden, nur weil das Teil einmal als „Verzinkt" registriert
+      // wurde. Namensregel-gesperrte Teile (echte Verzinkt-Beschläge) sind oben schon
+      // abgehandelt und bleiben unberührt.
+      let metallic = reg.metallic
+      let roughness = reg.roughness
+      let finish = reg.finish ?? (reg.metallic > 0.5 ? 'verzinkt' : 'matt')
+      let source = `Registry: ${reg.metallic}/${reg.roughness}`
+      if (surfaceMode === 'pulver') {
+        metallic = 0; roughness = 0.35; finish = 'matt'
+        source = 'Override --surface pulver: 0/0.35'
+      } else if (surfaceMode === 'verzinkt') {
+        metallic = 0.75; roughness = 0.25; finish = 'verzinkt'
+        source = 'Override --surface verzinkt: 0.75/0.25'
+      }
+      mat.setMetallicFactor(metallic)
+      mat.setRoughnessFactor(roughness)
+      result.materials.push({ name, ral: reg.ral ?? null, metallic, roughness, finish })
+            log.info(`    Material "${name}" → ${reg.ral ?? '–'} (${source})`)
       continue
     }
     const factor = mat.getBaseColorFactor()
@@ -1968,9 +1985,11 @@ async function main() {
         skipped++
         let materialInfo = { materials: [], surfaceCategory: 'unbekannt' }
         if (!dryRun && outDir) {
-          // Sichtbarkeit und Reduktion sind optional und isoliert: Fehler dort dürfen
-          // die Namens-/Geometrie-/Mapping-Farbregeln NICHT blockieren. Die werden
-          // unten in `applyMappingAndCliRalBaseColors` immer ausgeführt.
+          // WICHTIG: Farb-/Namensregeln ZUERST ausführen – sonst führt das `dedup()`
+          // in applyVisibilityRules noch identische Materialien zusammen, bevor die
+          // Regeln pro Teil differenzieren können (Farb-Kollaps). Sichtbarkeit und
+          // Reduktion sind optional und isoliert und laufen danach.
+          applyMappingAndCliRalBaseColors(doc)
           if (visibilityRulesCompiled?.length) {
             try {
               await applyVisibilityRules(doc, visibilityRulesCompiled)
@@ -1985,7 +2004,6 @@ async function main() {
                             log.warn(`    ⚠ Vertex-Reduktion übersprungen: ${e.message}`)
             }
           }
-          applyMappingAndCliRalBaseColors(doc)
           materialInfo =
             useRegistry && registryEntry?.materials?.length
               ? applyMaterialFinishFromRegistry(doc, { ...registryEntry, ralCode: forcedRalCode || registryEntry.ralCode }, cliSurfaceMode)
@@ -2018,8 +2036,11 @@ async function main() {
         continue
       }
       if (!baked && singleFile) {
-        // Sichtbarkeit und Reduktion sind optional und isoliert.
-        // Namens-/Geometrie-/Mapping-Farbregeln laufen anschließend immer.
+        // WICHTIG: Farb-/Namensregeln ZUERST ausführen – sonst führt das `dedup()`
+        // in applyVisibilityRules noch identische Materialien zusammen, bevor die
+        // Regeln pro Teil differenzieren können (Farb-Kollaps). Sichtbarkeit und
+        // Reduktion sind optional und isoliert und laufen danach.
+        applyMappingAndCliRalBaseColors(doc)
         if (visibilityRulesCompiled?.length) {
           try {
             await applyVisibilityRules(doc, visibilityRulesCompiled)
@@ -2034,7 +2055,6 @@ async function main() {
                         log.warn(`    ⚠ Vertex-Reduktion übersprungen: ${e.message}`)
           }
         }
-        applyMappingAndCliRalBaseColors(doc)
         const materialInfo =
           useRegistry && registryEntry?.materials?.length
             ? applyMaterialFinishFromRegistry(doc, { ...registryEntry, ralCode: forcedRalCode || registryEntry.ralCode }, cliSurfaceMode)
@@ -2051,8 +2071,11 @@ async function main() {
         continue
       }
 
-      // Sichtbarkeit und Reduktion sind optional und isoliert.
-      // Namens-/Geometrie-/Mapping-Farbregeln laufen anschließend immer.
+      // WICHTIG: Farb-/Namensregeln ZUERST ausführen – sonst führt das `dedup()`
+      // in applyVisibilityRules noch identische Materialien zusammen, bevor die
+      // Regeln pro Teil differenzieren können (Farb-Kollaps). Sichtbarkeit und
+      // Reduktion sind optional und isoliert und laufen danach.
+      applyMappingAndCliRalBaseColors(doc)
       if (visibilityRulesCompiled?.length) {
         try {
           await applyVisibilityRules(doc, visibilityRulesCompiled)
@@ -2067,7 +2090,6 @@ async function main() {
                     log.warn(`    ⚠ Vertex-Reduktion übersprungen: ${e.message}`)
         }
       }
-      applyMappingAndCliRalBaseColors(doc)
       const materialInfo =
         useRegistry && registryEntry?.materials?.length
           ? applyMaterialFinishFromRegistry(doc, { ...registryEntry, ralCode: forcedRalCode || registryEntry.ralCode }, cliSurfaceMode)

@@ -1,0 +1,34 @@
+# Optional: Caddy statt nginx (TLS + Basic-Auth)
+# Nutzung: caddy run --config deploy/docker/Caddyfile --adapter caddyfile
+
+{
+  email {$ACME_EMAIL:admin@example.com}
+}
+
+{$SHOWROOM_DOMAIN:localhost} {
+  encode gzip
+
+  @protected {
+    path /dashboard.html /converter.html /__api/* /api/* /outputs/*
+  }
+
+  basicauth @protected {
+    {$BASIC_AUTH_USER:admin} {$BASIC_AUTH_HASH}
+  }
+
+  handle /__api/* {
+    reverse_proxy dashboard-api:5080
+  }
+
+  handle /api/* {
+    reverse_proxy converter-gateway:3000
+  }
+
+  handle /outputs/* {
+    reverse_proxy converter-gateway:3000
+  }
+
+  handle {
+    reverse_proxy web:80
+  }
+}

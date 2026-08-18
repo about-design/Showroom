@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-REM META Showroom – Start fuer Anwender (ohne Admin)
+REM META Showroom - Start fuer Anwender (ohne Admin)
 REM Startet Redis/Memurai, Pre-Flight, API + MCP + Vite Preview, oeffnet Browser.
 
 set "ROOT=%~dp0"
@@ -110,7 +110,7 @@ if exist "%PID_FILE%" del /f /q "%PID_FILE%"
 
 echo.
 echo Dienste starten (API :3000, MCP :8001, Showroom :5050)...
-echo Fenster minimiert lassen – zum Beenden „META Showroom stoppen“ verwenden.
+echo Fenster minimiert lassen - zum Beenden "META Showroom stoppen" verwenden.
 echo.
 
 set "STACK_LOG=%LOG_BASE%\stack.log"

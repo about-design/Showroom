@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# Build-Context: vendor/blender-mcp-converter (via scripts/vendor-converter.mjs)
+
+FROM node:20-alpine
+WORKDIR /app
+
+COPY api-gateway/package.json api-gateway/package-lock.json* ./
+RUN npm ci --omit=dev
+
+COPY api-gateway/src ./src
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV REDIS_HOST=redis
+ENV REDIS_PORT=6379
+ENV MCP_SERVER_URL=http://converter-mcp:8001
+ENV BLENDER_OUTPUT_DIR=/data/outputs
+ENV DISABLE_RATE_LIMIT=false
+ENV RATE_LIMIT_MAX=100
+
+RUN mkdir -p /data/outputs
+
+EXPOSE 3000
+CMD ["node", "src/server.js"]

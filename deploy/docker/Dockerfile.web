@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+
+FROM node:20-bookworm-slim AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+ARG VITE_ASSET_BASE_URL=
+ARG VITE_ONLINE_BUILD=1
+ENV VITE_ASSET_BASE_URL=${VITE_ASSET_BASE_URL}
+ENV VITE_ONLINE_BUILD=${VITE_ONLINE_BUILD}
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY deploy/docker/nginx-web.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80

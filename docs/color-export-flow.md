@@ -42,8 +42,9 @@ Die Konvertierungs-API (Backend) muss diese **colorOverrides** beim Erzeugen des
 
 ## 2. Dashboard – „Alle GLBs neu konvertieren“ (vite.config.js)
 
-- **Projekt-Mapping:** Es wird `public/mtl-ral-color-mapping.json` gelesen (falls vorhanden). Zusammen mit `src/data/ralColors.json` werden daraus **colorOverrides** gebaut (gleiche Priorität wie im Konverter: matchRal+sourcePalette → matchPalette → matches+sourcePalette). **Projekt-Mapping hat Vorrang.**
-- **Fallback:** Nur wenn **kein** (oder leeres) Projekt-Mapping existiert und **defaultColorOverride** + **defaultColorHex** gesetzt sind: Preflight wird aufgerufen, alle vorkommenden Farben auf diese eine Ziel-Farbe gemappt.
+- **Modus-Weiche zuerst:** Hat das Produkt eine **explizite** Standardfarbe (RAL), wird das Hex-Mapping **nicht** verwendet – die Standardfarbe ist die Basis (siehe [4.2](#42-farb-priorität-im-bake-reihenfolge)). Nur im **Automatisch-Modus** (`defaultColor === __mapping__`) oder ganz ohne Standardfarbe kommt das Mapping zum Einsatz.
+- **Projekt-Mapping (nur Automatisch):** `public/mtl-ral-color-mapping.json` + `src/data/ralColors.json` → **colorOverrides** (Priorität: matchRal+sourcePalette → matchPalette → matches+sourcePalette).
+- **Fallback:** Wenn kein (oder leeres) Mapping und **defaultColorOverride** + **defaultColorHex** gesetzt: Preflight mappt alle vorkommenden Farben auf diese eine Ziel-Farbe.
 - Siehe auch [docs/mtl-mapping.md](mtl-mapping.md).
 
 ---
@@ -80,20 +81,37 @@ Die Konvertierungs-API (Backend) muss diese **colorOverrides** beim Erzeugen des
   - API-Response: `warnings[]` mit `reason: "color-collapse"`
 - Ziel: frühes Erkennen von Fällen, in denen Overrides/Preflight alle Quellfarben auf eine Zielfarbe zusammenziehen.
 
-## 4.2 Automatische Farb-Aliase aus Namen (generisch)
+## 4.2 Farb-Priorität im Bake (Reihenfolge)
 
-- In der Bake-Pipeline (`scripts/bake-glb-yup.js`) läuft als letzte Farbschicht ein generischer Alias-Fallback:
-  - Quelle: `src/lib/colorNameAliases.js`
-  - Auswertung: Materialname, danach Mesh-/Knotenname
-  - Regel: **letztes erkanntes Farb-Token gewinnt** (z. B. `..._Platte_Rot` → Rot)
-- Unterstützte Farbgruppen (de/en) sind zentral gepflegt und auf RAL gemappt, u. a.:
-  - rot/red, blau/blue, gelb/yellow, orange, gruen/green, grau/grey/gray, schwarz/black, verzinkt/metal/silver/stahl
-- Reihenfolge der Farbschichten bleibt:
-  1. Hex-Mapping (`colorOverrides`)
-  2. `--ral`/Standardfarbe (nur ohne Mapping-Treffer)
-  3. Geometrie-Regeln
-  4. Explizite `nameColorRules`
-  5. **Auto-Alias-Fallback** (nur für noch nicht gemappte Materialien)
+Im Bake (`scripts/bake-glb-yup.js`, `applyMappingAndCliRalBaseColors`) gilt eine feste **Priorität hoch → niedrig**. Technisch wird die höchste Priorität zuerst gefärbt und **gelockt**; niedrigere Schichten überspringen bereits gelockte Materialien.
+
+1. **Produkt-Namensregeln** (aus `conversionPreset`) — gewinnen immer
+2. **Globale Namensregeln = Geometrie-Regeln** (aus `mtl-ral-color-mapping.json`)
+3. **Hex-Mapping** (`colorOverrides` aus Datei-Hexwerten) — **nur im Automatisch-Modus** (`defaultColor === __mapping__` bzw. keine Produkt-Standardfarbe). Bei explizitem RAL entfällt diese Schicht.
+4. **Auto-Alias-Fallback** (Farbwort im Material-/Mesh-/Knotennamen → RAL) — nur für noch ungefärbte Materialien
+5. **Standardfarbe** (`--ral`) — Basis für alle noch ungefärbten Materialien (explizit gesetzt; im Automatisch-Modus dominanter RAL als Fallback)
+
+Produkt- und globale Namensregeln liegen in `nameColorRulesCompiled` bereits gemergt vor (global zuerst, dann Produkt → last-wins), Produktregeln gewinnen also innerhalb der Schicht.
+
+### Materialtrennung erhalten (Bake-Reihenfolge gegen Farb-Kollaps)
+
+`applyMappingAndCliRalBaseColors(doc)` läuft im Bake **vor** `applyVisibilityRules`/`applyVertexReductionRules`.
+
+Grund: Der externe Konverter liefert pro STEP-Solid ein eigenes Material, aber wenn `colorOverrides` alle Quellfarben auf denselben Zielton ziehen (z. B. CAD-Weiß → `#D7D7D7`), sind diese Materialien inhaltlich **identisch**. `applyVisibilityRules` ruft am Ende `doc.transform(prune(), dedup())` auf – `dedup()` führt identische Materialien zusammen. Liefe es **vor** den Farbregeln, kollabierten alle Teile auf **ein** gemeinsames Material; per-Teil-Namensregeln (z. B. `vzk → RAL 2001`) könnten dann nicht mehr greifen, weil das erste passende Mesh das gemeinsame Material lockt.
+
+Durch die Reihenfolge Farbe → Sichtbarkeit → Reduktion sind die Materialien beim `dedup()` bereits pro Teil differenziert; `dedup()` fasst danach nur noch **wirklich gleichfarbige** Teile zusammen (gewünscht, reduziert die Materialanzahl ohne Farbverlust).
+
+### Modus-Weiche (Automatisch vs. explizites RAL)
+
+Ob das Hex-Mapping überhaupt an den Bake/Blender geht, entscheidet `product.defaultColor`:
+
+- **Explizites RAL** (z. B. `"RAL 2001"`): `register-converted`/`convert-product` senden **kein** Hex-Mapping. Die Standardfarbe (`--ral` bzw. `defaultColorHex`) ist die einheitliche Basis; Namens-/Geometrie-Regeln setzen Ausnahmen. Das verhindert, dass generische CAD-Neutraltöne die Produktfarbe verdrängen (Farb-Kollaps STEP→GLB).
+- **Automatisch** (`__mapping__`) **oder keine Standardfarbe**: Hex-Mapping (Datei-Hexwerte) ist die Basis.
+
+### Auto-Alias – unterstützte Farbgruppen
+
+- Quelle: `src/lib/colorNameAliases.js`; Auswertung Materialname, dann Mesh-/Knotenname; **letztes erkanntes Farb-Token gewinnt** (z. B. `..._Platte_Rot` → Rot).
+- Farbgruppen (de/en), zentral gepflegt und auf RAL gemappt: rot/red, blau/blue, gelb/yellow, orange, gruen/green, grau/grey/gray, schwarz/black, verzinkt/metal/silver/stahl.
 
 ---
 
