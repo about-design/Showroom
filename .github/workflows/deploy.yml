@@ -1,0 +1,42 @@
+name: Deploy Online Showroom
+
+# Rollt bei jedem Push auf 'online-docker' automatisch auf den Server aus:
+# verbindet sich per SSH und führt deploy/docker/update.sh im Server-Checkout aus.
+# Manuell auslösbar über "Run workflow" (workflow_dispatch).
+#
+# Benötigte Repo-Secrets (Settings -> Secrets and variables -> Actions):
+#   DEPLOY_HOST      z. B. showroom.example.com oder IP
+#   DEPLOY_USER      SSH-Benutzer auf dem Server (kein root, mit Docker-Rechten)
+#   DEPLOY_SSH_KEY   Privater SSH-Key (ed25519) für den Deploy-Nutzer
+#   DEPLOY_PATH      Absoluter Pfad zum Repo-Checkout auf dem Server
+#                     z. B. /opt/showroom
+# Optional:
+#   DEPLOY_PORT      SSH-Port, Default 22
+
+on:
+  push:
+    branches:
+      - online-docker
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-online-showroom
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            bash deploy/docker/update.sh
