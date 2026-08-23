@@ -109,30 +109,15 @@ Variante B – externer Reverse-Proxy (Traefik, nginx auf Host) vor Port 8080.
 
 `converter-mcp`/`converter-gateway` werden **nicht** mitgebaut, da ihr Docker-Kontext (`vendor/blender-mcp-converter`) erst lokal per `npm run vendor:converter` aus dem separaten Blender-Converter-Projekt erzeugt wird und in GitHub Actions nicht vorliegt.
 
-Ein roter Haken im [Actions-Tab](https://github.com/about-design/Showroom/actions) heißt: Build ist kaputt – bevor der Commit über `update-showroom.cmd`, den Docker-Auto-Deploy oder manuell auf Mittwald landet, noch mal prüfen.
+Ein roter Haken im [Actions-Tab](https://github.com/about-design/Showroom/actions) heißt: Build ist kaputt – **vor** dem Push auf `online-docker` noch mal prüfen, da Mittwald jeden Push dort sofort baut und live schaltet (siehe unten).
 
-**Hinweis Mittwald:** Dieser CI-Workflow prüft nur, dass Build/Images lokal sauber entstehen. Er ist unabhängig davon, wie Mittwald Cloud/mStudio das Image beim eigentlichen Deploy baut oder zieht (Git-Trigger vs. Registry-Push) – dazu müssten wir die konkrete Mittwald-Projektkonfiguration ansehen, sobald ihr die Zugangsdaten/den Workflow dafür bereit habt.
+## Deployment (Mittwald Cloud / mStudio)
 
-## Automatisches Deployment (GitHub Actions)
+Gehostet wird ausschließlich bei **Mittwald Cloud/mStudio**: Mittwald ist dort direkt an den Branch **`online-docker`** angebunden und baut/deployt bei jedem Push automatisch selbst aus diesem Repo (Git-basiert, kein eigener SSH-Server, kein separates Deploy-Skript nötig). `git push origin online-docker` löst den Rollout also unmittelbar aus – es gibt keinen manuellen Zwischenschritt und keinen Review-Gate auf GitHub-Seite.
 
-Bei jedem Push auf `online-docker` rollt [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) automatisch auf dem Server aus: GitHub Actions verbindet sich per SSH und führt dort [`deploy/docker/update.sh`](docker/update.sh) aus (git reset auf `origin/online-docker`, `npm run vendor:converter`, `docker compose build` + `up -d`, altes Image-Aufräumen). Reine `git pull`s auf dem Server ohne diesen Rebuild-Schritt reichen **nicht** aus – der `web`-Container bäckt `dist/` beim Image-Build ein, nicht zur Laufzeit.
+Genau deshalb ist die [CI](#continuous-integration-github-actions) hier die einzige Sicherheitsnetz-Stufe: Sie muss auf `online-docker` grün sein, *bevor* man pusht, weil Mittwald jeden Push sofort baut und live schaltet.
 
-**Einmalige Einrichtung (Server-Admin):**
-
-1. Auf dem Server einen eigenen Deploy-User anlegen (kein root), der in der `docker`-Gruppe ist, und dort das Repo einmalig klonen, z. B. nach `/opt/showroom` (Branch `online-docker` auschecken, `.env`/`htpasswd` wie oben einrichten und den Stack einmal manuell hochfahren, um alles zu verifizieren).
-2. Dediziertes SSH-Schlüsselpaar für den Deploy-User erzeugen und den Public Key in dessen `~/.ssh/authorized_keys` eintragen:
-   ```bash
-   ssh-keygen -t ed25519 -f deploy_key -C "github-actions-showroom" -N ""
-   ```
-3. Im GitHub-Repo unter **Settings → Secrets and variables → Actions** anlegen:
-   - `DEPLOY_HOST` – Hostname/IP des Servers
-   - `DEPLOY_USER` – der Deploy-User aus Schritt 1
-   - `DEPLOY_SSH_KEY` – Inhalt der privaten Schlüsseldatei (`deploy_key`) aus Schritt 2
-   - `DEPLOY_PATH` – Pfad zum Checkout auf dem Server, z. B. `/opt/showroom`
-   - optional `DEPLOY_PORT`, falls SSH nicht auf 22 läuft
-4. Testen: Push auf `online-docker` (oder „Run workflow“ im Actions-Tab) und den Job-Log prüfen.
-
-Ohne diese Secrets schlägt der Workflow fehl, ändert aber nichts – reines Einrichten der Datei ist ungefährlich.
+Frühere Version dieses Abschnitts beschrieb ein SSH-Deploy-Skript für einen eigenen Docker-Server – das wurde entfernt, da Mittwald die einzige echte Hosting-Umgebung ist und dieser Weg nie produktiv genutzt wurde. Falls doch mal zusätzlich auf einem eigenen Server per Docker Compose gehostet werden soll, siehe „Schnellstart" oben (`npm run docker:build` / `docker:up`) – das funktioniert weiterhin manuell, nur eben ohne Auto-Deploy-Automatisierung.
 
 ## Hinweise
 
