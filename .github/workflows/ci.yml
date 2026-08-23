@@ -1,0 +1,68 @@
+name: CI
+
+# Reine Qualitätssicherung: prüft bei jedem Push/PR, ob der Showroom sauber
+# baut – BEVOR ein Commit über update-showroom.cmd oder den Auto-Deploy
+# (deploy.yml) live geht. Deployt/verändert nichts.
+
+on:
+  push:
+    branches: [main, online-docker, windows-rollout]
+  pull_request:
+    branches: [main, online-docker, windows-rollout]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-frontend:
+    name: Frontend-Build (npm run build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.11'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (dist/)
+        run: npm run build
+
+      - name: dist/ enthält index.html?
+        run: test -f dist/index.html
+
+  docker-images:
+    name: Docker-Image-Build (${{ matrix.name }})
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            dockerfile: deploy/docker/Dockerfile.web
+          - name: dashboard-api
+            dockerfile: deploy/docker/Dockerfile.dashboard-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # Hinweis: converter-mcp/converter-gateway werden hier NICHT gebaut, da ihr
+  # Docker-Build-Context (vendor/blender-mcp-converter) erst lokal per
+  # `npm run vendor:converter` aus dem Blender-Converter-Projekt erzeugt wird
+  # und in CI nicht verfügbar ist (siehe deploy/README.md).

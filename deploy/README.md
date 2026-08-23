@@ -100,6 +100,19 @@ Variante B – externer Reverse-Proxy (Traefik, nginx auf Host) vor Port 8080.
 | `CONVERTER_API_URL` | Dashboard-API → Gateway (intern: `http://converter-gateway:3000`) |
 | `CLAUDE_API_KEY` | Optional für KI-Klassifikation im MCP-Server |
 
+## Continuous Integration (GitHub Actions)
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) läuft bei jedem Push und Pull Request auf `main`, `online-docker` und `windows-rollout` – **rein zur Qualitätssicherung, kein Deploy:**
+
+1. **Frontend-Build:** `npm ci` + `npm run build`, prüft dass `dist/index.html` entsteht – der exakte Befehl, der auch `dist/` für Windows/Docker erzeugt.
+2. **Docker-Image-Build:** baut `Dockerfile.web` und `Dockerfile.dashboard-api` probeweise (ohne Push), um sicherzustellen, dass die produktiven Images sauber bauen.
+
+`converter-mcp`/`converter-gateway` werden **nicht** mitgebaut, da ihr Docker-Kontext (`vendor/blender-mcp-converter`) erst lokal per `npm run vendor:converter` aus dem separaten Blender-Converter-Projekt erzeugt wird und in GitHub Actions nicht vorliegt.
+
+Ein roter Haken im [Actions-Tab](https://github.com/about-design/Showroom/actions) heißt: Build ist kaputt – bevor der Commit über `update-showroom.cmd`, den Docker-Auto-Deploy oder manuell auf Mittwald landet, noch mal prüfen.
+
+**Hinweis Mittwald:** Dieser CI-Workflow prüft nur, dass Build/Images lokal sauber entstehen. Er ist unabhängig davon, wie Mittwald Cloud/mStudio das Image beim eigentlichen Deploy baut oder zieht (Git-Trigger vs. Registry-Push) – dazu müssten wir die konkrete Mittwald-Projektkonfiguration ansehen, sobald ihr die Zugangsdaten/den Workflow dafür bereit habt.
+
 ## Automatisches Deployment (GitHub Actions)
 
 Bei jedem Push auf `online-docker` rollt [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) automatisch auf dem Server aus: GitHub Actions verbindet sich per SSH und führt dort [`deploy/docker/update.sh`](docker/update.sh) aus (git reset auf `origin/online-docker`, `npm run vendor:converter`, `docker compose build` + `up -d`, altes Image-Aufräumen). Reine `git pull`s auf dem Server ohne diesen Rebuild-Schritt reichen **nicht** aus – der `web`-Container bäckt `dist/` beim Image-Build ein, nicht zur Laufzeit.
