@@ -188,6 +188,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 |---------------------|--------------|
 | `start-showroom.cmd`| Anwender-Start (IT-Rollout, voller Stack) |
 | `stop-showroom.cmd` | Anwender-Stop |
+| `update-showroom.cmd` | **Für Git-Checkouts:** stoppt den Stack, holt `git pull`, `npm install`, `npm run build`, startet neu. Ersetzt manuelles Pull+Build. |
 | `install-windows.ps1 -Unattended` | IT-Einmalinstallation |
 | `npm run package:win` | ZIP-Paket für IT bauen |
 | `npm run dev`       | Nur Vite (ohne Converter/MCP) |
