@@ -113,11 +113,32 @@ Ein roter Haken im [Actions-Tab](https://github.com/about-design/Showroom/action
 
 ## Deployment (Mittwald Cloud / mStudio)
 
-Gehostet wird ausschließlich bei **Mittwald Cloud/mStudio**: Mittwald ist dort direkt an den Branch **`online-docker`** angebunden und baut/deployt bei jedem Push automatisch selbst aus diesem Repo (Git-basiert, kein eigener SSH-Server, kein separates Deploy-Skript nötig). `git push origin online-docker` löst den Rollout also unmittelbar aus – es gibt keinen manuellen Zwischenschritt und keinen Review-Gate auf GitHub-Seite.
+Gehostet wird bei **Mittwald Cloud/mStudio**. Mittwalds Compose-Import ist **kein** normales `docker compose` – akzeptiert wurden dabei folgende Einschränkungen (per Validierungsfehler bestätigt):
 
-Genau deshalb ist die [CI](#continuous-integration-github-actions) hier die einzige Sicherheitsnetz-Stufe: Sie muss auf `online-docker` grün sein, *bevor* man pusht, weil Mittwald jeden Push sofort baut und live schaltet.
+- kein `build:` – nur fertige Images per `image:` aus einer Registry
+- kein `restart:`
+- keine relativen Bind-Mount-Pfade (nur absolute Pfade oder benannte Volumes)
+- keine `${VAR}`-Interpolation in `ports:`, nur literale Werte wie `"80:80"`
+- Routing/TLS/Domain übernimmt Mittwald selbst → kein eigener nginx-Proxy-Service nötig
 
-Frühere Version dieses Abschnitts beschrieb ein SSH-Deploy-Skript für einen eigenen Docker-Server – das wurde entfernt, da Mittwald die einzige echte Hosting-Umgebung ist und dieser Weg nie produktiv genutzt wurde. Falls doch mal zusätzlich auf einem eigenen Server per Docker Compose gehostet werden soll, siehe „Schnellstart" oben (`npm run docker:build` / `docker:up`) – das funktioniert weiterhin manuell, nur eben ohne Auto-Deploy-Automatisierung.
+Deshalb gibt es zwei getrennte Compose-Dateien:
+
+| Datei | Zweck |
+|---|---|
+| [`docker-compose.yml`](docker/docker-compose.yml) | Lokale Entwicklung/eigener Server, baut Images selbst (`npm run docker:build`/`docker:up`) |
+| [`docker-compose.mittwald.yml`](docker/docker-compose.mittwald.yml) | **Upload bei Mittwald** – referenziert fertige Images aus GHCR, kein `build`/`restart`/Proxy |
+
+**Bilder-Pipeline:**
+
+- `showroom-web` und `showroom-dashboard-api` werden automatisch von [`.github/workflows/build-images.yml`](../.github/workflows/build-images.yml) bei jedem Push auf `online-docker` gebaut und nach `ghcr.io/about-design/…` gepusht (Tags `latest` + Commit-SHA).
+- `showroom-converter-mcp` und `showroom-converter-gateway` können dort **nicht** gebaut werden – ihr Build-Kontext (`vendor/blender-mcp-converter`) liegt nur lokal vor (gitignored, separates Blender-Projekt, kein GitHub-Remote). Diese zwei müssen manuell gepusht werden: [`deploy/docker/push-converter-images.sh`](docker/push-converter-images.sh) auf einem Rechner mit `blender-exporter`-Symlink ausführen, nach `docker login ghcr.io`.
+- GHCR-Pakete müssen entweder **öffentlich** sein (einfachste Variante) oder Mittwald braucht einen Registry-Zugang (GitHub PAT mit `read:packages`) hinterlegt, um private Images zu ziehen.
+
+**Offene Punkte, die ich nicht raten wollte/konnte** (bitte beim Hochladen/Testen gegenprüfen):
+
+- Ob Mittwald mehrere öffentlich erreichbare Ports/Services pro Projekt unterstützt (aktuell ist nur `web` mit `ports: 80:80` als öffentlicher Eintrittspunkt gesetzt; `dashboard-api`/`converter-gateway` sind nur `expose`, also intern – falls `dashboard.html`/`converter.html` bei Mittwald auch von außen erreichbar sein müssen, braucht’s dafür ggf. eine weitere Mittwald-seitige Freigabe).
+- Ob `${VAR:-default}`/`.env`-Interpolation in der hochgeladenen Compose überhaupt ausgewertet wird – deshalb stehen in `docker-compose.mittwald.yml` literale Platzhalterwerte (z. B. `https://showroom.example.com`), die nach dem Import über Mittwalds eigene Umgebungsvariablen-Verwaltung pro Service echt gesetzt werden müssen.
+- Ob `expose`, `depends_on`, `healthcheck` von Mittwalds Parser unterstützt werden (nicht explizit als Fehler gemeldet, aber auch nicht bestätigt) – falls der nächste Upload-Versuch weitere Fehler wirft, bitte die Fehlermeldungen 1:1 hier reinkopieren, dann passe ich gezielt nach.
 
 ## Hinweise
 

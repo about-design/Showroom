@@ -1,0 +1,102 @@
+# META Showroom – Compose-Datei für Mittwald Cloud/mStudio
+#
+# WICHTIG: Das ist NICHT dieselbe Datei wie docker-compose.yml (die bleibt
+# fürs lokale `npm run docker:build`/`docker:up` mit "build:" bestehen).
+# Mittwalds Compose-Import akzeptiert nur:
+#   - "image:" (kein "build:")
+#   - kein "restart:"
+#   - keine relativen Bind-Mount-Pfade, keine "${VAR}"-Syntax in "ports:"
+# Routing/TLS/Domain übernimmt Mittwald selbst – daher kein eigener
+# nginx-Proxy-Service mehr.
+#
+# Voraussetzung: die vier Images müssen VOR dem Hochladen in der Registry
+# liegen:
+#   - showroom-web, showroom-dashboard-api:
+#     werden automatisch von .github/workflows/build-images.yml bei jedem
+#     Push auf online-docker nach ghcr.io gebaut/gepusht.
+#   - showroom-converter-mcp, showroom-converter-gateway:
+#     müssen aktuell manuell gepusht werden, siehe
+#     deploy/docker/push-converter-images.sh (Build-Kontext liegt nur lokal
+#     vor, nicht im Git-Repo).
+#
+# Nach dem Import in Mittwald: Umgebungsvariablen (SHOWROOM_ORIGIN,
+# VITE_ASSET_BASE_URL wirkt nur als Build-Arg beim Image-Bau, s.o.,
+# SHOWROOM_API_TOKEN, CLAUDE_API_KEY, ...) über Mittwalds eigene
+# Env-Var-Verwaltung pro Service setzen/überschreiben – ob die
+# "${VAR:-default}"-Syntax hier von Mittwald ausgewertet wird, ist nicht
+# bestätigt, daher unten mit literalen Platzhaltern statt Interpolation.
+
+name: meta-showroom-online
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    expose:
+      - "6379"
+
+  converter-mcp:
+    image: ghcr.io/about-design/showroom-converter-mcp:latest
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8001"
+      BLENDER_PATH: /usr/bin/blender
+      BLENDER_OUTPUT_DIR: /data/outputs
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      CLAUDE_API_KEY: ""
+      CLAUDE_ENABLED: "false"
+      GTIN_ENABLED: "false"
+    volumes:
+      - converter-outputs:/data/outputs
+    expose:
+      - "8001"
+
+  converter-gateway:
+    image: ghcr.io/about-design/showroom-converter-gateway:latest
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MCP_SERVER_URL: http://converter-mcp:8001
+      BLENDER_OUTPUT_DIR: /data/outputs
+      ALLOWED_ORIGINS: "https://showroom.example.com"
+      CLAUDE_ENABLED: "false"
+      GTIN_ENABLED: "false"
+      RATE_LIMIT_MAX: "100"
+    volumes:
+      - converter-outputs:/data/outputs
+    expose:
+      - "3000"
+
+  dashboard-api:
+    image: ghcr.io/about-design/showroom-dashboard-api:latest
+    environment:
+      NODE_ENV: production
+      DASHBOARD_API_PORT: "5080"
+      SHOWROOM_HOST: 0.0.0.0
+      SHOWROOM_ORIGIN: "https://showroom.example.com"
+      SHOWROOM_API_TOKEN: ""
+      CONVERTER_API_URL: http://converter-gateway:3000
+      BLENDER_PATH: /usr/bin/blender
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      - showroom-data:/app/src/data
+      - showroom-public:/app/public
+      - showroom-logs:/app/logs
+    expose:
+      - "5080"
+
+  web:
+    image: ghcr.io/about-design/showroom-web:latest
+    ports:
+      - "80:80"
+
+volumes:
+  redis-data:
+  converter-outputs:
+  showroom-data:
+  showroom-public:
+  showroom-logs:
