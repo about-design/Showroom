@@ -1,5 +1,33 @@
 # Changelog
 
+## MARA09.16.ad - 2026-09-16
+
+- Detail-Footer weiter verdichtet, damit alle Aktionen bei normaler Breite in einer Zeile bleiben.
+
+## MARA09.16.ac - 2026-09-16
+
+- Detail-Footer mit kompakter rechter Aktionsgruppe und vollständig sichtbarem Übernehmen-Button ausgerichtet.
+
+## MARA09.16.ab - 2026-09-16
+
+- Produktentfernen-Aktion in der Detailleiste klar beschriftet und horizontal ausgerichtet.
+
+## MARA09.16.aa - 2026-09-16
+
+- Archivdialog mit kompakten Spalten, gekürzten Pfaden und vollständigen Tooltips verbessert.
+
+## MARA09.16.z - 2026-09-16
+
+- Archivierung beim Produktentfernen umfasst auch eindeutig zugeordnete CAD- und Originaldateien.
+
+## MARA09.16.y - 2026-09-16
+
+- Produktentfernung archiviert zugehörige GLB-, USDZ- und Vorschaudateien nach bestätigter Vorschau.
+
+## MARA09.16.x - 2026-09-16
+
+- Neu-Konvertierung eines Produkts kann direkt aus der Produktdetailansicht gestartet werden.
+
 ## MARA09.16.w - 2026-09-16
 
 - Mesh-Schublade wird beim Sprung zu einer Namens-Farbregel zuverlässig eingeklappt.

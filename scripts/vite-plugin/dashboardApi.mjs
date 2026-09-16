@@ -48,7 +48,7 @@ function headerAllowsOverwrite(req) {
   const v = String(req.headers['x-overwrite'] ?? '').trim().toLowerCase()
   return v === '1' || v === 'true' || v === 'yes'
 }
-import { watch as fsWatch, createReadStream } from 'node:fs'
+import { watch as fsWatch, createReadStream, constants as fsConstants } from 'node:fs'
 import tailwindcss from '@tailwindcss/vite'
 import { createBlenderRenderMiddleware } from '../render/blenderRenderRoute.mjs'
 import { createLogger, withRequestLogger } from '../lib/logger.mjs'
@@ -326,6 +326,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
   const PRODUCTS_PATH = resolve(ROOT, 'src/data/products.json')
   const MODELS_BASE = resolve(ROOT, 'public/models')
   const MODELS_UPLOAD_DIR = resolve(ROOT, 'public/models/products')
+  const PUBLIC_ROOT = resolve(ROOT, 'public')
+  const ARCHIVE_BASE = 'D:\\Showroom Datei Move'
 
   const CAD_INDEX_PATH = resolve(ROOT, 'src/data/cad-index.json')
   const MAX_UPLOAD_BYTES = 512 * 1024 * 1024 // 512 MB
@@ -360,6 +362,49 @@ export function registerDashboardApi(middlewares, opts = {}) {
       if (!existing.has(f)) merged.push(f)
     }
     return { ...product, cadFiles: merged }
+  }
+
+  function storedFileUrl(value) {
+    return String(value || '').trim().split(/[?#]/)[0]
+  }
+
+  async function buildProductArchivePlan(data, productId) {
+    const product = data.products.find((p) => p.id === productId)
+    if (!product) throw new Error('Produkt nicht gefunden')
+    const knownFiles = [
+      { type: 'GLB', url: storedFileUrl(product.glbFile) },
+      { type: 'USDZ', url: storedFileUrl(product.usdzFile) },
+      { type: 'Thumbnail', url: storedFileUrl(product.previewImage) },
+      ...(product.cadFiles || []).map((url) => ({ type: 'CAD/Original', url: storedFileUrl(url) })),
+    ].filter((file) => file.url)
+    const uniqueKnownFiles = [...new Map(knownFiles.map((file) => [file.url, file])).values()]
+    const files = await Promise.all(uniqueKnownFiles.map(async (file) => {
+      const source = resolve(PUBLIC_ROOT, ...file.url.replace(/^\/+/, '').split('/'))
+      if (!file.url.startsWith('/models/') || !isSafePath(PUBLIC_ROOT, source)) {
+        return { ...file, source: '', target: '', status: 'Unsicherer gespeicherter Pfad', movable: false, blocking: true }
+      }
+      const shared = data.products.some((other) => other.id !== productId && [
+        other.glbFile,
+        other.usdzFile,
+        other.previewImage,
+        ...(other.cadFiles || []),
+      ].map(storedFileUrl).includes(file.url))
+      const target = resolve(ARCHIVE_BASE, relative(ROOT, source))
+      if (!isSafePath(ARCHIVE_BASE, target)) {
+        return { ...file, source, target: '', status: 'Ungültiges Archivziel', movable: false, blocking: true }
+      }
+      if (shared) return { ...file, source, target, status: 'Von anderem Produkt verwendet', movable: false, blocking: false, retained: true }
+      if (!await pathExists(source)) return { ...file, source, target, status: 'Quelldatei fehlt', movable: false, blocking: true }
+      if (await pathExists(target)) return { ...file, source, target, status: 'Zieldatei bereits vorhanden', movable: false, blocking: true }
+      return { ...file, source, target, status: 'bereit', movable: true, blocking: false }
+    }))
+    return {
+      product: { id: product.id, name: product.name || product.id },
+      archiveBase: ARCHIVE_BASE,
+      files,
+      retained: [],
+      canExecute: !files.some((file) => file.blocking),
+    }
   }
 
   // ── GLB Orientierungs-Erkennung ──────────────────────────────────────
@@ -2336,6 +2381,60 @@ export function registerDashboardApi(middlewares, opts = {}) {
         if (req.method === 'POST') {
           try {
             const rawPath = req.url.replace(/^\//, '').split('?')[0]
+            const archiveMatch = rawPath.match(/^([^/]+)\/(archive-preview|archive-remove)$/)
+            if (archiveMatch) {
+              const id = decodeURIComponent(archiveMatch[1])
+              const data = await loadProducts()
+              const plan = await buildProductArchivePlan(data, id)
+              if (archiveMatch[2] === 'archive-preview') {
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true, ...plan }))
+                return
+              }
+              if (!plan.canExecute) {
+                res.statusCode = 409
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Archivierung kann nicht sicher ausgeführt werden', ...plan }))
+                return
+              }
+              const moved = []
+              const copied = []
+              try {
+                for (const file of plan.files.filter((entry) => entry.movable)) {
+                  await mkdir(dirname(file.target), { recursive: true })
+                  await copyFile(file.source, file.target, fsConstants.COPYFILE_EXCL)
+                  copied.push(file)
+                  await unlink(file.source)
+                  copied.pop()
+                  moved.push(file)
+                }
+                data.products = data.products.filter((product) => product.id !== id)
+                await saveProducts(data)
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true, moved }))
+              } catch (error) {
+                const rollbackErrors = []
+                for (const file of copied.reverse()) {
+                  try {
+                    await unlink(file.target)
+                  } catch (rollbackError) {
+                    rollbackErrors.push(`${file.target}: ${rollbackError.message || rollbackError}`)
+                  }
+                }
+                for (const file of moved.reverse()) {
+                  try {
+                    if (await pathExists(file.source)) throw new Error('Quelle wurde zwischenzeitlich erneut angelegt')
+                    await rename(file.target, file.source)
+                  } catch (rollbackError) {
+                    rollbackErrors.push(`${file.source}: ${rollbackError.message || rollbackError}`)
+                  }
+                }
+                res.statusCode = 500
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: `Archivierung fehlgeschlagen: ${error.message || error}`, rollbackErrors }))
+              }
+              return
+            }
             const m = rawPath.match(/^([^/]+)\/preview-png$/)
             if (!m) {
               res.statusCode = 404

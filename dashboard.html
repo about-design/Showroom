@@ -42,7 +42,7 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.w</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.ad</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
@@ -232,21 +232,54 @@
   </div>
   <div class="detail-content" id="detailContent"></div>
   <div class="detail-footer">
-    <button class="btn btn-danger" id="btnDeleteProduct" style="margin-right:auto">
+    <button class="btn btn-danger" id="btnDeleteProduct">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-      Löschen
+      Produkt entfernen
     </button>
-    <a class="btn btn-ghost" id="btnShowroom" href="/" target="_blank" style="display:none">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-      Im Showroom öffnen
-    </a>
-    <button class="btn btn-ghost" id="btnCancelDetail">Abbrechen</button>
-    <button class="btn btn-primary" id="btnSaveDetail">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-      Übernehmen
-    </button>
+    <div class="detail-footer-actions">
+      <a class="btn btn-ghost" id="btnShowroom" href="/" target="_blank" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        Im Showroom öffnen
+      </a>
+      <button class="btn btn-ghost" id="btnReconvertDetail">Neu konvertieren</button>
+      <button class="btn btn-ghost" id="btnCancelDetail">Abbrechen</button>
+      <button class="btn btn-primary" id="btnSaveDetail">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Übernehmen
+      </button>
+    </div>
   </div>
 </aside>
+
+<!-- ═══════ Produkt archivieren ═══════ -->
+<div class="name-rules-modal" id="archiveRemovalModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="archiveRemovalBackdrop"></div>
+  <div class="name-rules-modal-panel archive-removal-modal-panel" role="dialog" aria-labelledby="archiveRemovalTitle" aria-modal="true">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="archiveRemovalTitle">Dateien ins Archiv verschieben</h2>
+      <div class="archive-removal-summary" id="archiveRemovalSummary"></div>
+    </div>
+    <div class="archive-removal-body">
+      <h3 class="archive-removal-heading">Gefundene Dateien</h3>
+      <div class="archive-removal-table-wrap">
+        <table class="archive-removal-table">
+          <thead><tr><th>Typ</th><th>Dateiname</th><th>Quelle</th><th>Ziel</th><th>Status</th></tr></thead>
+          <tbody id="archiveRemovalFiles"></tbody>
+        </table>
+      </div>
+      <section class="archive-removal-retained" id="archiveRemovalRetained" hidden>
+        <h3 class="archive-removal-heading">Bleibt erhalten</h3>
+        <ul id="archiveRemovalRetainedList"></ul>
+      </section>
+    </div>
+    <div class="name-rules-modal-actions">
+      <span class="archive-removal-warning" id="archiveRemovalWarning"></span>
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="archiveRemovalCancel">Abbrechen</button>
+      <button type="button" class="btn btn-danger" id="archiveRemovalConfirm">Produkt entfernen und Dateien verschieben</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══════ Globale Namens-Farbregeln ═══════ -->
 <div class="name-rules-modal" id="globalNameRulesModal" aria-hidden="true">

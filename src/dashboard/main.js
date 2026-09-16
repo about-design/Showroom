@@ -945,7 +945,21 @@ function bindEvents() {
   $('#detailPrev').addEventListener('click', () => navigateDetail(-1))
   $('#detailNext').addEventListener('click', () => navigateDetail(1))
   $('#btnSaveDetail').addEventListener('click', saveDetail)
+  $('#btnReconvertDetail').addEventListener('click', async (event) => {
+    const productId = selectedProductId
+    if (!productId) return
+    event.currentTarget.disabled = true
+    try {
+      const saved = await saveDetail()
+      if (saved) await startProductConversion(productId)
+    } finally {
+      event.currentTarget.disabled = false
+    }
+  })
   $('#btnDeleteProduct').addEventListener('click', deleteProduct)
+  $('#archiveRemovalBackdrop').addEventListener('click', closeArchiveRemovalModal)
+  $('#archiveRemovalCancel').addEventListener('click', closeArchiveRemovalModal)
+  $('#archiveRemovalConfirm').addEventListener('click', confirmArchiveRemoval)
   $('#btnSave').addEventListener('click', saveToServer)
   $('#btnExport').addEventListener('click', exportJSON)
   $('#btnAddGlb').addEventListener('click', () => glbFileInput.click())
@@ -4719,9 +4733,9 @@ function closeDetail() {
 }
 
 async function saveDetail() {
-  if (!selectedProductId) return
+  if (!selectedProductId) return false
   const p = productCache.get(selectedProductId)
-  if (!p) return
+  if (!p) return false
 
   const changes = structuredClone(p)
 
@@ -4830,59 +4844,97 @@ async function saveDetail() {
       if (oldBar) oldBar.replaceWith(newBar.firstChild)
     }
     openDetail(selectedProductId)
+    return true
   } catch (err) {
     toast(`Speichern fehlgeschlagen: ${err.message}`, 'error')
+    return false
   }
 }
 
-/** productId → { timeoutId, cardEl } – Löschungen, die noch per Toast rückgängig gemacht werden können. */
-const pendingDeletes = new Map()
-const DELETE_UNDO_MS = 6000
+let archiveRemovalPlan = null
 
-/**
- * Löschen ohne blockierenden Browser-Dialog: Karte wird sofort deaktiviert/abgeblendet
- * ("Wird gelöscht …"), der eigentliche DELETE-Request läuft erst nach einem Zeitfenster
- * mit Undo-Toast. Klick auf „Rückgängig" storniert ihn vollständig, es wurde nie etwas
- * an den Server geschickt.
- */
-function deleteProduct() {
+function closeArchiveRemovalModal() {
+  const modal = document.getElementById('archiveRemovalModal')
+  modal?.classList.remove('open')
+  modal?.setAttribute('aria-hidden', 'true')
+  archiveRemovalPlan = null
+}
+
+function showArchiveRemovalModal(plan) {
+  const modal = document.getElementById('archiveRemovalModal')
+  const files = plan.files || []
+  const retained = [
+    ...files.filter((file) => file.retained),
+    ...(plan.retained || []),
+  ]
+  document.getElementById('archiveRemovalSummary').innerHTML = `
+    <span><strong>Produkt:</strong> ${esc(plan.product.name)} / ${esc(plan.product.id)}</span>
+    <span><strong>Archivbasis:</strong> <code>${esc(plan.archiveBase)}</code></span>
+    <span><strong>Gefundene Dateien:</strong> ${files.length}</span>`
+  document.getElementById('archiveRemovalFiles').innerHTML = files.length
+    ? files.map((file) => {
+      const filename = String(file.source || file.url || '').split(/[\\/]/).pop()
+      const statusClass = file.status === 'bereit' ? 'archive-removal-status--ready' : 'archive-removal-status--blocked'
+      const source = file.source || file.url
+      const target = file.target || '—'
+      return `<tr><td class="archive-removal-type">${esc(file.type)}</td><td><span class="archive-removal-ellipsis" title="${esc(filename)}">${esc(filename)}</span></td><td><code class="archive-removal-ellipsis" title="${esc(source)}">${esc(source)}</code></td><td><code class="archive-removal-ellipsis" title="${esc(target)}">${esc(target)}</code></td><td class="${statusClass}"><span class="archive-removal-ellipsis" title="${esc(file.status)}">${esc(file.status)}</span></td></tr>`
+    }).join('')
+    : '<tr><td colspan="5">Keine archivierungsfähigen Dateien gespeichert.</td></tr>'
+  const retainedSection = document.getElementById('archiveRemovalRetained')
+  retainedSection.hidden = retained.length === 0
+  document.getElementById('archiveRemovalRetainedList').innerHTML = retained.map((file) =>
+    `<li><strong>${esc(file.type)}:</strong> ${esc(file.url || file.source || '—')} – ${esc(file.status)}</li>`,
+  ).join('')
+  const warning = document.getElementById('archiveRemovalWarning')
+  warning.textContent = plan.canExecute ? '' : 'Archivierung ist erst möglich, wenn alle Konflikte und fehlenden Quellen geklärt sind.'
+  const confirm = document.getElementById('archiveRemovalConfirm')
+  confirm.disabled = !plan.canExecute
+  archiveRemovalPlan = plan
+  modal.classList.add('open')
+  modal.setAttribute('aria-hidden', 'false')
+}
+
+async function deleteProduct() {
   if (!selectedProductId) return
   const p = productCache.get(selectedProductId)
   if (!p) return
-  const id = selectedProductId
-  closeDetail()
-
-  const cardEl = productGrid.querySelector(`.product-card[data-id="${cssEscapeId(id)}"]`)
-  if (cardEl) cardEl.classList.add('pending-delete')
-
-  const timeoutId = setTimeout(() => void finalizeDelete(id), DELETE_UNDO_MS)
-  pendingDeletes.set(id, { timeoutId, cardEl })
-
-  undoToast(`Produkt „${p.name}" wird gelöscht …`, () => cancelPendingDelete(id), DELETE_UNDO_MS)
-}
-
-function cancelPendingDelete(id) {
-  const pending = pendingDeletes.get(id)
-  if (!pending) return
-  clearTimeout(pending.timeoutId)
-  pendingDeletes.delete(id)
-  pending.cardEl?.classList.remove('pending-delete')
-}
-
-async function finalizeDelete(id) {
-  const pending = pendingDeletes.get(id)
-  pendingDeletes.delete(id)
-  const p = productCache.get(id)
+  const button = document.getElementById('btnDeleteProduct')
+  button.disabled = true
   try {
-    const res = await fetch(`/__api/products/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    const res = await fetch(`/__api/products/${encodeURIComponent(p.id)}/archive-preview`, { method: 'POST' })
+    const plan = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(plan.error || plan.message || `HTTP ${res.status}`)
+    showArchiveRemovalModal(plan)
+  } catch (error) {
+    toast(`Archivvorschau fehlgeschlagen: ${error.message || error}`, 'error')
+  } finally {
+    button.disabled = false
+  }
+}
+
+async function confirmArchiveRemoval() {
+  const plan = archiveRemovalPlan
+  if (!plan?.product?.id || !plan.canExecute) return
+  const confirm = document.getElementById('archiveRemovalConfirm')
+  confirm.disabled = true
+  try {
+    const res = await fetch(`/__api/products/${encodeURIComponent(plan.product.id)}/archive-remove`, { method: 'POST' })
     const data = await parseJsonResponse(res)
-    if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
-    productCache.delete(id)
-    pending?.cardEl?.remove()
-    toast(`Produkt „${p?.name || id}" gelöscht`, 'info')
+    if (!res.ok) {
+      if (data.files) showArchiveRemovalModal(data)
+      throw new Error(data.error || data.message || `HTTP ${res.status}`)
+    }
+    const productId = plan.product.id
+    productCache.delete(productId)
+    currentPageProducts = currentPageProducts.filter((product) => product.id !== productId)
+    productGrid.querySelector(`.product-card[data-id="${cssEscapeId(productId)}"]`)?.remove()
+    closeArchiveRemovalModal()
+    closeDetail()
+    toast(`Produkt „${plan.product.name}" archiviert und entfernt`, 'success')
   } catch (err) {
-    pending?.cardEl?.classList.remove('pending-delete')
-    toast(`Löschen fehlgeschlagen: ${err.message}`, 'error')
+    toast(`Archivierung fehlgeschlagen: ${err.message || err}`, 'error')
+  } finally {
+    if (archiveRemovalPlan?.canExecute) confirm.disabled = false
   }
 }
 

@@ -1,6 +1,13 @@
 const APP_VERSION_INFO = {
-  version: 'MARA09.16.w',
+  version: 'MARA09.16.ad',
   history: [
+    { version: 'MARA09.16.ad', description: 'Detail-Footer weiter verdichtet, damit alle Aktionen bei normaler Breite in einer Zeile bleiben.' },
+    { version: 'MARA09.16.ac', description: 'Detail-Footer mit kompakter rechter Aktionsgruppe und vollständig sichtbarem Übernehmen-Button ausgerichtet.' },
+    { version: 'MARA09.16.ab', description: 'Produktentfernen-Aktion in der Detailleiste klar beschriftet und horizontal ausgerichtet.' },
+    { version: 'MARA09.16.aa', description: 'Archivdialog mit kompakten Spalten, gekürzten Pfaden und vollständigen Tooltips verbessert.' },
+    { version: 'MARA09.16.z', description: 'Archivierung beim Produktentfernen umfasst auch eindeutig zugeordnete CAD- und Originaldateien.' },
+    { version: 'MARA09.16.y', description: 'Produktentfernung archiviert zugehörige GLB-, USDZ- und Vorschaudateien nach bestätigter Vorschau.' },
+    { version: 'MARA09.16.x', description: 'Neu-Konvertierung eines Produkts kann direkt aus der Produktdetailansicht gestartet werden.' },
     { version: 'MARA09.16.w', description: 'Mesh-Schublade wird beim Sprung zu einer Namens-Farbregel zuverlässig eingeklappt.' },
     { version: 'MARA09.16.v', description: 'Über Mesh-Kontextmenü kann direkt zu einer vorhandenen Namens-Farbregel gesprungen werden.' },
     { version: 'MARA09.16.u', description: 'Einzelteile-Schublade horizontal an den Stammdaten ausgerichtet.' },
