@@ -54,8 +54,9 @@ export default defineConfig({
     // dürfen nicht aus dem LAN erreichbar sein. Für bewussten LAN-Zugriff
     // explizit via `vite --host` oder SHOWROOM_HOST=0.0.0.0 überschreiben.
     host: process.env.SHOWROOM_HOST || '127.0.0.1',
-    // Beim Start Root öffnen = Showroom (index.html), nicht Port 3000 (Converter-API).
-    open: '/',
+    // Browser-Öffnung wird über das Start-Skript gesteuert, damit beim Start
+    // nicht doppelte Tabs im Browser entstehen.
+    open: false,
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
       '/outputs': { target: 'http://localhost:3000', changeOrigin: true },

@@ -4,9 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>META Online – 3D Showroom</title>
+  <style>
+    .sr-page-switch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 10px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.04);
+      color: #f8fafc;
+      text-decoration: none;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      transition: background .2s ease, border-color .2s ease;
+    }
+    .sr-page-switch:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <script type="module" src="/src/version.js"></script>
   <script type="module" src="/src/main.js"></script>
   <script async type="module" src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
 </head>
@@ -38,12 +60,13 @@
     <!-- ─── Top bar ─── -->
     <header class="sr-topbar">
       <div class="sr-topbar-left">
-        <div class="sr-logo">
-          <div class="sr-logo-mark">M</div>
-          <span>META</span>
-        </div>
+        <a href="/" class="sr-logo" title="Zum Showroom">
+          <img src="/img/meta-logo.svg" alt="META" class="sr-logo-img">
+        </a>
         <span class="sr-topbar-sep"></span>
         <span class="sr-topbar-title">3D Showroom</span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.g</span></span>
+        <a href="/dashboard.html" class="sr-page-switch" title="Zur Produktverwaltung">Produktverwaltung</a>
       </div>
       <div class="sr-topbar-center" x-show="currentProduct">
         <span class="sr-product-name" x-text="currentProduct?.name"></span>
@@ -73,6 +96,8 @@
            :class="{ 'sr-sidebar-closed': sidebarClosed }"
            @mouseenter="sidebarClosed && (sidebarPeek = true)"
            @mouseleave="sidebarPeek = false">
+       <div class="sr-sidebar-resize" role="separator" aria-orientation="vertical"
+         aria-label="Breite der Produktliste ändern" @pointerdown="startSidebarResize($event)"></div>
       <button type="button" class="sr-sidebar-toggle" @click="sidebarClosed = !sidebarClosed"
               :title="sidebarClosed ? 'Sidebar öffnen' : 'Sidebar schließen'">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -82,11 +107,18 @@
       </button>
       <div class="sr-sidebar-header">
         <span class="sr-sidebar-label">Produkte</span>
-        <span class="sr-sidebar-count" x-text="colorFilter ? (filteredProducts.length + ' von ' + products.length) : products.length"></span>
+        <span class="sr-sidebar-count" x-text="(colorFilter || productSearch) ? (filteredProducts.length + ' von ' + products.length) : products.length"></span>
+      </div>
+      <div class="sr-sidebar-search">
+        <input type="search" class="sr-sidebar-search-input" x-model="productSearch"
+               placeholder="Produkt oder ID suchen" aria-label="Produkte nach Name oder ID suchen">
       </div>
       <div class="sr-sidebar-list">
         <template x-for="product in filteredProducts" :key="product.id">
           <button type="button" @click="selectProduct(product)"
+                  @mouseenter="showProductPreview(product, $event)"
+                  @mousemove="moveProductPreview($event)"
+                  @mouseleave="hideProductPreview()"
                   class="sr-sidebar-item"
                   :class="currentProduct?.id === product.id && 'active'">
             <span class="sr-sidebar-item-name" x-text="product.name"></span>
@@ -99,6 +131,11 @@
         <span x-text="mobileMenuClosed ? 'Produkte anzeigen' : 'Schließen'"></span>
       </button>
     </aside>
+
+    <div class="sr-product-hover-preview" x-show="hoveredProduct" x-cloak
+         :style="productPreviewStyle" aria-hidden="true">
+      <img :src="productPreviewUrl(hoveredProduct)" alt="">
+    </div>
 
     <!-- ─── Farbfilter: nur Produkte in gewählter RAL-Farbe ─── -->
     <div class="sr-color-filter">

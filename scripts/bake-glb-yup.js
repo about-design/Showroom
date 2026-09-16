@@ -668,9 +668,14 @@ function applyCliRalBaseColor(doc, lockedSet = null) {
   const { rLin, gLin, bLin, r, g, b } = item
   const srgbHex = '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('').toUpperCase()
   let n = 0
-  for (const mat of doc.getRoot().listMaterials()) {
+  const materials = doc.getRoot().listMaterials()
+  log.info(`    Base Color: ${materials.length} Material(ien) für ${key} geprüft`)
+  for (const mat of materials) {
     if (lockedSet?.has(mat)) continue
-    if (mat.getBaseColorTexture()) continue
+    if (mat.getBaseColorTexture()) {
+      mat.setBaseColorTexture(null)
+      log.info(`    Base Color: Textur bei "${mat.getName() || '(unnamed)'}" entfernt`)
+    }
     mat.setBaseColorFactor([rLin, gLin, bLin, 1])
     lockedSet?.add(mat)
     n++
@@ -1261,6 +1266,38 @@ function applyMappingAndCliRalBaseColors(doc) {
 }
 
 /**
+ * Einige CAD-Exporte enthalten Primitives ohne Materialreferenz. Ohne Material
+ * können weder Standardfarbe noch Namens-/Geometrie-Regeln im GLB gespeichert
+ * werden. Jedes solche Primitive erhält deshalb ein eigenes Material, damit
+ * Regeln einzelne Bauteile weiterhin unterschiedlich einfärben können.
+ */
+function ensurePrimitiveMaterials(doc) {
+  let created = 0
+  const visitedMeshes = new Set()
+
+  function visitNode(node) {
+    const mesh = node.getMesh()
+    if (mesh && !visitedMeshes.has(mesh)) {
+      visitedMeshes.add(mesh)
+      const meshName = (mesh.getName() || node.getName() || 'Mesh').trim() || 'Mesh'
+      mesh.listPrimitives().forEach((primitive, index) => {
+        if (primitive.getMaterial()) return
+        const material = doc.createMaterial(`${meshName}__primitive_${index + 1}`)
+        primitive.setMaterial(material)
+        created++
+      })
+    }
+    for (const child of node.listChildren()) visitNode(child)
+  }
+
+  for (const scene of doc.getRoot().listScenes()) {
+    for (const rootChild of scene.listChildren()) visitNode(rootChild)
+  }
+  if (created) log.info(`    ${created} fehlende GLB-Materialzuweisung(en) angelegt`)
+  return created
+}
+
+/**
  * Generischer Fallback: erkennt Farbwoerter in Material-/Mesh-/Node-Namen
  * und setzt die entsprechende RAL-Basisfarbe.
  */
@@ -1406,6 +1443,55 @@ function sceneRuleLabel(t) {
   return t
 }
 
+/** RegExp mit g/y darf keinen lastIndex aus einem vorherigen Bauteil mitnehmen. */
+function matchesRuleRegex(regex, value) {
+  regex.lastIndex = 0
+  const matches = regex.test(value)
+  regex.lastIndex = 0
+  return matches
+}
+
+/**
+ * Szenenregeln zielen auf ein einzelnes Mesh bzw. einen Knoten. Teilt dieses
+ * sich ein Material mit anderen Primitives, wird es vor dem Färben kopiert,
+ * damit der Treffer nicht auf nicht passende Bauteile übergreift.
+ */
+function isolateSharedMaterialsForSceneRules(doc, sceneRules) {
+  if (!sceneRules.length) return 0
+  const references = new Map()
+  const primitives = []
+
+  function visitNode(node) {
+    const mesh = node.getMesh()
+    if (mesh) {
+      for (const [index, primitive] of mesh.listPrimitives().entries()) {
+        const material = primitive.getMaterial()
+        if (!material) continue
+        primitives.push({ node, mesh, index, primitive, material })
+        references.set(material, (references.get(material) || 0) + 1)
+      }
+    }
+    for (const child of node.listChildren()) visitNode(child)
+  }
+
+  for (const scene of doc.getRoot().listScenes()) {
+    for (const rootChild of scene.listChildren()) visitNode(rootChild)
+  }
+
+  let isolated = 0
+  for (const entry of primitives) {
+    if ((references.get(entry.material) || 0) < 2) continue
+    const meshName = (entry.mesh.getName() || entry.node.getName() || 'Mesh').trim() || 'Mesh'
+    const copy = doc.createMaterial()
+    copy.copy(entry.material)
+    copy.setName(`${entry.material.getName() || 'Material'}__${meshName}_${entry.index + 1}`)
+    entry.primitive.setMaterial(copy)
+    isolated++
+  }
+  if (isolated) log.info(`    ${isolated} gemeinsam genutzte Materialzuweisung(en) für Szenenregeln getrennt`)
+  return isolated
+}
+
 /**
  * Material: Regex auf mat.getName(). Szenen-Regeln: node, mesh, nodePath, extras.
  * Regel-Array: global → Produkt; bei mehreren Treffern gewinnt die **letzte** passende Regel.
@@ -1467,7 +1553,7 @@ function applyNameColorRules(doc, rules, remappedWeakSet) {
     let chosen = null
     for (const rule of materialRules) {
       const stat = ruleStats.get(rule); if (stat) stat.scanned++
-      if (!rule.regex.test(matName)) continue
+      if (!matchesRuleRegex(rule.regex, matName)) continue
       chosen = rule
       if (stat) stat.matched++
     }
@@ -1491,6 +1577,8 @@ function applyNameColorRules(doc, rules, remappedWeakSet) {
       }
     }
   }
+
+  isolateSharedMaterialsForSceneRules(doc, sceneRules)
 
   function haystackForSceneRule(rule, node, mesh, meshName, nodePathStr, extrasStr) {
     if (rule.target === 'node') return node.getName() || ''
@@ -1519,7 +1607,7 @@ function applyNameColorRules(doc, rules, remappedWeakSet) {
           if (sampledSceneHays.length < SAMPLE_LIMIT) {
             sampledSceneHays.push(`${rule.target}="${(hay || '').slice(0, 80)}"`)
           }
-          if (!rule.regex.test(hay)) continue
+          if (!matchesRuleRegex(rule.regex, hay)) continue
           sceneChosen = rule
           sceneHay = hay
           if (stat) stat.matched++
@@ -1806,13 +1894,17 @@ function applyMaterialFinish(doc, { forcedRalCode = null, surfaceMode = null } =
   return result
 }
 
-/** Entfernt Meshopt und aktiviert Draco-Kompression. */
-async function stripMeshoptApplyDraco(doc) {
+/** Entfernt Meshopt, ohne die Materialreferenzen vor den Farb-Schichten anzutasten. */
+function stripMeshopt(doc) {
   for (const ext of doc.getRoot().listExtensionsUsed()) {
     if (ext.extensionName === 'EXT_meshopt_compression') {
       ext.dispose()
     }
   }
+}
+
+/** Komprimiert erst nach allen Farb-, Regel- und Finish-Änderungen erneut mit Draco. */
+async function applyDracoCompression(doc) {
   // Draco-Kompression auf alle Meshes, egal ob Meshopt vorlag oder nicht
   try {
     const { draco } = await import('@gltf-transform/functions')
@@ -1875,6 +1967,7 @@ async function main() {
             log.info(`  mtl-texture-extra-dirs: ${mtlTextureExtraDirs.join(', ')}`)
     }
   }
+        if (cliRalCode) log.info(`  Standardfarbe (--ral): ${ralPaletteKeyFromCli(cliRalCode) || cliRalCode}`)
     log.info()
 
   const files = singleFile ? [path.resolve(singleFile)] : findGlbs(inputDir)
@@ -1956,9 +2049,10 @@ async function main() {
     const registryEntry = useRegistry ? registry[basename] : null
     try {
       const doc = await io.read(file)
-      await stripMeshoptApplyDraco(doc)
+      stripMeshopt(doc)
       const mtlTexCount = await applyMtlDeclaredBaseTexturesFromMtl(doc)
       if (mtlTexCount > 0) log.info(`  MTL-Pflichttexturen: ${mtlTexCount} Material-Update(s)`)
+      ensurePrimitiveMaterials(doc)
       // Verzinkt/Finish nur aus CLI oder Registry, nicht aus Dateiname (_VZK/_RAL_)
       const forcedRalCode =
         cliRalCode ||
@@ -2011,6 +2105,7 @@ async function main() {
           const surfaceDir = path.join(outDir, materialInfo.surfaceCategory)
           const out = path.join(surfaceDir, relPath)
           fs.mkdirSync(path.dirname(out), { recursive: true })
+          await applyDracoCompression(doc)
           await io.write(out, doc)
           const newSize = fs.statSync(out).size
           registry[basename] = makeRegistryEntry(relPath, orientation, orientationDetail, materialInfo, originalSize, newSize, out)
@@ -2059,9 +2154,11 @@ async function main() {
           useRegistry && registryEntry?.materials?.length
             ? applyMaterialFinishFromRegistry(doc, { ...registryEntry, ralCode: forcedRalCode || registryEntry.ralCode }, cliSurfaceMode)
             : applyMaterialFinish(doc, { forcedRalCode, surfaceMode: cliSurfaceMode })
+        await applyDracoCompression(doc)
         await io.write(file, doc)
         const newSize = fs.statSync(file).size
         registry[basename] = makeRegistryEntry(relPath, orientation, orientationDetail, materialInfo, originalSize, newSize, file)
+        modified++
         continue
       }
 
@@ -2099,10 +2196,12 @@ async function main() {
         const surfaceDir = path.join(outDir, materialInfo.surfaceCategory)
         outPath = path.join(surfaceDir, relPath)
         fs.mkdirSync(path.dirname(outPath), { recursive: true })
+        await applyDracoCompression(doc)
         await io.write(outPath, doc)
       } else {
         outPath = file
         if (!singleFile) fs.copyFileSync(file, file + '.bak')
+        await applyDracoCompression(doc)
         await io.write(file, doc)
       }
 

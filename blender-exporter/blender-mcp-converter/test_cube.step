@@ -1,0 +1,19 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Test STEP file with simple cube'), '2;1');
+FILE_NAME('test_cube.step', '2025-11-26T15:00:00', ('Test User'), ('Test Organization'), 'CAD System', 'Test Generator', '');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+
+DATA;
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=CARTESIAN_POINT('',(10.,0.,0.));
+#3=CARTESIAN_POINT('',(10.,10.,0.));
+#4=CARTESIAN_POINT('',(0.,10.,0.));
+#5=CARTESIAN_POINT('',(0.,0.,10.));
+#6=CARTESIAN_POINT('',(10.,0.,10.));
+#7=CARTESIAN_POINT('',(10.,10.,10.));
+#8=CARTESIAN_POINT('',(0.,10.,10.));
+ENDSEC;
+
+END-ISO-10303-21;

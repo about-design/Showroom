@@ -15,7 +15,6 @@ const INTERNAL_ONLY_FIELDS = [
   '_detectedOrientation',
   'cadFiles',
   'shopwareProductId',
-  'previewImage',
   'previewImageGeneratedAt',
   'conversionPreset',
 ]

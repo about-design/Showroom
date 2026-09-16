@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM META Showroom - Start fuer Anwender (ohne Admin)
-REM Startet Redis/Memurai, Pre-Flight, API + MCP + Vite Preview, oeffnet Browser.
+REM Startet Redis/Memurai sowie den aktuellen Vite-, API- und MCP-Stack.
 
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
@@ -87,19 +87,9 @@ if errorlevel 1 (
     )
 )
 
-REM --- dist vorhanden? ---
-if not exist "%ROOT%\dist\index.html" (
-    echo FEHLER: dist\index.html fehlt. IT muss install-windows.ps1 ausfuehren.
-    pause
-    exit /b 1
-)
-
-REM --- Pre-Flight ---
-echo Pre-Flight-Checks...
-node scripts\start-services.mjs
-if errorlevel 1 (
-    echo.
-    echo Pre-Flight fehlgeschlagen. Siehe Meldungen oben.
+REM --- Projekt-Abhaengigkeiten vorhanden? ---
+if not exist "%ROOT%\package.json" (
+    echo FEHLER: package.json fehlt. Die Showroom-Installation ist unvollstaendig.
     pause
     exit /b 1
 )
@@ -110,12 +100,14 @@ if exist "%PID_FILE%" del /f /q "%PID_FILE%"
 
 echo.
 echo Dienste starten (API :3000, MCP :8001, Showroom :5050)...
-echo Fenster minimiert lassen - zum Beenden "META Showroom stoppen" verwenden.
+echo Hintergrund-Start aktiv - Konsolenfenster wird verborgen.
 echo.
 
 set "STACK_LOG=%LOG_BASE%\stack.log"
 
-start "META Showroom Stack" /MIN cmd /c "set PATH=%NODE_PORTABLE%;%PATH% && cd /d \"%ROOT%\" && set LOG_DIR=%LOG_BASE% && set BLENDER_OUTPUT_DIR=%OUT_BASE% && npx concurrently -n mcp,api,vite -c blue,green,yellow \"npm run start:mcp\" \"npm run start:api\" \"npm run preview\" >> \"%STACK_LOG%\" 2>&1"
+REM Startet den Stack im Hintergrund ohne sichtbares Konsolenfenster. Das
+REM eigentliche Showroom wird als eigener Browser-Tab geöffnet.
+start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Set-Location '%ROOT%'; & '%ROOT%\scripts\start-showroom-stack.cmd'"
 
 REM Kurz warten bis Vite hoert
 ping 127.0.0.1 -n 5 >nul

@@ -116,8 +116,8 @@ body {
 .top-bar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1rem 2rem;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: #464952;
   position: sticky; top: 0; z-index: 100;
 }
 .top-bar-left { display: flex; align-items: center; gap: 1rem; }
@@ -128,8 +128,17 @@ body {
 .logo-img {
   height: 22px; width: auto; display: block;
 }
-.breadcrumb { display: flex; align-items: center; gap: .4rem; font-size: .82rem; color: var(--text-muted); }
-.breadcrumb span { color: var(--text-secondary); }
+.breadcrumb { display: flex; align-items: center; gap: .4rem; font-size: .82rem; color: rgba(255, 255, 255, 0.62); }
+.breadcrumb span { color: #f8fafc; }
+.breadcrumb .sr-topbar-version {
+  display: inline;
+  color: #f8fafc;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
 .top-bar-right { display: flex; align-items: center; gap: .75rem; }
 
 /* ─── Konvertierung (Top-Bar, Hintergrund-Jobs) ─── */

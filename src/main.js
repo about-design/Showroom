@@ -116,16 +116,26 @@ function showroomApp() {
     showOriginalOrientation: false,
     sidebarClosed: false,
     sidebarPeek: false,
+    productSearch: '',
+    sidebarWidth: 320,
+    hoveredProduct: null,
+    productPreviewStyle: '',
     settingsOpen: false,
     /** RAL-Code oder null = alle Farben. Filtert die Produktliste nach defaultColor. */
     colorFilter: null,
 
-    /** Produkte, gefiltert nach colorFilter (defaultColor). */
+    /** Produkte, gefiltert nach Farbe sowie Name oder ID. */
     get filteredProducts() {
-      if (!this.colorFilter) return this.products
-      return this.products.filter(
-        (p) => resolveEffectiveDefaultColorOrFallback(p) === this.colorFilter,
-      )
+      const searchTerm = this.productSearch.trim().toLocaleLowerCase('de-DE')
+      return this.products.filter((product) => {
+        const matchesColor = !this.colorFilter
+          || resolveEffectiveDefaultColorOrFallback(product) === this.colorFilter
+        const searchableText = [product.name, product.id, product.specs?.load]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase('de-DE')
+        return matchesColor && (!searchTerm || searchableText.includes(searchTerm))
+      })
     },
 
     setColorFilter(ralCode) {
@@ -135,6 +145,52 @@ function showroomApp() {
       if (!stillVisible && list.length) {
         this.selectProduct(list[0])
       }
+    },
+
+    startSidebarResize(event) {
+      if (event.button !== 0) return
+      event.preventDefault()
+      const startX = event.clientX
+      const startWidth = this.sidebarWidth
+      const resize = (moveEvent) => {
+        const width = Math.min(480, Math.max(260, startWidth + moveEvent.clientX - startX))
+        this.sidebarWidth = width
+        document.documentElement.style.setProperty('--sr-sidebar-w', `${width}px`)
+      }
+      const finish = () => {
+        window.removeEventListener('pointermove', resize)
+        window.removeEventListener('pointerup', finish)
+      }
+      window.addEventListener('pointermove', resize)
+      window.addEventListener('pointerup', finish, { once: true })
+    },
+
+    showProductPreview(product, event) {
+      if (!product.previewImage) return
+      this.hoveredProduct = product
+      this.moveProductPreview(event)
+    },
+
+    moveProductPreview(event) {
+      if (!this.hoveredProduct) return
+      const width = 292
+      const height = 242
+      const gap = 18
+      const left = event.clientX + width + gap > window.innerWidth
+        ? Math.max(12, event.clientX - width - gap)
+        : event.clientX + gap
+      const top = event.clientY + height + gap > window.innerHeight
+        ? Math.max(12, event.clientY - height - gap)
+        : event.clientY + gap
+      this.productPreviewStyle = `left:${left}px; top:${top}px;`
+    },
+
+    hideProductPreview() {
+      this.hoveredProduct = null
+    },
+
+    productPreviewUrl(product) {
+      return product?.previewImage ? resolveAssetUrl(product.previewImage) : ''
     },
 
     init() {

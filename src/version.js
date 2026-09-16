@@ -1,0 +1,92 @@
+const APP_VERSION_INFO = {
+  version: 'MARA09.16.g',
+  history: [
+    { version: 'MARA09.16.g', description: 'Darstellung der Versions-Hover-History verbessert.' },
+    { version: 'MARA09.16.f', description: 'Änderungshistorie über die Versionsanzeige hinzugefügt.' },
+    { version: 'MARA09.16.e', description: 'Showroom-Produktliste um Hover-Vorschauen mit vorhandenen Produktbildern erweitert.' },
+    { version: 'MARA09.16.d', description: 'Showroom-Produktliste um Live-Suche und verstellbare Breite erweitert.' },
+    { version: 'MARA09.16.c', description: 'Kopfzeilen von Showroom und Produktverwaltung vereinheitlicht.' },
+    { version: 'MARA09.16.b', description: 'Versionsanzeige und Showroom-Button in der Produktverwaltung korrigiert.' },
+    { version: 'MARA09.16.a', description: 'Zentrale Versions- und Historie-Notierung eingeführt.' },
+  ],
+};
+
+if (typeof window !== 'undefined') {
+  window.APP_VERSION = APP_VERSION_INFO.version;
+  window.APP_HISTORY = APP_VERSION_INFO.history;
+}
+
+if (typeof document !== 'undefined') {
+  window.addEventListener('DOMContentLoaded', () => {
+    const history = window.APP_HISTORY || APP_VERSION_INFO.history;
+    const badge = document.getElementById('appVersionBadge');
+    const trigger = document.querySelector('.sr-topbar-version');
+    if (!badge || !trigger) return;
+
+    badge.textContent = window.APP_VERSION || APP_VERSION_INFO.version;
+    trigger.classList.add('version-history-trigger');
+    trigger.tabIndex = 0;
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('aria-label', 'Änderungshistorie öffnen');
+
+    const makeEntries = (entries) => entries.map((entry) =>
+      `<li><strong>${entry.version}</strong><span>${entry.description}</span></li>`,
+    ).join('');
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'version-history-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.innerHTML = `<div class="version-history-heading">Letzte Änderungen</div><ul>${makeEntries(history.slice(0, 5))}</ul>`;
+    trigger.append(tooltip);
+
+    const modal = document.createElement('div');
+    modal.className = 'version-history-modal';
+    modal.hidden = true;
+    modal.innerHTML = `<div class="version-history-dialog" role="dialog" aria-modal="true" aria-labelledby="versionHistoryTitle">
+      <div class="version-history-dialog-header">
+        <h2 id="versionHistoryTitle">Änderungshistorie</h2>
+        <button type="button" class="version-history-close" aria-label="Historie schließen">×</button>
+      </div>
+      <ul class="version-history-full-list">${makeEntries(history)}</ul>
+      <button type="button" class="version-history-close-button">Schließen</button>
+    </div>`;
+    document.body.append(modal);
+
+    const closeModal = () => { modal.hidden = true; };
+    const openModal = () => { modal.hidden = false; modal.querySelector('.version-history-close').focus(); };
+    trigger.addEventListener('click', openModal);
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openModal();
+      }
+    });
+    modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(); });
+    modal.querySelector('.version-history-close').addEventListener('click', closeModal);
+    modal.querySelector('.version-history-close-button').addEventListener('click', closeModal);
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModal(); });
+
+    const style = document.createElement('style');
+    style.textContent = `
+      .version-history-trigger { position: relative; display: inline-flex !important; cursor: pointer; }
+      .version-history-tooltip { position: absolute; top: calc(100% + 12px); left: -12px; display: none; box-sizing: border-box; width: min(480px, calc(100vw - 24px)); padding: 12px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: #252830; box-shadow: 0 12px 32px rgba(0,0,0,.32); color: #f8fafc; z-index: 110; }
+      .version-history-trigger:hover .version-history-tooltip, .version-history-trigger:focus .version-history-tooltip { display: block; }
+      .version-history-heading { margin-bottom: 8px; color: #f8fafc; font-size: .76rem; font-weight: 700; }
+      .version-history-tooltip ul, .version-history-full-list { margin: 0; padding: 0; list-style: none; }
+      .version-history-tooltip li, .version-history-full-list li { display: grid; gap: 3px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.1); font-size: .72rem; line-height: 1.35; }
+      .version-history-tooltip li:first-child, .version-history-full-list li:first-child { border-top: 0; padding-top: 0; }
+      .version-history-tooltip strong, .version-history-full-list strong { color: #f8fafc; }
+      .version-history-tooltip span, .version-history-full-list span { color: rgba(248,250,252,.74); overflow-wrap: anywhere; white-space: normal; }
+      .version-history-modal[hidden] { display: none; }
+      .version-history-modal { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.55); }
+      .version-history-dialog { width: min(560px, 100%); max-height: min(680px, calc(100vh - 40px)); overflow: auto; padding: 20px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: #252830; box-shadow: 0 24px 64px rgba(0,0,0,.45); color: #f8fafc; }
+      .version-history-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+      .version-history-dialog h2 { margin: 0; font-size: 1rem; }
+      .version-history-close { border: 0; background: transparent; color: #f8fafc; font-size: 1.5rem; line-height: 1; cursor: pointer; }
+      .version-history-close-button { margin-top: 16px; padding: 7px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 6px; background: rgba(255,255,255,.08); color: #f8fafc; font: inherit; font-size: .8rem; cursor: pointer; }
+    `;
+    document.head.append(style);
+  });
+}
+
+export default APP_VERSION_INFO;
