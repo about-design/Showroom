@@ -649,6 +649,7 @@ const $ = (s) => document.querySelector(s)
 const statsStrip = $('#statsStrip')
 const productGrid = $('#productGrid')
 const searchInput = $('#searchInput')
+const searchClear = $('#searchClear')
 const filterGroup = $('#filterGroup')
 const viewToggle = $('#viewToggle')
 const resultCount = $('#resultCount')
@@ -838,6 +839,7 @@ async function init() {
 /** Spiegelt die aus localStorage wiederhergestellten Filter/Sort/Ansicht-Werte in die Toolbar-UI. */
 function syncToolbarUiFromState() {
   searchInput.value = searchQuery
+  searchClear.hidden = searchInput.value.length === 0
   filterGroup.querySelectorAll('.filter-chip').forEach(c =>
     c.classList.toggle('active', c.dataset.filter === currentFilter))
   statusFilterGroup.querySelectorAll('.filter-chip').forEach(c =>
@@ -858,8 +860,16 @@ function bindEvents() {
   }
 
   searchInput.addEventListener('input', () => {
+    searchClear.hidden = searchInput.value.length === 0
     clearTimeout(_searchDebounce)
     _searchDebounce = setTimeout(applyFilters, 280)
+  })
+  searchClear.addEventListener('click', () => {
+    searchInput.value = ''
+    searchClear.hidden = true
+    clearTimeout(_searchDebounce)
+    applyFilters()
+    searchInput.focus()
   })
 
   filterGroup.addEventListener('click', (e) => {
@@ -1437,6 +1447,8 @@ function renderGrid() {
     const tags = buildTags(p)
     const mainCat = String(p.mainCategory || '').trim()
     const hasThumb = !!(p.previewImage && String(p.previewImage).trim())
+    const conversionStatus = getProductConversionStatus(p)
+    const liveConversion = getLiveConversionForProduct(p.id)
 
     return `
     <div class="product-card" data-id="${p.id}" style="animation-delay:${Math.min(i, 12) * 25}ms">
@@ -1452,6 +1464,11 @@ function renderGrid() {
         </div>`}
         <span class="card-type-badge ${badgeClass}">${badgeLabel}</span>
         <span class="card-color-dot" style="background:${color}" title="${isDefaultColorMappingAuto(p.defaultColor) ? 'Automatisch (MTL-Mapping)' : esc(p.defaultColor)}"></span>
+        ${liveConversion ? `<div class="card-conversion-live" aria-live="polite">
+          <span class="card-conversion-live-dot" aria-hidden="true"></span>
+          <span class="card-conversion-live-id">${esc(p.id)}</span>
+          <span class="card-conversion-live-time" data-job-id="${esc(liveConversion.jobId)}">${formatDashConvElapsedMs(Date.now() - liveConversion.startedAt)}</span>
+        </div>` : ''}
       </div>
       <div class="card-body">
         <div class="card-name" title="${esc(p.name)}">${esc(p.name)}</div>
@@ -1467,6 +1484,9 @@ function renderGrid() {
         <div class="card-specs">
           ${specBit('↕', p.specs?.height)}${specBit('↔', p.specs?.width)}
           ${specBit('↗', p.specs?.depth)}${specBit('⚖', p.specs?.load)}
+        </div>
+        <div class="card-conversion-status conversion-status-${conversionStatus.key}">
+          <span>Konvertierung:</span><strong>${conversionStatus.label}</strong>
         </div>
       </div>
       <div class="card-footer">
@@ -1544,6 +1564,20 @@ function buildTags(p) {
   if (p.shopwareProductId) t += '<span class="card-tag tag-shopware">SW</span>'
   if (isIncomplete(p)) t += '<span class="card-tag tag-incomplete">Unvollständig</span>'
   return t
+}
+
+function getProductConversionStatus(product) {
+  const liveStatus = dashConvCardStatuses.get(product.id)
+  if (liveStatus) return liveStatus
+  if (product.glbFile) return { key: 'completed', label: 'abgeschlossen' }
+  return { key: 'not-converted', label: 'Nicht konvertiert' }
+}
+
+function getLiveConversionForProduct(productId) {
+  for (const [jobId, job] of dashConvJobs) {
+    if (job.productId === productId) return { jobId, ...job }
+  }
+  return null
 }
 
 function renderCardStatusBar(p) {
@@ -2252,13 +2286,13 @@ function bindDetailNameRules() {
   const rows = document.getElementById('detailNameRulesRows')
   document.getElementById('detailNameRuleAdd')?.addEventListener('click', () => {
     if (!rows) return
-    rows.insertAdjacentHTML('beforeend', renderNameRuleRowHtml({}))
-    refreshNameRuleSummaries(rows)
+    appendDetailNameRule()
   })
   rows?.addEventListener('click', (e) => {
     const btn = e.target.closest('.name-rule-remove')
     if (!btn) return
     btn.closest('.detail-name-rule-row')?.remove()
+    updateDetailMeshRowClasses()
   })
   document.getElementById('linkOpenGlobalNameRules')?.addEventListener('click', (e) => {
     e.preventDefault()
@@ -2266,6 +2300,104 @@ function bindDetailNameRules() {
   })
   attachNameRuleSummaryListeners(rows)
   refreshNameRuleSummaries(rows)
+  rows?.addEventListener('input', updateDetailMeshRowClasses)
+  rows?.addEventListener('change', updateDetailMeshRowClasses)
+}
+
+function appendDetailNameRule(pattern = '') {
+  const rows = document.getElementById('detailNameRulesRows')
+  if (!rows) return
+  rows.insertAdjacentHTML('beforeend', renderNameRuleRowHtml({ pattern }))
+  refreshNameRuleSummaries(rows)
+  updateDetailMeshRowClasses()
+  return rows.lastElementChild
+}
+
+let meshNameMenuController = null
+let selectedMeshNameLabel = null
+let selectedMeshNameText = ''
+
+function closeMeshNameMenu() {
+  meshNameMenuController?.abort()
+  meshNameMenuController = null
+  document.getElementById('meshNameContextMenu')?.remove()
+}
+
+function getSelectedMeshNameText(label) {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return ''
+  if (!label.contains(selection.anchorNode) || !label.contains(selection.focusNode)) return ''
+  return selection.toString()
+}
+
+function closeDetailMeshDrawer() {
+  const drawerToggle = document.getElementById('detailMeshDrawerToggle')
+  const drawerContent = document.getElementById('detailMeshDrawerContent')
+  if (drawerToggle) drawerToggle.setAttribute('aria-expanded', 'false')
+  if (drawerContent) drawerContent.hidden = true
+}
+
+function focusDetailNameRule(row) {
+  closeDetailMeshDrawer()
+  row?.scrollIntoView({ block: 'center' })
+  row?.querySelector('.name-rule-pattern')?.focus({ preventScroll: true })
+}
+
+document.addEventListener('selectionchange', () => {
+  const selection = window.getSelection()
+  const label = selection?.anchorNode?.parentElement?.closest('.detail-mesh-name')
+  const text = label ? getSelectedMeshNameText(label) : ''
+  selectedMeshNameLabel = text ? label : null
+  selectedMeshNameText = text
+})
+
+function openMeshNameMenu(event, name, matchingRules = []) {
+  closeMeshNameMenu()
+  const menu = document.createElement('div')
+  menu.id = 'meshNameContextMenu'
+  menu.className = 'mesh-name-context-menu'
+  menu.setAttribute('role', 'menu')
+  const action = document.createElement('button')
+  action.type = 'button'
+  action.setAttribute('role', 'menuitem')
+  action.textContent = 'Als Namens-Farbregel übernehmen'
+  menu.append(action)
+  matchingRules.forEach((rule) => {
+    const goToRule = document.createElement('button')
+    goToRule.type = 'button'
+    goToRule.setAttribute('role', 'menuitem')
+    goToRule.textContent = matchingRules.length === 1
+      ? 'Gehe zu Namens-Farbregel'
+      : `Gehe zu Regel: ${rule.pattern}`
+    goToRule.addEventListener('click', () => {
+      closeMeshNameMenu()
+      focusDetailNameRule(rule.row)
+    })
+    menu.append(goToRule)
+  })
+  document.body.append(menu)
+  menu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - menu.offsetWidth))}px`
+  menu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - menu.offsetHeight))}px`
+  action.addEventListener('click', () => {
+    closeMeshNameMenu()
+    const pattern = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const row = appendDetailNameRule(pattern)
+    focusDetailNameRule(row)
+  })
+  meshNameMenuController = new AbortController()
+  const options = { capture: true, signal: meshNameMenuController.signal }
+  document.addEventListener('pointerdown', (e) => {
+    if (!menu.contains(e.target)) closeMeshNameMenu()
+  }, options)
+  window.addEventListener('resize', closeMeshNameMenu, options)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      closeMeshNameMenu()
+    }
+  }, options)
+  action.focus({ preventScroll: true })
 }
 
 function openGlobalNameRulesModal() {
@@ -2947,7 +3079,8 @@ async function openDetail(id) {
   seedDetailRotationFromProduct(p)
 
   detailContent.innerHTML = `
-    <div class="detail-preview" id="detailPreviewWrap">
+    <div class="detail-preview-sticky">
+      <div class="detail-preview" id="detailPreviewWrap">
       <div class="card-preview-placeholder">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;opacity:.3">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -2955,31 +3088,40 @@ async function openDetail(id) {
         </svg>
         <span>${p.glbFile ? '3D-Vorschau lädt …' : 'Kein 3D-Modell'}</span>
       </div>
-    </div>
-    ${!isComposed && p.glbFile ? `
+      </div>
+      ${!isComposed && p.glbFile ? `
     <div class="detail-preview-toolbar">
       <button type="button" class="btn btn-ghost btn-sm" id="btnRegenerateThumbnail" title="PNG für die Karten-Vorschau aus der aktuellen 3D-Ansicht neu speichern">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:middle;margin-right:.25rem"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         Vorschaubild neu erzeugen
       </button>
-    </div>
-    <div class="detail-section detail-mesh-parts" id="detailMeshPartsSection" hidden>
-      <div class="detail-section-title">Einzelteile (Meshes)</div>
-      <p class="cc-muted" style="font-size:.72rem;margin:0 0 .5rem;line-height:1.4">
-        <strong>Häkchen</strong> = Teil kommt beim nächsten <strong>Neu konvertieren</strong> ins GLB. Häkchen entfernen = Teil wird aus dem Export entfernt
-        (schneller Weg für die <em>Sichtbarkeit beim Export</em> unten – erzeugt beim Speichern automatisch die passenden Regeln).<br>
-        Zeile anklicken: nur dieses Teil anzeigen · Kamera-Symbol: Ansicht · erneut: alle Teile.
-      </p>
-      <div class="detail-mesh-toolbar">
-        <span class="detail-mesh-sel-count" id="detailMeshSelCount"></span>
-        <span class="detail-mesh-toolbar-spacer"></span>
-        <button type="button" class="btn btn-ghost btn-sm" id="detailMeshSelectAll">Alle</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="detailMeshSelectNone">Keine</button>
       </div>
-      <div id="detailMeshPartsList" class="detail-mesh-parts-list"></div>
-      <button type="button" class="detail-mesh-clear-btn" id="detailMeshClearBtn" hidden>Alle Teile anzeigen</button>
+      ` : ''}
+    ${!isComposed && p.glbFile ? `
+    <div class="detail-section detail-mesh-parts" id="detailMeshPartsSection" hidden>
+      <button type="button" class="detail-mesh-drawer-toggle" id="detailMeshDrawerToggle" aria-expanded="false">
+        <span class="detail-section-title">Einzelteile (Meshes)</span>
+        <span class="detail-mesh-drawer-count" id="detailMeshDrawerCount"></span>
+        <span class="detail-mesh-drawer-arrow" aria-hidden="true">▼</span>
+      </button>
+      <div class="detail-mesh-drawer-content" id="detailMeshDrawerContent" hidden>
+        <p class="cc-muted" style="font-size:.72rem;margin:0 0 .5rem;line-height:1.4">
+          <strong>Häkchen</strong> = Teil kommt beim nächsten <strong>Neu konvertieren</strong> ins GLB. Häkchen entfernen = Teil wird aus dem Export entfernt
+          (schneller Weg für die <em>Sichtbarkeit beim Export</em> unten – erzeugt beim Speichern automatisch die passenden Regeln).<br>
+          Zeile anklicken: nur dieses Teil anzeigen · Kamera-Symbol: Ansicht · erneut: alle Teile.
+        </p>
+        <div class="detail-mesh-toolbar">
+          <span class="detail-mesh-sel-count" id="detailMeshSelCount"></span>
+          <span class="detail-mesh-toolbar-spacer"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="detailMeshSelectAll">Alle</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="detailMeshSelectNone">Keine</button>
+        </div>
+        <div id="detailMeshPartsList" class="detail-mesh-parts-list"></div>
+        <button type="button" class="detail-mesh-clear-btn" id="detailMeshClearBtn" hidden>Alle Teile anzeigen</button>
+      </div>
     </div>
     ` : ''}
+    </div>
     ${!isComposed && !p.glbFile ? `
     <div class="glb-upload-zone" id="detailGlbUpload">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -3366,6 +3508,16 @@ async function openDetail(id) {
   const btnRegenThumb = detailContent.querySelector('#btnRegenerateThumbnail')
   if (btnRegenThumb) {
     btnRegenThumb.addEventListener('click', () => void regenerateDashboardThumbnail())
+  }
+
+  const meshDrawerToggle = detailContent.querySelector('#detailMeshDrawerToggle')
+  const meshDrawerContent = detailContent.querySelector('#detailMeshDrawerContent')
+  if (meshDrawerToggle && meshDrawerContent) {
+    meshDrawerToggle.addEventListener('click', () => {
+      const expanded = meshDrawerToggle.getAttribute('aria-expanded') === 'true'
+      meshDrawerToggle.setAttribute('aria-expanded', String(!expanded))
+      meshDrawerContent.hidden = expanded
+    })
   }
 
   if (p.glbFile) loadDetailPreview(p)
@@ -4094,12 +4246,30 @@ function applyDetailMeshVisibility() {
   })
 }
 
+function getCurrentMatchingNameRules(name) {
+  const rows = document.getElementById('detailNameRulesRows')
+  if (!rows || !name) return []
+  return [...rows.querySelectorAll('.detail-name-rule-row')].flatMap((row) => {
+    const pattern = (row.querySelector('.name-rule-pattern')?.value || '').trim()
+    const flags = (row.querySelector('.name-rule-flags')?.value || '').trim()
+    if (!pattern) return []
+    try {
+      return new RegExp(pattern, flags).test(name) ? [{ row, pattern }] : []
+    } catch {
+      return []
+    }
+  })
+}
+
 function updateDetailMeshRowClasses() {
   const list = document.getElementById('detailMeshPartsList')
   if (!list) return
   list.querySelectorAll('.detail-mesh-row').forEach((row) => {
     const i = parseInt(row.dataset.meshIdx, 10)
-    row.classList.toggle('is-active', detailMeshIsolateIndex === i)
+    const name = row.querySelector('.detail-mesh-name')?.textContent || ''
+    const hasMatchingRule = getCurrentMatchingNameRules(name).length > 0
+    row.classList.toggle('is-rule-match', hasMatchingRule)
+    row.classList.toggle('is-active', detailMeshIsolateIndex === i && !hasMatchingRule)
     row.classList.toggle('is-excluded', detailMeshExcluded.has(i))
   })
   const clearBtn = document.getElementById('detailMeshClearBtn')
@@ -4109,10 +4279,12 @@ function updateDetailMeshRowClasses() {
 
 function updateDetailMeshSelectionCount() {
   const el = document.getElementById('detailMeshSelCount')
-  if (!el || !detailPreviewModelRoot) return
+  const drawerCount = document.getElementById('detailMeshDrawerCount')
+  if (!detailPreviewModelRoot) return
   const total = collectMeshesFromGroup(detailPreviewModelRoot).length
   const included = total - detailMeshExcluded.size
-  el.textContent = `${included}/${total} im GLB`
+  if (el) el.textContent = `${included}/${total} im GLB`
+  if (drawerCount) drawerCount.textContent = `${included}/${total}`
 }
 
 function clearDetailMeshIsolate() {
@@ -4218,6 +4390,18 @@ function buildDetailMeshPartsUI() {
     if (e.target.closest('[data-mesh-inc-wrap]')) return
     const row = e.target.closest('.detail-mesh-row')
     if (row) toggleDetailMeshIsolate(parseInt(row.dataset.meshIdx, 10))
+  }
+  listEl.oncontextmenu = (e) => {
+    const label = e.target.closest('.detail-mesh-name')
+    if (!label) return
+    const mesh = meshes[Number(label.closest('.detail-mesh-row').dataset.meshIdx)]
+    if (!mesh?.name) return
+    const selectedText = getSelectedMeshNameText(label)
+      || (selectedMeshNameLabel === label ? selectedMeshNameText : '')
+    const matchingRules = getCurrentMatchingNameRules(mesh.name)
+    e.preventDefault()
+    e.stopPropagation()
+    openMeshNameMenu(e, selectedText || mesh.name, matchingRules)
   }
   listEl.onchange = (e) => {
     const cb = e.target.closest('.detail-mesh-inc-cb')
@@ -4521,6 +4705,7 @@ function updateDetailNavState() {
 }
 
 function closeDetail() {
+  closeMeshNameMenu()
   disposeDetailPreview()
   disposeDetailPartPreviews()
   detailColorCompareState = null
@@ -4710,6 +4895,8 @@ const CONVERT_ALL_DELAY_MS = 1500 // Abstand zwischen Konvertierungs-Starts
 
 /** jobId → { productName, startedAt } – parallele Dashboard-Konvertierungen */
 const dashConvJobs = new Map()
+/** Produkt-ID → aktueller UI-Status der vorhandenen Konvertierungsjobs. */
+const dashConvCardStatuses = new Map()
 let dashConvElapseTimer = null
 let dashConvHideTimer = null
 
@@ -4733,50 +4920,30 @@ function clearDashConvIndicatorTimers() {
 
 function setDashConvIndicatorIdle() {
   clearDashConvIndicatorTimers()
-  const wrap = document.getElementById('convIndicator')
-  if (wrap) {
-    wrap.hidden = true
-    wrap.classList.remove('is-running', 'is-completed', 'is-failed')
-  }
 }
 
 function updateDashConvElapsedTick() {
-  const el = document.getElementById('convIndicatorElapsed')
-  if (!el || dashConvJobs.size === 0) return
-  let minT = Infinity
-  for (const v of dashConvJobs.values()) {
-    if (v.startedAt < minT) minT = v.startedAt
+  for (const [jobId, job] of dashConvJobs) {
+    const elapsed = formatDashConvElapsedMs(Date.now() - job.startedAt)
+    document.querySelectorAll(`.card-conversion-live-time[data-job-id="${jobId}"]`).forEach((el) => {
+      el.textContent = elapsed
+    })
   }
-  if (minT === Infinity) return
-  el.textContent = formatDashConvElapsedMs(Date.now() - minT)
 }
 
 function refreshDashConvRunningUI() {
-  const wrap = document.getElementById('convIndicator')
-  const label = document.getElementById('convIndicatorLabel')
-  if (!wrap || dashConvJobs.size === 0) return
-  wrap.hidden = false
-  wrap.classList.remove('is-completed', 'is-failed')
-  wrap.classList.add('is-running')
-  if (label) {
-    if (dashConvJobs.size === 1) {
-      const only = dashConvJobs.values().next().value
-      const name = only?.productName || 'Konvertierung'
-      label.textContent = name.length > 32 ? `${name.slice(0, 30)}…` : name
-    } else {
-      label.textContent = `${dashConvJobs.size} Konvertierungen laufen`
-    }
-  }
   updateDashConvElapsedTick()
 }
 
-function dashConvRegister(jobId, productName) {
+function dashConvRegister(jobId, productName, productId) {
   if (!jobId) return
   clearDashConvIndicatorTimers()
-  dashConvJobs.set(jobId, { productName: productName || 'Konvertierung', startedAt: Date.now() })
+  dashConvJobs.set(jobId, { productId, productName: productName || 'Konvertierung', startedAt: Date.now() })
+  if (productId) dashConvCardStatuses.set(productId, { key: 'running', label: 'läuft …' })
   void ensureDashConvNotificationPermission()
   refreshDashConvRunningUI()
   dashConvElapseTimer = setInterval(updateDashConvElapsedTick, 1000)
+  renderGrid()
 }
 
 /**
@@ -4786,7 +4953,13 @@ function dashConvRegister(jobId, productName) {
 function dashConvUnregister(jobId, outcome, meta = {}) {
   const entry = jobId ? dashConvJobs.get(jobId) : null
   const startedAt = entry?.startedAt
+  if (entry?.productId) {
+    if (outcome === 'ok') dashConvCardStatuses.set(entry.productId, { key: 'completed', label: 'abgeschlossen' })
+    if (outcome === 'fail') dashConvCardStatuses.set(entry.productId, { key: 'failed', label: 'fehlgeschlagen' })
+    if (outcome === 'aborted') dashConvCardStatuses.set(entry.productId, { key: 'waiting', label: 'Wartet' })
+  }
   if (jobId) dashConvJobs.delete(jobId)
+  renderGrid()
 
   if (dashConvJobs.size > 0) {
     clearDashConvIndicatorTimers()
@@ -4796,33 +4969,8 @@ function dashConvUnregister(jobId, outcome, meta = {}) {
   }
 
   clearDashConvIndicatorTimers()
-  const wrap = document.getElementById('convIndicator')
-  const label = document.getElementById('convIndicatorLabel')
-  const elapsedEl = document.getElementById('convIndicatorElapsed')
-  if (!wrap) return
-
-  const dur = startedAt ? Date.now() - startedAt : 0
-  if (elapsedEl) elapsedEl.textContent = formatDashConvElapsedMs(dur)
-
-  if (outcome === 'aborted') {
-    wrap.hidden = true
-    wrap.classList.remove('is-running', 'is-completed', 'is-failed')
-    return
-  }
-
-  wrap.hidden = false
-  wrap.classList.remove('is-running')
-  if (outcome === 'fail') {
-    wrap.classList.remove('is-completed')
-    wrap.classList.add('is-failed')
-    if (label) label.textContent = 'Konvertierung fehlgeschlagen'
-    dashConvHideTimer = setTimeout(setDashConvIndicatorIdle, 5000)
-  } else {
-    wrap.classList.remove('is-failed')
-    wrap.classList.add('is-completed')
-    if (label) label.textContent = meta.partial ? 'Teilweise fertig' : 'Konvertierung fertig'
-    dashConvHideTimer = setTimeout(setDashConvIndicatorIdle, 3000)
-  }
+  void startedAt
+  void meta
 }
 
 function notifyDashConvDone(jobId, kind, productName, outputs, errorText) {
@@ -5204,6 +5352,8 @@ async function startProductConversion(productId) {
   const p = await fetchProductById(productId)
   if (!p) return
 
+  dashConvCardStatuses.set(productId, { key: 'waiting', label: 'Wartet' })
+  renderGrid()
   const btns = document.querySelectorAll(`[data-product-id="${productId}"]`)
   btns.forEach(b => { b.disabled = true; b.style.opacity = '.5' })
 
@@ -5270,13 +5420,15 @@ async function startProductConversion(productId) {
 
     pollConversionInBackground(jobId, productId, p.name, usedOptions)
   } catch (err) {
+    dashConvCardStatuses.set(productId, { key: 'failed', label: 'fehlgeschlagen' })
+    renderGrid()
     toast(`Fehler: ${err.message}`, 'error')
     btns.forEach(b => { b.disabled = false; b.style.opacity = '' })
   }
 }
 
 async function pollConversionInBackground(jobId, productId, productName, conversionPresetUsed) {
-  dashConvRegister(jobId, productName)
+  dashConvRegister(jobId, productName, productId)
   let count = 0
   const poll = async () => {
     count++

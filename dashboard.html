@@ -42,16 +42,11 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.g</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.w</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
     <div class="top-bar-right">
-      <div class="conv-indicator" id="convIndicator" hidden aria-live="polite">
-        <span class="conv-indicator-dot" aria-hidden="true"></span>
-        <span class="conv-indicator-label" id="convIndicatorLabel">Konvertierung läuft</span>
-        <span class="conv-indicator-elapsed" id="convIndicatorElapsed">0:00</span>
-      </div>
       <a href="/converter.html" class="btn btn-ghost" title="GLB Konvertierung">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Konvertierung
@@ -90,6 +85,8 @@
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
         <input class="search-input" id="searchInput" type="text" placeholder="Suche: Name, ID, Artikelnr., dominante RAL …" title="Mehrere Artikel gleichzeitig finden: Begriffe mit Komma trennen, z. B. „12345, 98765, RAL 7035“">
+        <button type="button" class="search-clear" id="searchClear" hidden
+                aria-label="Produktsuche löschen" title="Suche löschen">×</button>
       </div>
       <div class="filter-sep"></div>
       <div class="sort-wrap mapping-target-wrap">

@@ -236,6 +236,11 @@ function showroomApp() {
       this._resolveInitialProduct(urlProduct).then((initial) => {
         if (initial) {
           this.selectProduct(initial)
+          this.$nextTick(() => {
+            const item = Array.from(this.$refs.productList.querySelectorAll('.sr-sidebar-item'))
+              .find((entry) => entry.dataset.productId === String(this.currentProduct?.id))
+            item?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+          })
         } else {
           this.isLoading = false
           this.loadStatus = this.products.length

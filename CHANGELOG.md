@@ -1,5 +1,69 @@
 # Changelog
 
+## MARA09.16.w - 2026-09-16
+
+- Mesh-Schublade wird beim Sprung zu einer Namens-Farbregel zuverlässig eingeklappt.
+
+## MARA09.16.v - 2026-09-16
+
+- Über Mesh-Kontextmenü kann direkt zu einer vorhandenen Namens-Farbregel gesprungen werden.
+
+## MARA09.16.u - 2026-09-16
+
+- Einzelteile-Schublade horizontal an den Stammdaten ausgerichtet.
+
+## MARA09.16.t - 2026-09-16
+
+- Mesh-Liste zeigt Auswahl und vorhandene Namens-Farbregeln farblich an; Schublade schließt nach Regelübernahme automatisch.
+
+## MARA09.16.s - 2026-09-16
+
+- Namens-Farbregel kann wahlweise den vollständigen oder einen markierten Teil des Mesh-Namens übernehmen.
+
+## MARA09.16.r - 2026-09-16
+
+- Eingeklappte Einzelteile-Schublade in den fixierten Vorschaubereich aufgenommen.
+
+## MARA09.16.q - 2026-09-16
+
+- Fixierten Vorschaubereich erweitert und Abstände der Einzelteile-Schublade optimiert.
+
+## MARA09.16.p - 2026-09-16
+
+- 3D-Vorschau in der Produktdetailansicht fixiert und Einzelteile-Bereich ein- und ausklappbar gestaltet.
+
+## MARA09.16.o - 2026-09-16
+
+- Übernahme von Einzelteilnamen in Namens-Farbregeln ohne ^- und $-Begrenzung.
+
+## MARA09.16.n - 2026-09-16
+
+- Einzelteile können per Rechtsklick direkt als Namens-Farbregel übernommen werden.
+
+## MARA09.16.m - 2026-09-16
+
+- Geöffnetes Produkt wird im Showroom automatisch in der Produktliste markiert.
+
+## MARA09.16.l - 2026-09-16
+
+- Sichtbarkeit der Buttons in der Kopfzeile der Produktverwaltung verbessert.
+
+## MARA09.16.k - 2026-09-16
+
+- Löschen-Button für die Suche in der Produktverwaltung ergänzt.
+
+## MARA09.16.j - 2026-09-16
+
+- Löschen-Button für die Produktsuche im Showroom ergänzt.
+
+## MARA09.16.i - 2026-09-16
+
+- Live-Konvertierungsanzeige aus der Kopfzeile in die jeweilige Produktkarte verschoben.
+
+## MARA09.16.h - 2026-09-16
+
+- Separaten Konvertierungsstatus für jedes Einzelteil ergänzt.
+
 ## MARA09.16.g - 2026-09-16
 
 - Darstellung der Versions-Hover-History verbessert.

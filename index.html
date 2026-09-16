@@ -65,7 +65,7 @@
         </a>
         <span class="sr-topbar-sep"></span>
         <span class="sr-topbar-title">3D Showroom</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.g</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.w</span></span>
         <a href="/dashboard.html" class="sr-page-switch" title="Zur Produktverwaltung">Produktverwaltung</a>
       </div>
       <div class="sr-topbar-center" x-show="currentProduct">
@@ -110,16 +110,20 @@
         <span class="sr-sidebar-count" x-text="(colorFilter || productSearch) ? (filteredProducts.length + ' von ' + products.length) : products.length"></span>
       </div>
       <div class="sr-sidebar-search">
-        <input type="search" class="sr-sidebar-search-input" x-model="productSearch"
+        <input type="search" class="sr-sidebar-search-input" x-model="productSearch" x-ref="productSearchInput"
                placeholder="Produkt oder ID suchen" aria-label="Produkte nach Name oder ID suchen">
+        <button type="button" class="sr-sidebar-search-clear" x-show="productSearch.length > 0" x-cloak
+                @click="productSearch = ''; $refs.productSearchInput.focus()"
+                aria-label="Produktsuche löschen" title="Suche löschen">×</button>
       </div>
-      <div class="sr-sidebar-list">
+      <div class="sr-sidebar-list" x-ref="productList">
         <template x-for="product in filteredProducts" :key="product.id">
           <button type="button" @click="selectProduct(product)"
                   @mouseenter="showProductPreview(product, $event)"
                   @mousemove="moveProductPreview($event)"
                   @mouseleave="hideProductPreview()"
                   class="sr-sidebar-item"
+                  :data-product-id="product.id"
                   :class="currentProduct?.id === product.id && 'active'">
             <span class="sr-sidebar-item-name" x-text="product.name"></span>
             <span class="sr-sidebar-item-sub" x-text="product.specs?.load && product.specs.load !== '–' ? product.specs.load : product.id"></span>
