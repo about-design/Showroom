@@ -4626,7 +4626,13 @@ class BlenderOBJToGLBConverter:
             # Step 1: Convert STEP to OBJ
             self.log(f"📐 Converting STEP to OBJ (quality: {tessellation_quality})...")
             step_converter = StepToObjConverter(tessellation_quality=tessellation_quality)
-            step_result = step_converter.convert_step_to_obj(step_file, temp_obj_path, temp_mtl_path)
+            step_result = step_converter.convert_step_to_obj(
+                step_file,
+                temp_obj_path,
+                temp_mtl_path,
+                gtin=options.get('gtin'),
+                article_number=options.get('articleNumber') or options.get('article_number'),
+            )
             
             if not step_result.get('success'):
                 raise RuntimeError(f"STEP conversion failed: {step_result.get('error', 'Unknown error')}")

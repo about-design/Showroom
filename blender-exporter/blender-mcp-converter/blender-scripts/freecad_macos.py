@@ -326,6 +326,8 @@ logger.info(f"Log file: {log_file}")
 input_file = os.environ.get('STEP_INPUT_FILE')
 output_file = os.environ.get('STEP_OUTPUT_FILE')  
 tessellation_quality = float(os.environ.get('STEP_TESSELLATION', '0.1'))
+mesh_gtin = (os.environ.get('STEP_GTIN') or '').strip()
+mesh_article_number = (os.environ.get('STEP_ARTICLE_NUMBER') or '').strip()
 color_export_mode = (os.environ.get('STEP_COLOR_EXPORT') or '').strip().lower()
 
 logger.info(f"Input: {input_file}")
@@ -337,6 +339,58 @@ if color_export_mode:
 if not input_file or not output_file:
     logger.error("ERROR: Environment variables STEP_INPUT_FILE and STEP_OUTPUT_FILE must be set")
     sys.exit(1)
+
+if not mesh_gtin or not mesh_article_number:
+    filename_match = re.match(r'^(\d{8,14})_(.+)$', Path(input_file).stem)
+    if filename_match:
+        mesh_gtin = mesh_gtin or filename_match.group(1)
+        mesh_article_number = mesh_article_number or filename_match.group(2)
+
+mesh_gtin = re.sub(r'[^0-9A-Za-z.-]+', '_', mesh_gtin).strip('_') or 'KeineEAN'
+mesh_article_number = re.sub(r'[^0-9A-Za-z.-]+', '_', mesh_article_number).strip('_') or 'KeineArtikelnummer'
+
+
+def _extract_drawing_number(path_segments):
+    for segment in reversed(path_segments):
+        match = re.search(r'(?<!\d)(\d{2}-\d{5})(?!\d)', str(segment))
+        if match:
+            return match.group(1)
+    return 'KeineZeichnungsnummer'
+
+
+def _read_step_component_drawing_numbers(step_file_path):
+    """Return component drawing numbers in their declared STEP assembly order."""
+    try:
+        with open(step_file_path, 'r', encoding='utf-8', errors='ignore') as step_file:
+            content = step_file.read()
+    except OSError as error:
+        logger.warning(f"Unable to read STEP component structure: {error}")
+        return []
+
+    products = {
+        int(match.group(1)): match.group(2)
+        for match in re.finditer(r"#(\d+)\s*=\s*PRODUCT\s*\(\s*'([^']*)'", content)
+    }
+    formations = {
+        int(match.group(1)): int(match.group(2))
+        for match in re.finditer(r"#(\d+)\s*=\s*PRODUCT_DEFINITION_FORMATION[^(]*\([^,]*,\s*'[^']*',\s*#(\d+)", content, re.DOTALL)
+    }
+    definitions = {
+        int(match.group(1)): int(match.group(2))
+        for match in re.finditer(r"#(\d+)\s*=\s*PRODUCT_DEFINITION\s*\([^,]*,\s*'[^']*',\s*#(\d+)", content, re.DOTALL)
+    }
+
+    drawing_numbers = []
+    for occurrence in re.finditer(r"NEXT_ASSEMBLY_USAGE_OCCURRENCE\s*\([^;]*?;", content, re.DOTALL):
+        references = [int(ref) for ref in re.findall(r"#(\d+)", occurrence.group(0))]
+        if not references:
+            continue
+        product_name = products.get(formations.get(definitions.get(references[-1])))
+        drawing_number = _extract_drawing_number([product_name]) if product_name else None
+        if drawing_number:
+            drawing_numbers.append(drawing_number)
+
+    return drawing_numbers
 
 if color_export_mode in {'ply', 'color', 'true'}:
     try:
@@ -1122,6 +1176,7 @@ try:
     
     # Process objects separately to preserve object boundaries and colors
     obj_data = []  # List of (object_name, vertices, faces, color)
+    drawing_number_counts = defaultdict(int)
     total_vertices = 0
     total_faces = 0
     materials = {}  # Dictionary of material_name: (r, g, b, a)
@@ -1274,6 +1329,16 @@ try:
                 })
     
     logger.info(f"Total shapes to process: {len(shapes_to_process)}")
+    step_component_drawing_numbers = _read_step_component_drawing_numbers(input_file)
+    if len(step_component_drawing_numbers) == len(shapes_to_process):
+        for shape_info, drawing_number in zip(shapes_to_process, step_component_drawing_numbers):
+            shape_info['step_drawing_number'] = drawing_number
+        logger.info(f"Using {len(step_component_drawing_numbers)} drawing numbers from STEP component structure")
+    elif step_component_drawing_numbers:
+        logger.warning(
+            "STEP component count does not match export shape count "
+            f"({len(step_component_drawing_numbers)} != {len(shapes_to_process)}); using FreeCAD labels as fallback"
+        )
     
     # Use improved geometry-based color mapping
     step_colors = _map_colors_by_geometry(doc.Objects, step_shape_colors, step_shape_names)
@@ -1375,9 +1440,9 @@ try:
                 vertices, faces = mesh_data[0], mesh_data[1]
                 
                 if vertices and faces:
-                    # Store object data with sanitized name
-                    sanitized_segments = _sanitize_path_segments(export_path, f"Obj{i+1}")
-                    safe_obj_name = "__".join(sanitized_segments) or f"Obj{i+1}"
+                    drawing_number = shape_info.get('step_drawing_number') or _extract_drawing_number(export_path)
+                    drawing_number_counts[drawing_number] += 1
+                    safe_obj_name = f"{mesh_gtin}_{mesh_article_number}_{drawing_number}_{drawing_number_counts[drawing_number]}"
                     display_path = " / ".join(export_path)
                     obj_data.append({
                         'name': safe_obj_name,

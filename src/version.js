@@ -1,6 +1,10 @@
 const APP_VERSION_INFO = {
-  version: 'MARA09.16.ad',
+  version: 'MARA09.17.d',
   history: [
+    { version: 'MARA09.17.d', description: 'Mesh-Liste zeigt vollständige Namen; STEP-Produktstruktur bestimmt die Zeichnungsnummer je Bauteil.' },
+    { version: 'MARA09.17.c', description: 'Mesh-Liste zeigt Zeichnungsnummer und Gruppennummer ohne EAN- und Artikelnummer-Präfix.' },
+    { version: 'MARA09.17.b', description: 'STEP-Meshes werden je Zeichnungsnummer in Bauteilreihenfolge ab eins nummeriert.' },
+    { version: 'MARA09.17.a', description: 'Archivierung überschreibt vorhandene Zielartefakte nach bestätigter Vorschau.' },
     { version: 'MARA09.16.ad', description: 'Detail-Footer weiter verdichtet, damit alle Aktionen bei normaler Breite in einer Zeile bleiben.' },
     { version: 'MARA09.16.ac', description: 'Detail-Footer mit kompakter rechter Aktionsgruppe und vollständig sichtbarem Übernehmen-Button ausgerichtet.' },
     { version: 'MARA09.16.ab', description: 'Produktentfernen-Aktion in der Detailleiste klar beschriftet und horizontal ausgerichtet.' },

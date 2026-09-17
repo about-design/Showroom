@@ -395,7 +395,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
       }
       if (shared) return { ...file, source, target, status: 'Von anderem Produkt verwendet', movable: false, blocking: false, retained: true }
       if (!await pathExists(source)) return { ...file, source, target, status: 'Quelldatei fehlt', movable: false, blocking: true }
-      if (await pathExists(target)) return { ...file, source, target, status: 'Zieldatei bereits vorhanden', movable: false, blocking: true }
+      if (await pathExists(target)) return { ...file, source, target, status: 'Wird überschrieben', movable: true, blocking: false, overwrite: true }
       return { ...file, source, target, status: 'bereit', movable: true, blocking: false }
     }))
     return {
@@ -2398,33 +2398,40 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 return
               }
               const moved = []
-              const copied = []
               try {
                 for (const file of plan.files.filter((entry) => entry.movable)) {
                   await mkdir(dirname(file.target), { recursive: true })
-                  await copyFile(file.source, file.target, fsConstants.COPYFILE_EXCL)
-                  copied.push(file)
-                  await unlink(file.source)
-                  copied.pop()
-                  moved.push(file)
+                  const backup = file.overwrite ? `${file.target}.archive-backup-${Date.now()}-${moved.length}` : null
+                  if (backup) await rename(file.target, backup)
+                  try {
+                    await copyFile(file.source, file.target, fsConstants.COPYFILE_EXCL)
+                    await unlink(file.source)
+                    moved.push({ ...file, backup })
+                  } catch (moveError) {
+                    if (await pathExists(file.target)) await unlink(file.target)
+                    if (backup && await pathExists(backup)) await rename(backup, file.target)
+                    throw moveError
+                  }
                 }
                 data.products = data.products.filter((product) => product.id !== id)
                 await saveProducts(data)
+                for (const file of moved) {
+                  if (!file.backup || !await pathExists(file.backup)) continue
+                  try {
+                    await unlink(file.backup)
+                  } catch (backupError) {
+                    log.warn(`[archive-remove] Sicherungsdatei bleibt erhalten: ${file.backup}: ${backupError.message || backupError}`)
+                  }
+                }
                 res.setHeader('Content-Type', 'application/json')
                 res.end(JSON.stringify({ ok: true, moved }))
               } catch (error) {
                 const rollbackErrors = []
-                for (const file of copied.reverse()) {
-                  try {
-                    await unlink(file.target)
-                  } catch (rollbackError) {
-                    rollbackErrors.push(`${file.target}: ${rollbackError.message || rollbackError}`)
-                  }
-                }
                 for (const file of moved.reverse()) {
                   try {
-                    if (await pathExists(file.source)) throw new Error('Quelle wurde zwischenzeitlich erneut angelegt')
-                    await rename(file.target, file.source)
+                    if (await pathExists(file.target) && !await pathExists(file.source)) await rename(file.target, file.source)
+                    else if (await pathExists(file.target)) await unlink(file.target)
+                    if (file.backup && await pathExists(file.backup)) await rename(file.backup, file.target)
                   } catch (rollbackError) {
                     rollbackErrors.push(`${file.source}: ${rollbackError.message || rollbackError}`)
                   }

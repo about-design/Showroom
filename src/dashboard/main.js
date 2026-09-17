@@ -4874,7 +4874,11 @@ function showArchiveRemovalModal(plan) {
   document.getElementById('archiveRemovalFiles').innerHTML = files.length
     ? files.map((file) => {
       const filename = String(file.source || file.url || '').split(/[\\/]/).pop()
-      const statusClass = file.status === 'bereit' ? 'archive-removal-status--ready' : 'archive-removal-status--blocked'
+      const statusClass = file.status === 'bereit'
+        ? 'archive-removal-status--ready'
+        : file.status === 'Wird überschrieben'
+          ? 'archive-removal-status--overwrite'
+          : 'archive-removal-status--blocked'
       const source = file.source || file.url
       const target = file.target || '—'
       return `<tr><td class="archive-removal-type">${esc(file.type)}</td><td><span class="archive-removal-ellipsis" title="${esc(filename)}">${esc(filename)}</span></td><td><code class="archive-removal-ellipsis" title="${esc(source)}">${esc(source)}</code></td><td><code class="archive-removal-ellipsis" title="${esc(target)}">${esc(target)}</code></td><td class="${statusClass}"><span class="archive-removal-ellipsis" title="${esc(file.status)}">${esc(file.status)}</span></td></tr>`

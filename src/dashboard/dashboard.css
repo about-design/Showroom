@@ -1835,6 +1835,7 @@ select.field-value { cursor: pointer; appearance: none; background-image: url("d
 .archive-removal-ellipsis { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .archive-removal-type { white-space: nowrap; }
 .archive-removal-status--ready { color: #258443; font-weight: 700; }
+.archive-removal-status--overwrite { color: #a16207; font-weight: 700; }
 .archive-removal-status--blocked { color: var(--danger); font-weight: 700; }
 .archive-removal-retained { margin-top: var(--space-5); }
 .archive-removal-retained ul { margin: 0; padding-left: 1.2rem; font-size: .78rem; color: var(--text-secondary); }

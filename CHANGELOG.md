@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.13 - 2026-09-17
+
+- Mesh-Liste zeigt wieder vollständige Namen; STEP-Produktdefinitionen bestimmen die Zeichnungsnummer je Bauteil vor der Instanzzählung.
+
+## 1.0.12 - 2026-09-17
+
+- Mesh-Liste blendet EAN und Artikelnummer nur in der Anzeige aus; Aktionen verwenden weiterhin den vollständigen GLB-Namen.
+
+## 1.0.11 - 2026-09-17
+
+- STEP-Meshes werden je Zeichnungsnummer in der Reihenfolge der STEP-Bauteile ab `1` nummeriert.
+
+## 1.0.10 - 2026-09-17
+
+- Archivierung überschreibt vorhandene Zielartefakte rückrollbar und zeigt sie in der Vorschau als „Wird überschrieben“ an.
+
+## 1.0.9 - 2026-09-17
+
+- STEP-Exporte benennen Meshes künftig deterministisch als EAN_Artikelnummer_Zeichnungsnummer_laufendeNummer.
+
 ## MARA09.16.ad - 2026-09-16
 
 - Detail-Footer weiter verdichtet, damit alle Aktionen bei normaler Breite in einer Zeile bleiben.

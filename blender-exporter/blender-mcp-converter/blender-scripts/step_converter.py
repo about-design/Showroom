@@ -139,8 +139,10 @@ class StepToObjConverter:
         self.log_messages.append(log_entry)
         print(log_entry)
     
-    def convert_step_to_obj(self, step_file: str, obj_file: str, 
-                          mtl_file: Optional[str] = None) -> Dict[str, Any]:
+    def convert_step_to_obj(self, step_file: str, obj_file: str,
+                          mtl_file: Optional[str] = None,
+                          gtin: Optional[str] = None,
+                          article_number: Optional[str] = None) -> Dict[str, Any]:
         """
         Convert STEP file to OBJ format using external FreeCAD command
         
@@ -148,6 +150,8 @@ class StepToObjConverter:
             step_file (str): Path to input STEP/STP file
             obj_file (str): Path to output OBJ file
             mtl_file (str, optional): Path to output MTL file (not used for STEP)
+            gtin (str, optional): Product EAN/GTIN for exported mesh names
+            article_number (str, optional): Product article number for exported mesh names
             
         Returns:
             dict: Conversion result with statistics
@@ -338,6 +342,8 @@ except Exception as e:
             env['STEP_INPUT_FILE'] = str(step_path.absolute())
             env['STEP_OUTPUT_FILE'] = str(obj_path.absolute())
             env['STEP_TESSELLATION'] = str(self.tessellation_quality)
+            env['STEP_GTIN'] = str(gtin or '').strip()
+            env['STEP_ARTICLE_NUMBER'] = str(article_number or '').strip()
 
             if "FreeCAD.app" in self.freecad_binary:
                 freecad_resources = "/Applications/FreeCAD.app/Contents/Resources"
