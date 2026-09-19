@@ -80,6 +80,7 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
+  --detail-panel-width: min(94vw, var(--detail-panel-preferred-width, 45vw));
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -108,7 +109,7 @@ body {
 /* ─── Shell ─── */
 .shell {
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto 1fr;
   min-height: 100vh;
 }
 
@@ -518,9 +519,56 @@ body {
 
 /* ─── Main content ─── */
 .main-content {
+  min-width: 0;
   padding: 1.5rem 2rem 3rem;
   position: relative;
   overflow-y: auto;
+}
+.shell.detail-open .main-content,
+.shell.detail-open .dashboard-controls { margin-right: var(--detail-panel-width); }
+
+.dashboard-controls {
+  position: sticky;
+  top: var(--dashboard-header-height, 72px);
+  align-self: start;
+  min-width: 0;
+  z-index: 90;
+  isolation: isolate;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+}
+.dashboard-controls-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 160ms ease, visibility 160ms;
+}
+.dashboard-controls-inner {
+  min-height: 0;
+  max-height: max(80px, calc(100dvh - var(--dashboard-header-height, 72px) - 100px));
+  overflow: auto;
+}
+.dashboard-controls.is-collapsed .dashboard-controls-body {
+  grid-template-rows: 0fr;
+  visibility: hidden;
+}
+.dashboard-controls-toggle {
+  display: block;
+  width: 100%;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 22px;
+  text-align: center;
+  cursor: pointer;
+}
+.dashboard-controls-toggle:hover { background: var(--border-subtle); }
+.dashboard-controls-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dashboard-controls .pagination { margin: 0; padding: .4rem 2rem; }
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-controls-body { transition: none; }
 }
 
 /* ─── Upload drop overlay ─── */
@@ -546,7 +594,7 @@ body {
 /* ─── Product grid ─── */
 .product-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 1rem;
 }
 .product-grid.list-view { grid-template-columns: 1fr; }
@@ -568,7 +616,8 @@ body {
 }
 .product-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 3px var(--accent);
+  z-index: 1;
 }
 
 .card-preview {
@@ -715,6 +764,9 @@ body {
 }
 .card-status-bar .status-dot { width: 6px; height: 6px; }
 .card-status-label { color: var(--text-muted); }
+.status-bar-review .card-status-label { color: #6d28d9; }
+.status-bar-approved .card-status-label { color: var(--success); }
+.status-bar-rejected .card-status-label { color: var(--danger); }
 .card-issues {
   display: flex; gap: .25rem; flex-wrap: wrap; margin-left: auto;
 }
@@ -847,13 +899,14 @@ textarea.review-notes:focus { border-color: var(--accent); }
   transition: opacity 0.25s ease;
 }
 .detail-panel {
+  container: product-detail / inline-size;
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(720px, 94vw);
+  width: var(--detail-panel-width);
   z-index: 201;
-  background: var(--bg-surface);
+  background-color: var(--bg-surface);
   border-left: 1px solid var(--border-subtle);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
   transform: translateX(100%);
@@ -861,6 +914,7 @@ textarea.review-notes:focus { border-color: var(--accent); }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  isolation: isolate;
 }
 .detail-header {
   display: flex;
@@ -892,6 +946,9 @@ textarea.review-notes:focus { border-color: var(--accent); }
   flex: 1;
   overflow-y: auto;
   padding: var(--space-6);
+  background-color: var(--bg-surface);
+  position: relative;
+  z-index: 0;
 }
 .detail-footer {
   display: flex;
@@ -920,6 +977,27 @@ textarea.review-notes:focus { border-color: var(--accent); }
   .detail-footer-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
 .detail-panel.open { transform: translateX(0); }
+.detail-splitter {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 10px;
+  z-index: 10;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+.detail-splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--border-default);
+}
+.detail-splitter:hover::after,
+.detail-splitter:focus-visible::after,
+.detail-resizing .detail-splitter::after { background: var(--accent, #e30613); }
+.detail-resizing, .detail-resizing * { cursor: ew-resize !important; user-select: none !important; }
+.detail-resizing .detail-panel { transition: none; }
 
 .detail-overlay.open { opacity: 1; pointer-events: auto; }
 
@@ -988,6 +1066,7 @@ textarea.review-notes:focus { border-color: var(--accent); }
   margin-bottom: 0;
   padding: 0;
   overflow: hidden;
+  background-color: var(--bg-surface);
 }
 .detail-mesh-drawer-toggle {
   display: flex;
@@ -995,7 +1074,7 @@ textarea.review-notes:focus { border-color: var(--accent); }
   width: 100%;
   padding: .7rem calc(var(--space-6) - 1px);
   border: 0;
-  background: transparent;
+  background-color: var(--bg-surface);
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
@@ -1006,7 +1085,10 @@ textarea.review-notes:focus { border-color: var(--accent); }
 .detail-mesh-drawer-count { margin-left: auto; color: var(--text-muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .detail-mesh-drawer-arrow { width: 1rem; margin-left: .7rem; color: var(--text-muted); font-size: .7rem; }
 .detail-mesh-drawer-toggle[aria-expanded="true"] .detail-mesh-drawer-arrow { transform: rotate(180deg); }
-.detail-mesh-drawer-content { padding: 0 var(--space-6) var(--space-5); }
+.detail-mesh-drawer-content {
+  padding: 0 var(--space-6) var(--space-5);
+  background-color: var(--bg-surface);
+}
 
 .detail-mesh-parts-list {
   display: flex; flex-direction: column; gap: .35rem;
@@ -1025,7 +1107,7 @@ textarea.review-notes:focus { border-color: var(--accent); }
 }
 .detail-mesh-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: 15px minmax(0, 1fr) 4.5rem 4rem 1.6rem;
   align-items: center;
   gap: 0.55rem;
   padding: 0.55rem 0.75rem;
@@ -1069,12 +1151,33 @@ textarea.review-notes:focus { border-color: var(--accent); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   color: var(--text-primary);
 }
+.detail-mesh-name-trigger { grid-column: 2; cursor: text; }
+.detail-mesh-name-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.detail-mesh-full-name {
+  grid-column: 2 / -1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  user-select: text;
+  cursor: text;
+  padding: .4rem .5rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+}
+.detail-mesh-ral { grid-column: 3; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.detail-mesh-ral[hidden] { display: none; }
+.detail-mesh-ral-chip { width: 8px; height: 8px; flex: 0 0 8px; box-sizing: border-box; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); }
+.detail-mesh-ral-chip.is-galvanized { border-color: #bfbfbf; }
 .detail-mesh-v {
+  grid-column: 4;
+  text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   font-size: .72rem;
 }
 .detail-mesh-focus-btn {
+  grid-column: 5;
   display: grid; place-items: center;
   width: 1.6rem; height: 1.6rem;
   padding: 0; border: none; border-radius: var(--radius-sm);
@@ -1089,6 +1192,9 @@ textarea.review-notes:focus { border-color: var(--accent); }
   color: var(--accent);
 }
 .detail-mesh-focus-btn svg { width: 13px; height: 13px; }
+.hide-mesh-ral .detail-mesh-row { grid-template-columns: 15px minmax(0, 1fr) 4rem 1.6rem; }
+.hide-mesh-ral .detail-mesh-v { grid-column: 3; }
+.hide-mesh-ral .detail-mesh-focus-btn { grid-column: 4; }
 .detail-mesh-clear-btn {
   margin-top: .5rem; width: 100%;
   padding: .4rem .6rem; font-size: .78rem;
@@ -2167,3 +2273,38 @@ select.field-value { cursor: pointer; appearance: none; background-image: url("d
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Respond to the sidebar itself, including on wide desktop windows. */
+.detail-panel .field-row { grid-template-columns: 120px minmax(0, 1fr); }
+.detail-panel .field-row > * { min-width: 0; overflow-wrap: anywhere; }
+@container product-detail (max-width: 540px) {
+  .detail-header, .detail-content, .detail-footer { padding: 12px; }
+  .detail-section { padding: 12px; overflow-wrap: anywhere; }
+  .detail-mesh-drawer-toggle { padding: 10px 12px; }
+  .detail-mesh-drawer-content { padding: 0 12px 12px; }
+  .detail-footer-actions, .detail-preview-toolbar, .detail-mesh-toolbar,
+  .detail-section-title-row { flex-wrap: wrap; }
+  .detail-footer-actions { justify-content: flex-end; max-width: 100%; }
+  .detail-footer .btn { white-space: normal; height: auto; min-height: 2.2rem; max-width: 100%; }
+  .detail-panel .field-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .field-row > *, .field-value { min-width: 0; max-width: 100%; }
+  .field-checkbox-label { white-space: normal; }
+  .rule-card-grid { grid-template-columns: minmax(0, 1fr); }
+  .rule-field-vminmax { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-rotation-section .rot-row { grid-template-columns: 1.5rem 3rem repeat(2, minmax(0, 1fr)); }
+  .detail-mesh-row, .hide-mesh-ral .detail-mesh-row {
+    grid-template-columns: 15px minmax(0, 1fr) minmax(0, 1fr) 1.6rem;
+    gap: .35rem;
+    padding: .5rem;
+  }
+  .detail-mesh-inc { grid-column: 1; grid-row: 1; }
+  .detail-mesh-name-trigger { grid-column: 2 / -1; grid-row: 1; white-space: normal; overflow-wrap: anywhere; }
+  .detail-mesh-ral { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
+  .detail-mesh-v, .hide-mesh-ral .detail-mesh-v { grid-column: 3; grid-row: 2; white-space: normal; overflow-wrap: anywhere; }
+  .detail-mesh-focus-btn, .hide-mesh-ral .detail-mesh-focus-btn { grid-column: 4; grid-row: 2; }
+  .detail-mesh-full-name { grid-column: 1 / -1; }
+  .detail-header-left { flex-wrap: wrap; }
+  .detail-heading { flex: 1 1 100%; order: 1; }
+  .detail-close { flex-shrink: 0; }
+}
+

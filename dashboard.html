@@ -42,7 +42,7 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.19.h</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.19.t</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
@@ -77,6 +77,9 @@
     </div>
   </header>
 
+  <section class="dashboard-controls" id="dashboardControls" aria-label="Dashboard-Steuerbereich">
+    <div class="dashboard-controls-body" id="dashboardControlsBody">
+      <div class="dashboard-controls-inner">
   <!-- ═══════ Stats strip ═══════ -->
   <section class="stats-strip" id="statsStrip"></section>
 
@@ -137,6 +140,8 @@
           <option value="newest" selected>Neueste zuerst</option>
           <option value="oldest">Älteste zuerst</option>
           <option value="name">Name A–Z</option>
+          <option value="shortTextAsc">Kurztext A–Z</option>
+          <option value="shortTextDesc">Kurztext Z–A</option>
         </select>
       </div>
       <div class="sort-wrap export-rotation-wrap">
@@ -201,6 +206,13 @@
       </div>
     </div>
   </nav>
+        <div id="paginationBar"></div>
+      </div>
+    </div>
+    <button type="button" class="dashboard-controls-toggle" id="dashboardControlsToggle"
+      aria-controls="dashboardControlsBody" aria-expanded="true"
+      aria-label="Steuerbereich einklappen" title="Steuerbereich einklappen">▲</button>
+  </section>
 
   <!-- ═══════ Main content ═══════ -->
   <main class="main-content">
@@ -248,6 +260,13 @@
             <option value="4">4</option>
             <option value="5">5</option>
           </select>
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="meshDisplaySettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="meshDisplaySettingsTitle">Darstellung</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>RAL-Farbe in Mesh-Liste anzeigen</span>
+          <input type="checkbox" id="showMeshRal" checked>
         </label>
       </section>
     </div>

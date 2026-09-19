@@ -4,6 +4,9 @@ import { resolveAssetUrl } from '../lib/resolveAssetUrl.js'
 const log = createLogger('dashboard')
 
 import './dashboard.css'
+import { initDetailSplitter } from './modules/detailSplitter.js'
+import { initControlsPanel } from './modules/controlsPanel.js'
+import { closeMeshNameExpansion, toggleMeshNameExpansion } from './modules/meshNameExpansion.js'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
@@ -653,8 +656,11 @@ const searchClear = $('#searchClear')
 const filterGroup = $('#filterGroup')
 const viewToggle = $('#viewToggle')
 const resultCount = $('#resultCount')
+const appShell = $('#app')
+initControlsPanel()
 const detailOverlay = $('#detailOverlay')
 const detailPanel = $('#detailPanel')
+initDetailSplitter()
 const detailTitle = $('#detailTitle')
 const detailContent = $('#detailContent')
 const dropOverlay = $('#dropOverlay')
@@ -665,6 +671,22 @@ const sortSelect = $('#sortSelect')
 const mappingTargetSelect = $('#mappingTargetSelect')
 const categorySelect = $('#categorySelect')
 const fileManagerSettingsModal = $('#fileManagerSettingsModal')
+let showMeshRal = true
+
+function applyMeshDisplaySettings(settings) {
+  showMeshRal = settings.showMeshRal !== false
+  updateDetailMeshRowClasses()
+}
+
+async function loadMeshDisplaySettings() {
+  try {
+    const res = await fetch('/__api/file-manager-settings')
+    const settings = await parseJsonResponse(res)
+    if (res.ok) applyMeshDisplaySettings(settings)
+  } catch (error) {
+    log.warn('Mesh-Anzeigeeinstellungen konnten nicht geladen werden:', error)
+  }
+}
 
 /* ═══════════════════════════════════════════════
    API – server-seitige Datenlast
@@ -839,6 +861,7 @@ async function openFileManagerSettings() {
     $('#freeCommanderPath').value = settings.freeCommanderPath || ''
     $('#autoConvertOnDrop').checked = settings.autoConvertOnDrop === true
     $('#maxParallelConversions').value = String(settings.maxParallelConversions || 3)
+    $('#showMeshRal').checked = settings.showMeshRal !== false
     fileManagerSettingsModal.classList.add('open')
     fileManagerSettingsModal.setAttribute('aria-hidden', 'false')
     syncFileManagerSettingsUi()
@@ -867,11 +890,13 @@ async function saveFileManagerSettings() {
         fileManager: $('#fileManagerChoice').value,
         freeCommanderPath: $('#freeCommanderPath').value,
         autoConvertOnDrop: $('#autoConvertOnDrop').checked,
+        showMeshRal: $('#showMeshRal').checked,
         maxParallelConversions,
       }),
     })
     const data = await parseJsonResponse(res)
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    applyMeshDisplaySettings(data)
     if (typeof BroadcastChannel !== 'undefined') {
       const channel = new BroadcastChannel('showroom-conversion-settings')
       channel.postMessage({
@@ -895,7 +920,7 @@ async function init() {
   bindEvents()
   bindGlobalNameRulesModal()
   bindGlobalReductionRulesModal()
-  await Promise.all([loadMappingTargetOptions(), loadCategoryOptions()])
+  await Promise.all([loadMappingTargetOptions(), loadCategoryOptions(), loadMeshDisplaySettings()])
   await fetchPage()
 
   // ?highlight=ID → Produkt direkt öffnen (kommt vom Converter nach Abschluss)
@@ -1580,7 +1605,7 @@ function renderGrid() {
     const liveConversion = getLiveConversionForProduct(p.id)
 
     return `
-    <div class="product-card" data-id="${p.id}" style="animation-delay:${Math.min(i, 12) * 25}ms">
+    <div class="product-card${selectedProductId === p.id ? ' selected' : ''}" data-id="${p.id}" style="animation-delay:${Math.min(i, 12) * 25}ms">
       <div class="card-preview${hasThumb ? ' has-thumb' : ''}"${hasThumb ? '' : ` data-glb="${p.glbFile || ''}"`} data-product-id="${p.id}" data-default-color="${esc(p.defaultColor || '')}" data-surface-finish="${esc(p.surfaceFinish || 'auto')}">
         ${hasThumb
           ? `<img class="card-preview-img" src="${esc(resolveAssetUrl(p.previewImage))}" loading="lazy" decoding="async" alt="" width="640" height="400">`
@@ -2463,7 +2488,7 @@ function escapeNameRulePattern(name) {
   return String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-async function saveMeshNameRule(name, ral) {
+async function saveMeshNameRule(name, ral, matchingRule = null) {
   const rows = document.getElementById('detailNameRulesRows')
   const productId = selectedProductId
   const product = productId ? productCache.get(productId) : null
@@ -2471,13 +2496,8 @@ async function saveMeshNameRule(name, ral) {
 
   const pattern = escapeNameRulePattern(name)
   const finish = ral === 'RAL 9007' ? 'verzinkt' : 'pulver'
-  const existingRow = [...rows.querySelectorAll('.detail-name-rule-row')].find((row) =>
-    row.querySelector('.name-rule-target')?.value === 'mesh' &&
-    row.querySelector('.name-rule-pattern')?.value.trim() === pattern,
-  )
+  const existingRow = matchingRule?.row
   const row = existingRow || appendDetailNameRule(pattern)
-  row.querySelector('.name-rule-target').value = 'mesh'
-  row.querySelector('.name-rule-pattern').value = pattern
   row.querySelector('.name-rule-ral').value = ral
   row.querySelector('.name-rule-finish').value = finish
   refreshNameRuleSummaries(rows)
@@ -2513,6 +2533,7 @@ function getSelectedMeshNameText(label) {
 }
 
 function closeDetailMeshDrawer() {
+  closeMeshNameExpansion()
   const drawerToggle = document.getElementById('detailMeshDrawerToggle')
   const drawerContent = document.getElementById('detailMeshDrawerContent')
   if (drawerToggle) drawerToggle.setAttribute('aria-expanded', 'false')
@@ -2535,6 +2556,7 @@ document.addEventListener('selectionchange', () => {
 
 function openMeshNameMenu(event, name, matchingRules = []) {
   closeMeshNameMenu()
+  const matchingRule = getMatchingMeshColorRule(matchingRules) || matchingRules.at(-1)
   const menu = document.createElement('div')
   menu.id = 'meshNameContextMenu'
   menu.className = 'mesh-name-context-menu'
@@ -2552,6 +2574,7 @@ function openMeshNameMenu(event, name, matchingRules = []) {
   ralSelect.innerHTML = `<option value="">— RAL —</option>${ColorService.getAllColors()
     .map((color) => `<option value="${esc(color.code)}">${esc(color.code)} ${esc(color.name)}</option>`)
     .join('')}`
+  ralSelect.value = matchingRule?.row.querySelector('.name-rule-ral')?.value || ''
   ralLabel.append(ralSelect)
   menu.append(ralLabel)
   matchingRules.forEach((rule) => {
@@ -2580,7 +2603,7 @@ function openMeshNameMenu(event, name, matchingRules = []) {
     const ral = ralSelect.value
     if (!ral) return
     closeMeshNameMenu()
-    await saveMeshNameRule(name, ral)
+    await saveMeshNameRule(name, ral, matchingRule)
   })
   meshNameMenuController = new AbortController()
   const options = { capture: true, signal: meshNameMenuController.signal }
@@ -3280,6 +3303,7 @@ function bindCollapsibleDetailHelp() {
 }
 
 async function openDetail(id) {
+  closeMeshNameExpansion()
   disposeDetailPartPreviews()
   // Gleiche Karte: Grid-WebGL freigeben, sonst Detail + Karte = zwei Kontexte pro Produkt (GPU-Limit).
   if (previewRenderers.has(id)) disposeCardPreviewById(id)
@@ -3296,6 +3320,7 @@ async function openDetail(id) {
   updateDetailNavState()
   detailOverlay.classList.add('open')
   detailPanel.classList.add('open')
+  appShell.classList.add('detail-open')
 
   const showroomBtn = document.getElementById('btnShowroom')
   if (showroomBtn) {
@@ -4500,6 +4525,33 @@ function getCurrentMatchingNameRules(name) {
   })
 }
 
+function getMatchingMeshColorRule(matchingRules) {
+  // Gemeinsame Priorität für Kontextmenü und Zeile: letzte passende Farbregel gewinnt.
+  return matchingRules.findLast((rule) => rule.row.querySelector('.name-rule-ral')?.value)
+}
+
+function updateMeshRalBadge(row, matchingRules) {
+  const badge = row.querySelector('.detail-mesh-ral')
+  if (!badge) return
+  const rule = getMatchingMeshColorRule(matchingRules)
+  const ral = rule?.row.querySelector('.name-rule-ral')?.value || ''
+  badge.hidden = !showMeshRal || !ral
+  badge.replaceChildren()
+  badge.removeAttribute('title')
+  if (badge.hidden) return
+  const color = ColorService.getRAL(ral)
+  badge.title = `${ral}${color?.name ? ` ${color.name}` : ''}${ral === 'RAL 9007' ? ' · Verzinkt' : ''}`
+  if (color?.hex) {
+    const chip = document.createElement('span')
+    chip.className = 'detail-mesh-ral-chip'
+    chip.classList.toggle('is-galvanized', ral === 'RAL 9007')
+    chip.style.backgroundColor = color.hex
+    chip.setAttribute('aria-hidden', 'true')
+    badge.append(chip)
+  }
+  badge.append(document.createTextNode(ral === 'RAL 9007' ? 'Verzinkt' : ral))
+}
+
 function colorRuleCoverage(names, rules = []) {
   const assigned = names.filter((name) => rules.some((rule) =>
     nameRuleMatches(name, String(rule.pattern || '').trim(), String(rule.flags || '').trim()))).length
@@ -4548,10 +4600,13 @@ async function updateCardColorRuleStatuses(products) {
 function updateDetailMeshRowClasses() {
   const list = document.getElementById('detailMeshPartsList')
   if (!list) return
+  list.classList.toggle('hide-mesh-ral', !showMeshRal)
   list.querySelectorAll('.detail-mesh-row').forEach((row) => {
     const i = parseInt(row.dataset.meshIdx, 10)
     const name = row.querySelector('.detail-mesh-name')?.textContent || ''
-    const hasMatchingRule = getCurrentMatchingNameRules(name).length > 0
+    const matchingRules = getCurrentMatchingNameRules(name)
+    const hasMatchingRule = matchingRules.length > 0
+    updateMeshRalBadge(row, matchingRules)
     row.classList.toggle('is-rule-match', hasMatchingRule)
     row.classList.toggle('is-active', detailMeshIsolateIndex === i && !hasMatchingRule)
     row.classList.toggle('is-excluded', detailMeshExcluded.has(i))
@@ -4613,6 +4668,7 @@ function focusDetailMeshPart(index) {
 }
 
 function buildDetailMeshPartsUI() {
+  closeMeshNameExpansion()
   const section = document.getElementById('detailMeshPartsSection')
   const listEl = document.getElementById('detailMeshPartsList')
   const clearBtn = document.getElementById('detailMeshClearBtn')
@@ -4650,7 +4706,9 @@ function buildDetailMeshPartsUI() {
         <label class="detail-mesh-inc" title="Ins GLB aufnehmen" data-mesh-inc-wrap>
           <input type="checkbox" class="detail-mesh-inc-cb" data-mesh-inc="${i}" ${checked}>
         </label>
-        <span class="detail-mesh-name" title="${esc(name)}">${esc(name)}</span>
+        <span class="detail-mesh-name detail-mesh-name-trigger" title="${esc(name)}" role="button" tabindex="0"
+          aria-expanded="false" aria-controls="detailMeshFullName-${i}">${esc(name)}</span>
+        <span class="detail-mesh-ral" hidden></span>
         <span class="detail-mesh-v">${vc.toLocaleString('de-DE')} V</span>
         <button type="button" class="detail-mesh-focus-btn" data-mesh-focus="${i}" title="Kamera auf dieses Teil">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2M3 17v2a2 2 0 0 0 2 2h2m10-16h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2"/></svg>
@@ -4664,6 +4722,13 @@ function buildDetailMeshPartsUI() {
   updateDetailMeshRowClasses()
 
   listEl.onclick = (e) => {
+    if (e.target.closest('.detail-mesh-full-name')) return
+    const nameLabel = e.target.closest('.detail-mesh-name-trigger')
+    if (nameLabel) {
+      // Textauswahl beim Ziehen und der zweite Klick eines Doppelklicks bleiben erhalten.
+      if (e.detail < 2 && !getSelectedMeshNameText(nameLabel)) toggleMeshNameExpansion(nameLabel)
+      return
+    }
     const focusBtn = e.target.closest('[data-mesh-focus]')
     if (focusBtn) {
       e.stopPropagation()
@@ -4686,6 +4751,17 @@ function buildDetailMeshPartsUI() {
     e.preventDefault()
     e.stopPropagation()
     openMeshNameMenu(e, selectedText || mesh.name, matchingRules)
+  }
+  listEl.ondblclick = (e) => {
+    const label = e.target.closest('.detail-mesh-name-trigger')
+    if (label) toggleMeshNameExpansion(label, true)
+  }
+  listEl.onkeydown = (e) => {
+    const label = e.target.closest('.detail-mesh-name-trigger')
+    if (label && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault()
+      toggleMeshNameExpansion(label)
+    }
   }
   listEl.onchange = (e) => {
     const cb = e.target.closest('.detail-mesh-inc-cb')
@@ -4989,12 +5065,14 @@ function updateDetailNavState() {
 }
 
 function closeDetail() {
+  closeMeshNameExpansion()
   closeMeshNameMenu()
   disposeDetailPreview()
   disposeDetailPartPreviews()
   detailColorCompareState = null
   detailOverlay.classList.remove('open')
   detailPanel.classList.remove('open')
+  appShell.classList.remove('detail-open')
   productGrid.querySelectorAll('.product-card.selected').forEach(c => c.classList.remove('selected'))
   selectedProductId = null
   // Header-Bake-Drehung bleibt erhalten: Wenn der User vorher manuell einen Override gewählt hat,
@@ -5003,8 +5081,9 @@ function closeDetail() {
 }
 
 async function saveDetail() {
-  if (!selectedProductId) return false
-  const p = productCache.get(selectedProductId)
+  const productId = selectedProductId
+  if (!productId) return false
+  const p = productCache.get(productId)
   if (!p) return false
 
   const changes = structuredClone(p)
@@ -5043,6 +5122,8 @@ async function saveDetail() {
   }
 
   if (!changes._review) changes._review = {}
+  const selectedStatus = detailContent.querySelector('.review-status-btn[class*="active-"]')
+  if (selectedStatus) changes._review.status = selectedStatus.dataset.status
   const checkedIssues = []
   detailContent.querySelectorAll('.issue-check input:checked').forEach(cb => {
     checkedIssues.push(cb.dataset.issue)
@@ -5075,19 +5156,19 @@ async function saveDetail() {
   }
 
   try {
-    await patchProduct(selectedProductId, changes)
+    await patchProduct(productId, changes)
     toast(`Produkt „${changes.name}" gespeichert`, 'success')
     await loadCategoryOptions()
     // Karte auf der aktuellen Seite sofort aktualisieren (inkl. Standard-Farbe)
-    const card = productGrid.querySelector(`[data-id="${selectedProductId}"]`)
+    const card = productGrid.querySelector(`[data-id="${productId}"]`)
     if (card) {
       const previewEl = card.querySelector('.card-preview')
       if (previewEl) {
         previewEl.dataset.defaultColor = changes.defaultColor || ''
         previewEl.dataset.surfaceFinish = changes.surfaceFinish || 'auto'
         // Vorschau neu laden, wenn bereits gerendert, damit Farbe sofort sichtbar ist
-        if (previewRenderers.has(selectedProductId)) {
-          const entry = previewRenderers.get(selectedProductId)
+        if (previewRenderers.has(productId)) {
+          const entry = previewRenderers.get(productId)
           if (entry?.animId) cancelAnimationFrame(entry.animId)
           if (entry?.resizeObs) entry.resizeObs.disconnect()
           if (entry?.scene) disposeSceneGpuResources(entry.scene)
@@ -5095,11 +5176,11 @@ async function saveDetail() {
             entry.renderer.dispose()
             safeForceWebGLContextLoss(entry.renderer)
           }
-          previewRenderers.delete(selectedProductId)
-          const updatedP = productCache.get(selectedProductId) || {}
+          previewRenderers.delete(productId)
+          const updatedP = productCache.get(productId) || {}
           const product = {
             ...updatedP,
-            id: selectedProductId,
+            id: productId,
             glbFile: changes.glbFile || previewEl.dataset.glb,
             defaultColor: changes.defaultColor || '',
             surfaceFinish: changes.surfaceFinish || 'auto',
@@ -5107,7 +5188,7 @@ async function saveDetail() {
           loadPreview(product, previewEl)
         }
       }
-      const updated = productCache.get(selectedProductId)
+      const updated = productCache.get(productId)
       const ruleStatus = card.querySelector('.card-color-rule-status')
       if (ruleStatus && detailPreviewModelRoot && changes.glbFile === p.glbFile) {
         const names = collectMeshesFromGroup(detailPreviewModelRoot).map((mesh) => mesh.name || '(ohne Namen)')
@@ -5120,9 +5201,11 @@ async function saveDetail() {
       const newBar = document.createElement('div')
       newBar.innerHTML = renderCardStatusBar(updated)
       const oldBar = card.querySelector('.card-status-bar')
-      if (oldBar) oldBar.replaceWith(newBar.firstChild)
+      if (oldBar) oldBar.replaceWith(newBar.firstElementChild)
     }
-    openDetail(selectedProductId)
+    // Gespeicherte Statusquelle auch für Filter, Zähler und Seiteninhalt neu laden.
+    await fetchPage()
+    if (selectedProductId === productId) openDetail(productId)
     return true
   } catch (err) {
     toast(`Speichern fehlgeschlagen: ${err.message}`, 'error')

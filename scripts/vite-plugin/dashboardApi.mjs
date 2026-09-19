@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import { resolveProductShortText } from '../lib/sapShortText.mjs'
+import { compareShortText } from '../lib/shortTextSort.mjs'
 import { resolve, dirname, relative, isAbsolute, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
 import { buildColorOverridesFromMapping, normalizeMappingHex } from '../../src/lib/hexMapping.js'
@@ -377,6 +378,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
         fileManager: saved?.fileManager === 'freecommander' ? 'freecommander' : 'explorer',
         freeCommanderPath: String(saved?.freeCommanderPath || '').trim(),
         autoConvertOnDrop: saved?.autoConvertOnDrop === true,
+        showMeshRal: saved?.showMeshRal !== false,
+        sidebarWidthPercent: [35, 40, 45, 50, 55].includes(Number(saved?.sidebarWidthPercent))
+          ? Number(saved.sidebarWidthPercent) : 45,
         maxParallelConversions: [1, 2, 3, 4, 5].includes(Number(saved?.maxParallelConversions))
           ? Number(saved.maxParallelConversions)
           : 3,
@@ -386,6 +390,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
         fileManager: 'explorer',
         freeCommanderPath: '',
         autoConvertOnDrop: false,
+        showMeshRal: true,
+        sidebarWidthPercent: 45,
         maxParallelConversions: 3,
       }
     }
@@ -2709,6 +2715,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             list = [...list].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
           } else if (sort === 'name') {
             list = [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'))
+          } else if (sort === 'shortTextAsc' || sort === 'shortTextDesc') {
+            list = [...list].sort((a, b) => compareShortText(a, b, sort === 'shortTextDesc'))
           }
 
           const total = list.length
@@ -2743,6 +2751,12 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const fileManager = body?.fileManager === 'freecommander' ? 'freecommander' : 'explorer'
           const freeCommanderPath = String(body?.freeCommanderPath || '').trim()
           const autoConvertOnDrop = body?.autoConvertOnDrop === true
+          const showMeshRal = typeof body?.showMeshRal === 'boolean'
+            ? body.showMeshRal
+            : (await getFileManagerSettings()).showMeshRal
+          const sidebarWidthPercent = [35, 40, 45, 50, 55].includes(Number(body?.sidebarWidthPercent))
+            ? Number(body.sidebarWidthPercent)
+            : (await getFileManagerSettings()).sidebarWidthPercent
           const requestedParallelism = Number(body?.maxParallelConversions)
           const maxParallelConversions = [1, 2, 3, 4, 5].includes(requestedParallelism)
             ? requestedParallelism
@@ -2751,6 +2765,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             fileManager,
             freeCommanderPath,
             autoConvertOnDrop,
+            showMeshRal,
+            sidebarWidthPercent,
             maxParallelConversions,
           }, null, 2) + '\n', 'utf-8')
           res.setHeader('Content-Type', 'application/json')
@@ -2759,6 +2775,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             fileManager,
             freeCommanderPath,
             autoConvertOnDrop,
+            showMeshRal,
+            sidebarWidthPercent,
             maxParallelConversions,
           }))
         } catch (error) {

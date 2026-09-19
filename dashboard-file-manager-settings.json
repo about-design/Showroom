@@ -2,5 +2,7 @@
   "fileManager": "explorer",
   "freeCommanderPath": "C:\\Program Files (x86)\\FreeCommander XE\\FreeCommander.exe",
   "autoConvertOnDrop": true,
+  "showMeshRal": true,
+  "sidebarWidthPercent": 35,
   "maxParallelConversions": 3
 }

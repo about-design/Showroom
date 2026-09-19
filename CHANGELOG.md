@@ -1,5 +1,53 @@
 # Changelog
 
+## MARA09.19.t - 2026-09-19
+
+- Sidebar-Mindestbreite auf 25 % reduziert; Mesh-Liste, RAL, Vertexzahl, Stammdaten und Footer passen sich an schmale Sidebar-Breiten an. Maximum 60 %, Standard/Reset 45 % und lokale Speicherung unveraendert.
+
+## MARA09.19.s - 2026-09-19
+
+- Vertikaler Splitter für die Produktdetail-Sidebar: live 35–60 %, Standard und Doppelklick-Reset 45 %, dauerhaft lokal gespeichert. Dashboard und Kartenraster folgen der Breite; Textauswahl beim Ziehen ist gesperrt. Separate Prozent-Auswahl entfernt, bestehende Mindestbreite kleiner Fenster erhalten.
+
+## MARA09.19.r - 2026-09-19
+
+- Zentrale Darstellungseinstellung „Breite Produktdetail-Sidebar“ mit 35 %, 40 %, 45 %, 50 % und 55 % ergänzt (Standard 45 %). Dauerhaft gespeichert und nach Speichern ohne Neuladen wirksam. Sidebar und Dashboard verwenden dieselbe Breite; das Kartenraster passt sich an und erhält beim Schließen wieder die gesamte Breite. Für kleine Fenster wird die Sidebar auf mindestens 480 px, höchstens 94 % der Fensterbreite begrenzt; bestehende responsive Regeln bleiben erhalten. Mesh-Namen nutzen den zusätzlichen Platz, die rechten Mesh-Spalten bleiben fest.
+
+## MARA09.19.q - 2026-09-19
+
+- RAL/Verzinkt, Vertex-Anzahl und Kamera in festen Mesh-Spalten ausgerichtet; der Name nutzt den flexiblen Restplatz. Bei deaktivierter RAL-Anzeige entfällt deren Spalte vollständig. Klick/Doppelklick auf einen Mesh-Namen öffnet den vollständigen auswählbaren Text direkt unter der Zeile. Beliebige Textteile können über das bestehende Kontextmenü als Namens-Farbregel übernommen werden; erneuter Klick oder Klick außerhalb schließt die Anzeige. Gespeicherte Mesh-Namen bleiben unverändert.
+
+## MARA09.19.p - 2026-09-19
+
+- Kompakte RAL-Anzeige mit echtem Farbpunkt in der Mesh-Zeile vor der Vertex-Anzahl ergänzt. Sie nutzt dieselben Regex-Treffer und dieselbe Regelpriorität wie das Kontextmenü und aktualisiert sich bei Änderungen im Menü oder Regelbereich sofort. Ohne RAL bleibt sie leer; RAL 9007 zeigt Verzinkt im Tooltip. Die zentrale Option „RAL-Farbe in Mesh-Liste anzeigen“ ist standardmäßig eingeschaltet, wird dauerhaft gespeichert und gibt ausgeschaltet den Platz für den Mesh-Namen frei. Farbregeln, Konvertierung und GLB bleiben von der Darstellungsoption unberührt.
+
+## MARA09.19.o - 2026-09-19
+
+- Statistik, Suche, Filter, Sortierung, Exportrotation, Queue-/Auswahlaktionen, Ansicht und Seitennavigation in einem deckenden Sticky-Steuerbereich unter der META-Kopfzeile zusammengefasst. Ein mittiger Pfeil klappt den gesamten Inhalt animiert auf eine schmale Leiste ein; der Zustand bleibt lokal gespeichert. Bestehende Bedienelemente und Einstellungen bleiben erhalten, die Breite folgt der Produkt-Sidebar. Bei geringer Bildschirmhöhe ist der aufgeklappte Inhalt scrollbar, der Griff bleibt erreichbar; reduzierte Bewegung wird berücksichtigt.
+
+## MARA09.19.n - 2026-09-19
+
+- Mesh-Kontextmenü wählt die aktuelle RAL-Farbe aus den bestehenden Treffern der grünen Mesh-Markierung voraus. Wie bei der Farbanwendung gewinnt die letzte passende Farbregel. Eine neue RAL-Auswahl aktualisiert genau diese Regel statt eines Duplikats; Regex, Ziel und Flags bleiben erhalten, RAL 9007 setzt Verzinkt und andere RAL-Farben Pulver. Regelanzeige und Mesh-Markierung werden unmittelbar aktualisiert.
+
+## MARA09.19.m - 2026-09-19
+
+- Produktkarten zeigen den unter „Freigabe & Qualität“ gespeicherten Prüfstatus nach Übernehmen korrekt an. Die Aktualisierung ersetzt jetzt das Statusleisten-Element statt eines Leerraum-Textknotens; die aktive Statusauswahl wird explizit in das vorhandene Feld `_review.status` übernommen. Karten verwenden die vorhandenen Statusfarben; Liste, Statusfilter und Zähler werden nach dem Speichern neu geladen.
+
+## MARA09.19.l - 2026-09-19
+
+- Dashboard-Sortierungen „Kurztext A–Z“ und „Kurztext Z–A“ für das gespeicherte Feld `shortText` ergänzt. Groß-/Kleinschreibung und äußere Leerzeichen werden ignoriert; leere Werte und Strich-Platzhalter stehen in beiden Richtungen am Ende. Sortierung erfolgt nach Suche und Filtern vor der Seiteneinteilung, ohne erneute Excel-/SAP-Abfrage.
+
+## MARA09.19.k - 2026-09-19
+
+- Die aktuell in der Produktdetail-Sidebar geöffnete Produktkarte erhält einen deutlich sichtbaren roten META-Rahmen ohne Layoutverschiebung. Die Markierung folgt der Detail-Navigation, bleibt bei Karten-Reflows erhalten und wird beim Schließen entfernt.
+
+## MARA09.19.j - 2026-09-19
+
+- Bei geöffneter Produktdetail-Sidebar wird der Dashboard-Inhaltsbereich um exakt deren Breite reduziert. Das vorhandene Kartenraster nutzt die linke Restbreite, ordnet vollständig sichtbare Karten neu an und stellt beim Schließen sofort die volle Breite wieder her.
+
+## MARA09.19.i - 2026-09-19
+
+- Produktdetail-Sidebar einschließlich Scrollbereich und „Einzelteile (Meshes)“ gegen durchscheinende Dashboard-Inhalte abgesichert: deckende Hintergründe und isolierter Stacking-Context bei unverändertem Detail-Layout.
+
 ## MARA09.19.h - 2026-09-19
 
 - Lange Hilfetexte im Produktdetail sind platzsparend einklappbar. Namens-Farbregeln, Vertex-Reduktion und Sichtbarkeit zeigen zuerst eine Kurzzeile; vollständige Erklärung und vorhandene Links bleiben über „Mehr anzeigen“ erreichbar.
