@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -17,13 +18,13 @@ from collections import defaultdict
 import FreeCAD
 log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, "freecad_step_debug.log")
+log_file = os.environ.get("STEP_LOG_FILE") or os.path.join(log_dir, "freecad_step_debug.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file),
+        logging.FileHandler(log_file, encoding="utf-8", errors="backslashreplace"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -964,8 +965,21 @@ def parse_step_colors(step_file_path):
         return {}, {}
 
 
+conversion_started = time.perf_counter()
+stage_timings = {}
+
+
+def _record_stage(name, started):
+    elapsed = time.perf_counter() - started
+    stage_timings[name] = elapsed
+    logger.info("STEP Laufzeit %s: %.3fs (gesamt %.3fs)", name, elapsed,
+                time.perf_counter() - conversion_started)
+
+
 # Parse STEP file for colors before FreeCAD import
+stage_started = time.perf_counter()
 step_shape_colors, step_shape_names = parse_step_colors(input_file)
+_record_stage("Farbauswertung", stage_started)
 
 # Import FreeCAD modules
 try:
@@ -983,6 +997,7 @@ try:
     logger.info("✓ Created FreeCAD document")
     
     # Import STEP file - use Part.insert instead of Import.insert
+    stage_started = time.perf_counter()
     logger.info("Starting STEP file import...")
     import_successful = False
     import_method = None
@@ -1084,6 +1099,8 @@ try:
         logger.error(f"✗ All three import methods failed")
     
     # Refresh document and ensure colors are loaded
+    _record_stage("STEP-Import", stage_started)
+    stage_started = time.perf_counter()
     logger.info("Recomputing document...")
     doc.recompute()
     
@@ -1329,6 +1346,8 @@ try:
                 })
     
     logger.info(f"Total shapes to process: {len(shapes_to_process)}")
+    _record_stage("Formaufbereitung", stage_started)
+    stage_started = time.perf_counter()
     step_component_drawing_numbers = _read_step_component_drawing_numbers(input_file)
     if len(step_component_drawing_numbers) == len(shapes_to_process):
         for shape_info, drawing_number in zip(shapes_to_process, step_component_drawing_numbers):
@@ -1340,6 +1359,9 @@ try:
             f"({len(step_component_drawing_numbers)} != {len(shapes_to_process)}); using FreeCAD labels as fallback"
         )
     
+    _record_stage("STEP-Namenszuordnung", stage_started)
+    stage_started = time.perf_counter()
+
     # Use improved geometry-based color mapping
     step_colors = _map_colors_by_geometry(doc.Objects, step_shape_colors, step_shape_names)
 
@@ -1373,6 +1395,9 @@ try:
     logger.info(f"  ✓ Collected view colors for {len(view_object_colors)} objects")
     
     # Process each shape and apply colors
+    _record_stage("Farbzuordnung", stage_started)
+    tessellation_started = time.perf_counter()
+    shapes_processed = 0
     for i, shape_info in enumerate(shapes_to_process):
         shape_label = shape_info['label']
         export_path = shape_info['export_path']
@@ -1381,7 +1406,10 @@ try:
         placement = shape_info.get('placement')
         display_name = " / ".join(export_path)
 
-        logger.info(f"Processing shape {i+1}/{len(shapes_to_process)}: {display_name}")
+        shapes_processed += 1
+        shape_started = time.perf_counter()
+        logger.info(f"Tessellierung {i+1}/{len(shapes_to_process)}: {display_name} "
+                    f"(gesamt {time.perf_counter() - conversion_started:.3f}s)")
         
         # Extract color from pre-analyzed step_colors dictionary
         obj_color = None
@@ -1468,7 +1496,16 @@ try:
             logger.error(f"  ✗ ERROR: Tessellation failed for {display_name}: {e}")
             logger.debug(f"  Exception type: {type(e).__name__}")
             continue
-    
+        finally:
+            logger.info("STEP Laufzeit Form %d/%d: %.3fs", i + 1, len(shapes_to_process),
+                        time.perf_counter() - shape_started)
+
+    _record_stage("Tessellierung", tessellation_started)
+    status_payload['shapesTotal'] = len(shapes_to_process)
+    status_payload['shapesProcessed'] = shapes_processed
+    status_payload['meshesExported'] = len(obj_data)
+    status_payload['verticesTotal'] = total_vertices
+    status_payload['facesTotal'] = total_faces
     if not obj_data:
         logger.error("✗ ERROR: No mesh data could be extracted from any objects")
         logger.error("All objects failed tessellation - this indicates:")
@@ -1479,6 +1516,7 @@ try:
     
     # Write MTL file with materials
     mtl_file = output_file.replace('.obj', '.mtl')
+    stage_started = time.perf_counter()
     logger.info(f"Writing MTL file with {len(materials)} materials...")
     
     with open(mtl_file, 'w') as f:
@@ -1546,6 +1584,9 @@ try:
             f.write("\n")
             vertex_offset += len(vertices)
     
+    _record_stage("OBJ-MTL-Ausgabe", stage_started)
+    status_payload["stageTimingsSeconds"] = stage_timings
+    status_payload["durationSeconds"] = time.perf_counter() - conversion_started
     output_size = os.path.getsize(output_file)
     mtl_size = os.path.getsize(mtl_file)
     logger.info("="*80)

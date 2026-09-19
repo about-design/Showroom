@@ -42,7 +42,7 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.16.ad</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.19.h</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
@@ -67,6 +67,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         Speichern
       </button>
+      <button type="button" class="btn btn-ghost" id="btnFileManagerSettings" title="Dateimanager einstellen" aria-label="Dateimanager einstellen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20h-3v-.08A1.7 1.7 0 0 0 10.66 18.36a1.7 1.7 0 0 0-1.88.34l-.06.06L6.6 16.64l.06-.06A1.7 1.7 0 0 0 7 14.7a1.7 1.7 0 0 0-1.56-1.04H5v-3h.08A1.7 1.7 0 0 0 6.64 9.62a1.7 1.7 0 0 0-.34-1.88l-.06-.06L8.36 5.56l.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.34 4.4V4h3v.08a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.08v3h-.08A1.7 1.7 0 0 0 19.4 15z"/></svg>
+      </button>
       <button class="btn btn-primary" id="btnExport" title="products.json als Download">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Exportieren
@@ -84,7 +87,7 @@
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input class="search-input" id="searchInput" type="text" placeholder="Suche: Name, ID, Artikelnr., dominante RAL …" title="Mehrere Artikel gleichzeitig finden: Begriffe mit Komma trennen, z. B. „12345, 98765, RAL 7035“">
+        <input class="search-input" id="searchInput" type="text" placeholder="Suche: Name, ID, Artikelnr., Kurztext, dominante RAL …" title="Mehrere Artikel gleichzeitig finden: Begriffe mit Komma trennen, z. B. „12345, 98765, RAL 7035“">
         <button type="button" class="search-clear" id="searchClear" hidden
                 aria-label="Produktsuche löschen" title="Suche löschen">×</button>
       </div>
@@ -212,6 +215,50 @@
   </main>
 </div>
 
+<div class="name-rules-modal" id="fileManagerSettingsModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="fileManagerSettingsBackdrop"></div>
+  <div class="name-rules-modal-panel file-manager-settings-panel" role="dialog" aria-labelledby="fileManagerSettingsTitle" aria-modal="true">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="fileManagerSettingsTitle">Einstellungen</h2>
+    </div>
+    <div class="file-manager-settings-body">
+      <section class="file-manager-settings-section" aria-labelledby="fileManagerSettingsSectionTitle">
+        <h3 class="file-manager-settings-section-title" id="fileManagerSettingsSectionTitle">Dateimanager</h3>
+        <label class="file-manager-settings-field">Dateimanager
+          <select class="sort-select" id="fileManagerChoice">
+            <option value="explorer">Windows Explorer</option>
+            <option value="freecommander">FreeCommander</option>
+          </select>
+        </label>
+        <label class="file-manager-settings-field" id="freeCommanderPathRow" hidden>Pfad zu FreeCommander.exe
+          <input class="detail-input" id="freeCommanderPath" type="text" placeholder="C:\\Program Files\\FreeCommander XE\\FreeCommander.exe">
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="conversionSettingsSectionTitle">
+        <h3 class="file-manager-settings-section-title" id="conversionSettingsSectionTitle">Konvertierung</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Automatische Konvertierung nach Drag &amp; Drop</span>
+          <input type="checkbox" id="autoConvertOnDrop">
+        </label>
+        <label class="file-manager-settings-field">Gleichzeitige Konvertierungen
+          <select class="sort-select" id="maxParallelConversions">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+      </section>
+    </div>
+    <div class="name-rules-modal-actions">
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="fileManagerSettingsCancel">Abbrechen</button>
+      <button type="button" class="btn btn-primary" id="fileManagerSettingsSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════ Detail panel ═══════ -->
 <div class="detail-overlay" id="detailOverlay"></div>
 <aside class="detail-panel" id="detailPanel">
@@ -223,7 +270,10 @@
       <button class="detail-nav-btn" id="detailNext" title="Nächstes Produkt (→)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
       </button>
-      <span class="detail-title" id="detailTitle"></span>
+      <div class="detail-heading">
+        <span class="detail-title" id="detailTitle"></span>
+        <div class="detail-short-text" id="detailShortText"></div>
+      </div>
       <span class="detail-position" id="detailPosition"></span>
     </div>
     <button class="detail-close" id="detailClose">

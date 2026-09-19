@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import datetime
 import json
+import time
+import math
+import re
 
 
 def _collect_freecad_candidate_binaries():
@@ -79,9 +82,9 @@ def _probe_freecad_binary(path):
     try:
         if name.startswith('python'):
             test_cmd = [path, '-c', 'import FreeCAD; print("OK")']
-            result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=15)
+            result = subprocess.run(test_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
             return result.returncode == 0 and 'OK' in (result.stdout or '')
-        result = subprocess.run([path, '--version'], capture_output=True, text=True, timeout=10)
+        result = subprocess.run([path, '--version'], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
         return result.returncode == 0
     except Exception:
         return False
@@ -207,7 +210,7 @@ class StepToObjConverter:
                 # Get FreeCAD version for macOS installation
                 test_cmd = [self.freecad_binary, "-c", 
                            "import sys; sys.path.insert(0, '/Applications/FreeCAD.app/Contents/Resources/lib'); import FreeCAD; print('Version:', '.'.join(FreeCAD.Version()[:3]))"]
-                result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=5)
+                result = subprocess.run(test_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
                 if result.returncode == 0 and result.stdout:
                     self.log(f"FreeCAD {result.stdout.strip()}")
                 else:
@@ -336,8 +339,18 @@ except Exception as e:
         script_used = None
         fallback_reason = None
         last_exception: Optional[Exception] = None
+        timeout_seconds = float(os.environ.get('STEP_CONVERSION_TIMEOUT_SECONDS', '600'))
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError('STEP_CONVERSION_TIMEOUT_SECONDS must be a positive finite number')
+        conversion_started = time.perf_counter()
+        deadline = conversion_started + timeout_seconds
+        attempt_failures = []
+        self.log(f"FreeCAD total time budget: {timeout_seconds:g}s (shared by all attempts)")
 
         for script_label, freecad_script in script_attempts:
+            remaining_seconds = deadline - time.perf_counter()
+            if remaining_seconds <= 0:
+                break
             env = os.environ.copy()
             env['STEP_INPUT_FILE'] = str(step_path.absolute())
             env['STEP_OUTPUT_FILE'] = str(obj_path.absolute())
@@ -367,21 +380,14 @@ except Exception as e:
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
-                    text=True,
-                    timeout=60,
+                    timeout=remaining_seconds,
                     env=env,
                     cwd=script_dir
                 )
 
-                if result.stdout:
-                    for line in result.stdout.strip().split('\n'):
-                        if line.strip():
-                            self.log(f"FreeCAD ({script_label}): {line}")
-
-                if result.stderr:
-                    for line in result.stderr.strip().split('\n'):
-                        if line.strip():
-                            self.log(f"FreeCAD ({script_label}) Error: {line}", "WARN")
+                result.stdout = self._log_process_output(result.stdout, script_label)
+                result.stderr = self._log_process_output(result.stderr, script_label, stderr=True)
+                self.log(f"FreeCAD ({script_label}) elapsed: {time.perf_counter() - conversion_started:.3f}s")
 
                 if result.returncode != 0:
                     error_msg = f"FreeCAD conversion failed with exit code {result.returncode} ({script_label})"
@@ -399,14 +405,25 @@ except Exception as e:
                 break
 
             except subprocess.TimeoutExpired as timeout_error:
-                fallback_reason = fallback_reason or f"{script_label}_timeout"
-                self.log(f"FreeCAD {script_label} script timed out after 60s", "ERROR")
-                last_exception = TimeoutError("FreeCAD conversion timed out after 60 seconds")
+                output = self._log_process_output(timeout_error.stdout, script_label)
+                self._log_process_output(timeout_error.stderr, script_label, stderr=True)
+                progress = re.findall(r'(?:Tessellierung\s+\d+/\d+|Processing shape\s+\d+/\d+|Processing object\s+\d+|Importing STEP file|Starting STEP file import|Recomputing document|Parsing STEP file for color definitions|Writing (?:OBJ|MTL) file)[^\r\n]*', output)
+                last_step = progress[-1] if progress else 'See FreeCAD import/stage logs above'
+                fallback_reason = f"{script_label}_timeout"
+                message = (f"FreeCAD {script_label} exceeded the shared {timeout_seconds:g}s time budget; "
+                           f"elapsed {time.perf_counter() - conversion_started:.3f}s; last step: {last_step}")
+                self.log(message, "ERROR")
+                attempt_failures.append(message)
+                last_exception = TimeoutError(message)
+                # The full shared budget was consumed: do not repeat the same work.
+                break
             except subprocess.CalledProcessError as call_error:
-                fallback_reason = fallback_reason or f"{script_label}_error_{call_error.returncode}"
+                fallback_reason = f"{script_label}_error_{call_error.returncode}"
+                attempt_failures.append(f"{script_label}: exit code {call_error.returncode}")
                 last_exception = call_error
             except Exception as generic_error:
-                fallback_reason = fallback_reason or f"{script_label}_unexpected_error"
+                fallback_reason = f"{script_label}_unexpected_error"
+                attempt_failures.append(f"{script_label}: {generic_error}")
                 self.log(f"Unexpected {script_label} script error: {generic_error}", "ERROR")
                 last_exception = generic_error
             finally:
@@ -417,7 +434,8 @@ except Exception as e:
                         pass
 
         if script_used is None:
-            raise RuntimeError(f"All STEP conversion scripts failed: {fallback_reason}") from last_exception
+            raise RuntimeError(f"All STEP conversion scripts failed: {fallback_reason}; "
+                               + "; ".join(attempt_failures)) from last_exception
 
         # Verify output file was created
         if not obj_path.exists():
@@ -432,7 +450,7 @@ except Exception as e:
         faces_count = 0
 
         try:
-            with open(obj_path, 'r') as f:
+            with open(obj_path, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     line = line.strip()
                     if line.startswith('v '):
@@ -489,10 +507,25 @@ except Exception as e:
             'step_colorless_objects': colorless_objects,
             'step_color_notes': status_notes,
             'step_color_fallback_reason': fallback_reason,
-            'step_status': status_info
+            'step_status': status_info,
+            'duration_seconds': time.perf_counter() - conversion_started,
+            'timeout_seconds': timeout_seconds
         }
 
         return stats
+
+    def _log_process_output(self, output, script_label: str, stderr: bool = False) -> str:
+        """Decode after draining byte pipes; native FreeCAD output may mix encodings."""
+        if isinstance(output, bytes):
+            output = output.decode('utf-8', errors='replace')
+        output = output or ''
+        if '\ufffd' in output:
+            self.log(f"FreeCAD ({script_label}): undecodable output characters replaced; output preserved", "WARN")
+        prefix = f"FreeCAD ({script_label})" + (' Error' if stderr else '')
+        for line in output.splitlines():
+            if line.strip():
+                self.log(f"{prefix}: {line}", "WARN" if stderr else "INFO")
+        return output
 
     def _load_status_file(self, status_path: Path) -> Dict[str, Any]:
         """Load STEP conversion status data if available."""
@@ -543,7 +576,7 @@ def detect_freecad_installation() -> Dict[str, Any]:
             if FREECAD_BINARY_PATH:
                 # Test external FreeCAD command
                 result = subprocess.run([FREECAD_BINARY_PATH, "--version"], 
-                                      capture_output=True, text=True, timeout=10)
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
                 if result.returncode == 0:
                     # Parse version from output
                     output = result.stdout.strip()

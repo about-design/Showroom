@@ -25,6 +25,17 @@ export function esc(s) {
     .replace(/'/g, '&#39;')
 }
 
+/**
+ * Eigenständiges, optionales Produktdatenfeld `shortText` (SAP-Kurztext).
+ * Wird unverändert im Produktdatensatz gespeichert; die Anzeige kennt keine Datenquelle.
+ * @param {{shortText?: string | null}} product
+ */
+export function formatProductShortText(product) {
+  return typeof product.shortText === 'string' && product.shortText.trim()
+    ? product.shortText
+    : '–'
+}
+
 export function formatDate(iso) {
   if (!iso) return ''
   const d = new Date(iso)

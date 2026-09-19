@@ -4131,6 +4131,8 @@ class BlenderOBJToGLBConverter:
                     stderr=subprocess.PIPE,
                     check=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 )
                 if result.stdout.strip():
                     self.log(f"USDZ (usdzip) stdout: {result.stdout.strip()}")

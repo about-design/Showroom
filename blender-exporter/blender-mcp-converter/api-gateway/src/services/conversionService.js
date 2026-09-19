@@ -1399,7 +1399,7 @@ export class ConversionService {
           method: 'blender-convert',
           params: inputData
         }, {
-          timeout: 600000,
+          timeout: 1800000, // Covers the MCP's 25-minute conversion budget and response delivery.
           headers: { 'Content-Type': 'application/json' }
         });
 

@@ -57,12 +57,14 @@
   },
   "dependencies": {
     "@google/model-viewer": "^4.0.0",
+    "@xmldom/xmldom": "^0.8.11",
     "alpinejs": "^3.14.0",
     "connect": "^3.7.0",
     "gsap": "^3.12.0",
     "meshoptimizer": "^1.0.1",
     "serve-static": "^2.2.1",
-    "three": "^0.172.0"
+    "three": "^0.172.0",
+    "yauzl": "^3.2.0"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.3.0",

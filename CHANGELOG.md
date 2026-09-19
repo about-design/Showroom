@@ -1,5 +1,75 @@
 # Changelog
 
+## MARA09.19.h - 2026-09-19
+
+- Lange Hilfetexte im Produktdetail sind platzsparend einklappbar. Namens-Farbregeln, Vertex-Reduktion und Sichtbarkeit zeigen zuerst eine Kurzzeile; vollständige Erklärung und vorhandene Links bleiben über „Mehr anzeigen“ erreichbar.
+
+## MARA09.19.g - 2026-09-19
+
+- Das Kontextmenü eines Meshes bietet eine zentrale RAL-Auswahl. Sie erzeugt und speichert sofort eine editierbare Mesh-Namens-Farbregel mit Pulver beziehungsweise Verzinkt für RAL 9007; exakte vorhandene Mesh-Regeln werden gezielt aktualisiert.
+
+## MARA09.19.f - 2026-09-19
+
+- Neue Produkt-Namens-Farbregeln verwenden standardmäßig das Ziel „Mesh (Geometrie)“. Bei aktiver RAL-Auswahl wird die Oberfläche auf Pulver, bei RAL 9007 auf Verzinkt und ohne RAL auf Automatisch vorbelegt; manuelle Änderungen bleiben möglich.
+
+## MARA09.19.e - 2026-09-19
+
+- Automatische Dashboard-Queue wartet nach STEP-Uploads auf den Karten-Refresh. Die tatsächlich gestarteten Slots verwenden dadurch die bestehende Produktkarten-Liveanzeige mit Job-ID und Laufzeit.
+
+## MARA09.19.d - 2026-09-19
+
+- Dashboard-Drop startet nach erfolgreichem STEP-Upload bei aktivierter Automatik die gemeinsame Konvertierungsqueue. Manuelle Auswahl- und Gesamtkonvertierungen verwenden denselben Scheduler und die zentrale Parallelgrenze.
+
+## MARA09.19.c - 2026-09-19
+
+- Automatische STEP-Konvertierung nach Drag & Drop wartet auf den initialen Abruf der zentral gespeicherten Einstellungen. Dadurch wird die gemeinsame Warteschlange auch unmittelbar nach dem Öffnen des Konverters mit der konfigurierten Parallelgrenze gestartet.
+
+## MARA09.19.b - 2026-09-19
+
+- Zentrale Einstellungen für automatische STEP-Konvertierungen nach Drag & Drop und die parallele Warteschlange ergänzt. Die Anzahl gleichzeitiger Konvertierungen (1 bis 5, Standard 3) bleibt dauerhaft gespeichert und gilt auch für manuell gestartete Stapel.
+
+## MARA09.19.a - 2026-09-19
+
+- Drag-&-Drop-Konvertierungen mit einstellbarer paralleler Warteschlange (1–5, Standard 3). Nach Abschluss oder Fehler eines Jobs startet automatisch die nächste wartende Datei.
+
+## MARA09.18.h - 2026-09-18
+
+- FreeCommander wird für „Im Dateimanager anzeigen“ ohne `/N` und ohne nicht dokumentierten `/O`-Parameter mit dem gespeicherten GLB-Pfad aufgerufen. Dadurch verwendet FreeCommander seine vorhandene Single-Instance-Weiterleitung; bei bereits laufendem FreeCommander wird kein weiteres Fenster erzwungen.
+
+## MARA09.18.g - 2026-09-18
+
+- Produktkarten haben eine kompakte Ordner-Aktion für die gespeicherte GLB-Datei. Sie markiert die Datei lokal im gewählten Dateimanager und verwendet weder STEP-/Quelldateien noch eine erneute Dateisuche.
+- In den Dateimanager-Einstellungen sind Windows Explorer und FreeCommander mit dauerhaft gespeichertem EXE-Pfad auswählbar. Fehlende GLB- oder FreeCommander-Dateien werden verständlich gemeldet; bei FreeCommander ist Windows Explorer als Alternative verfügbar.
+
+## MARA09.18.f - 2026-09-18
+
+- FreeCAD-Prozessausgabe als Bytes erfassen und mit Ersatzzeichen decodieren; vollständige Ausgabe auch bei Fehlern und Timeouts erhalten.
+- Gemeinsames FreeCAD-Zeitbudget von 600 Sekunden statt separater 60-Sekunden-Limits; über `STEP_CONVERSION_TIMEOUT_SECONDS` konfigurierbar. Ersatzversuche verwenden nur die verbleibende Zeit, nach Budgetverbrauch wird sauber abgebrochen.
+- Fehlerursachen aller Versuche erfassen und den letzten Fehler melden; HTTP-Konvertierungsbudget auf 30 Minuten an das vorhandene MCP-Budget von 25 Minuten angepasst.
+- Fortschritt je Form (`Tessellierung n/N`), Laufzeiten der Hauptschritte und verarbeitete/exportierte Formen protokollieren. Tessellierungsqualität, Geometrie, Farben, STEP-Namenszuordnung und Gruppierung unverändert.
+- Große Datei `4026212455489_315868` vollständig mit 114 Meshes in 61,5 Sekunden und kleine Datei in 2,14 Sekunden getestet; beide GLBs bytegleich zur bisherigen FreeCAD-Auswertung. Fünf Prozess-/Timeout-Regressionstests und Frontend-Build bestanden. Details: [Prüfbericht](docs/step-conversion-MARA09.18.f.md).
+
+## MARA09.18.e - 2026-09-18
+
+- Kurztext (SAP) im Produktdetail unter der Überschrift und schreibgeschützt in den Stammdaten angezeigt.
+
+## MARA09.18.d - 2026-09-18
+
+- Produktsuche um Kurztext (SAP) erweitert.
+
+## MARA09.18.c - 2026-09-18
+
+- SAP-Kurztexte aus `SAP_Artnr.xlsx` über EAN (Spalte A), ersatzweise Artikelnummer (Spalte B), aus Spalte E übernommen.
+- Vorhandenen Bestand einmalig abgeglichen und automatische Kurztextsuche nach erfolgreicher Konvertierung ergänzt; Excel-Fehler blockieren die Konvertierung nicht.
+
+## MARA09.18.b - 2026-09-18
+
+- Eigenständigen Kurztext (SAP) auf Produktkarten vorbereitet und angezeigt.
+
+## MARA09.18.a - 2026-09-18
+
+- Farbregel-Status mit zugeordneten und gesamten Einzelteilen auf Produktkarten ergänzt.
+
 ## 1.0.13 - 2026-09-17
 
 - Mesh-Liste zeigt wieder vollständige Namen; STEP-Produktdefinitionen bestimmen die Zeichnungsnummer je Bauteil vor der Instanzzählung.

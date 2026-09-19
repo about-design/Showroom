@@ -834,7 +834,7 @@ async def health_check():
         )
         stdout, stderr = await process.communicate()
         blender_available = process.returncode == 0
-        blender_version = stdout.decode().split("\n")[0] if blender_available else None
+        blender_version = stdout.decode("utf-8", errors="replace").split("\n")[0] if blender_available else None
         blender_path = blender_exe
     except Exception as exc:  # noqa: BLE001
         blender_available = False
@@ -879,7 +879,7 @@ async def health_check():
                             )
                             stdout, _ = await proc.communicate()
                             if proc.returncode == 0:
-                                freecad_version = stdout.decode().strip().split('\n')[0]
+                                freecad_version = stdout.decode("utf-8", errors="replace").strip().split('\n')[0]
                             break
                         except:
                             continue
@@ -1135,7 +1135,7 @@ async def step_conversion_health():
                     try:
                         test_cmd = [FREECAD_BINARY_PATH, "-c", 
                                    "import sys; sys.path.insert(0, '/Applications/FreeCAD.app/Contents/Resources/lib'); import FreeCAD; print('.'.join(FreeCAD.Version()[:3]))"]
-                        result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=5)
+                        result = subprocess.run(test_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
                         if result.returncode == 0 and result.stdout:
                             freecad_info["version"] = result.stdout.strip()
                     except Exception as e:

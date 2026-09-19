@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { resolveProductShortText } from '../lib/sapShortText.mjs'
 import { resolve, dirname, relative, isAbsolute, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
 import { buildColorOverridesFromMapping, normalizeMappingHex } from '../../src/lib/hexMapping.js'
@@ -15,7 +16,7 @@ import { getMtllibFromObjContent, setMtllibInObjContent } from '../../src/lib/ob
 const __dirname = typeof import.meta.dirname !== 'undefined'
   ? import.meta.dirname
   : dirname(fileURLToPath(import.meta.url))
-import { spawnSync } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { open, readdir, readFile, writeFile, mkdir, stat, copyFile, unlink, rename } from 'fs/promises'
 
 /** @param {string} abs */
@@ -327,6 +328,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
   const MODELS_BASE = resolve(ROOT, 'public/models')
   const MODELS_UPLOAD_DIR = resolve(ROOT, 'public/models/products')
   const PUBLIC_ROOT = resolve(ROOT, 'public')
+  const FILE_MANAGER_SETTINGS_PATH = resolve(ROOT, 'dashboard-file-manager-settings.json')
   const ARCHIVE_BASE = 'D:\\Showroom Datei Move'
 
   const CAD_INDEX_PATH = resolve(ROOT, 'src/data/cad-index.json')
@@ -366,6 +368,27 @@ export function registerDashboardApi(middlewares, opts = {}) {
 
   function storedFileUrl(value) {
     return String(value || '').trim().split(/[?#]/)[0]
+  }
+
+  async function getFileManagerSettings() {
+    try {
+      const saved = JSON.parse(await readFile(FILE_MANAGER_SETTINGS_PATH, 'utf-8'))
+      return {
+        fileManager: saved?.fileManager === 'freecommander' ? 'freecommander' : 'explorer',
+        freeCommanderPath: String(saved?.freeCommanderPath || '').trim(),
+        autoConvertOnDrop: saved?.autoConvertOnDrop === true,
+        maxParallelConversions: [1, 2, 3, 4, 5].includes(Number(saved?.maxParallelConversions))
+          ? Number(saved.maxParallelConversions)
+          : 3,
+      }
+    } catch {
+      return {
+        fileManager: 'explorer',
+        freeCommanderPath: '',
+        autoConvertOnDrop: false,
+        maxParallelConversions: 3,
+      }
+    }
   }
 
   async function buildProductArchivePlan(data, productId) {
@@ -1840,6 +1863,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
             }
           }
 
+          for (const { p } of glbRows) {
+            if (p && !p.conversionError) p.shortText = await resolveProductShortText(p)
+          }
           await saveProducts(data)
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ ok: true, added, warnings }))
@@ -2381,6 +2407,64 @@ export function registerDashboardApi(middlewares, opts = {}) {
         if (req.method === 'POST') {
           try {
             const rawPath = req.url.replace(/^\//, '').split('?')[0]
+            const revealMatch = rawPath.match(/^([^/]+)\/reveal-source$/)
+            if (revealMatch) {
+              if (process.platform !== 'win32') {
+                res.statusCode = 501
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Diese Funktion ist nur lokal unter Windows verfügbar.' }))
+                return
+              }
+              const id = decodeURIComponent(revealMatch[1])
+              const data = await loadProductsRef()
+              const product = data.products.find((entry) => entry.id === id)
+              if (!product) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Produkt nicht gefunden.' }))
+                return
+              }
+              const glbUrl = storedFileUrl(product.glbFile)
+              const source = cadUrlToAbsPublic(ROOT, glbUrl)
+              if (!glbUrl || !/\.glb$/i.test(glbUrl) || !glbUrl.startsWith('/models/') || !source || !isSafePath(PUBLIC_ROOT, source)) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Für dieses Produkt ist keine gültige GLB-Datei gespeichert.' }))
+                return
+              }
+              let sourceStat
+              try {
+                sourceStat = await stat(source)
+              } catch {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Die gespeicherte GLB-Datei wurde nicht gefunden.' }))
+                return
+              }
+              if (!sourceStat.isFile()) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Der gespeicherte GLB-Pfad verweist nicht auf eine Datei.' }))
+                return
+              }
+              const requestUrl = new URL(req.url, 'http://localhost')
+              const settings = await getFileManagerSettings()
+              const useExplorer = settings.fileManager !== 'freecommander' || requestUrl.searchParams.get('fallback') === 'explorer'
+              if (!useExplorer && (!settings.freeCommanderPath || !await pathExists(settings.freeCommanderPath))) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'FreeCommander.exe wurde am gespeicherten Pfad nicht gefunden.', fallbackAvailable: true }))
+                return
+              }
+              const command = useExplorer ? 'explorer.exe' : settings.freeCommanderPath
+              const args = useExplorer ? [`/select,${source}`] : [source]
+              const fileManager = spawn(command, args, { detached: true, stdio: 'ignore' })
+              fileManager.once('error', (error) => log.warn(`[reveal-source] Dateimanager konnte nicht gestartet werden: ${error.message || error}`))
+              fileManager.unref()
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ ok: true }))
+              return
+            }
             const archiveMatch = rawPath.match(/^([^/]+)\/(archive-preview|archive-remove)$/)
             if (archiveMatch) {
               const id = decodeURIComponent(archiveMatch[1])
@@ -2576,12 +2660,13 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 const sw = (p.shopwareProductId || '').toLowerCase()
                 const cat = String(p.mainCategory || '').toLowerCase()
                 const dom = String(p._mtlColors?.dominantRal || '').toLowerCase()
-                return tokens.some((t) =>
-                  name.includes(t) ||
-                  id.includes(t) ||
-                  sw.includes(t) ||
-                  cat.includes(t) ||
-                  (dom && dom.includes(t))
+                const shortText = String(p.shortText || '').toLowerCase()
+                const article = String(p.articleNumber || '').toLowerCase()
+                const fields = [name, id, sw, cat, shortText, dom, article]
+                return tokens.some((group) =>
+                  group.split(/\s+/).filter(Boolean).every((term) =>
+                    fields.some((field) => field.includes(term))
+                  )
                 )
               })
             }
@@ -2644,6 +2729,43 @@ export function registerDashboardApi(middlewares, opts = {}) {
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ products: items, total, page: safePage, pages, stats }))
         } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })) }
+      })
+
+      middlewares.use('/__api/file-manager-settings', async (req, res) => {
+        if (req.method === 'GET') {
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(await getFileManagerSettings()))
+          return
+        }
+        if (req.method !== 'PUT') { res.statusCode = 405; res.end(); return }
+        try {
+          const body = JSON.parse((await readBody(req, 16 * 1024)).toString('utf-8'))
+          const fileManager = body?.fileManager === 'freecommander' ? 'freecommander' : 'explorer'
+          const freeCommanderPath = String(body?.freeCommanderPath || '').trim()
+          const autoConvertOnDrop = body?.autoConvertOnDrop === true
+          const requestedParallelism = Number(body?.maxParallelConversions)
+          const maxParallelConversions = [1, 2, 3, 4, 5].includes(requestedParallelism)
+            ? requestedParallelism
+            : 3
+          await writeFile(FILE_MANAGER_SETTINGS_PATH, JSON.stringify({
+            fileManager,
+            freeCommanderPath,
+            autoConvertOnDrop,
+            maxParallelConversions,
+          }, null, 2) + '\n', 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({
+            ok: true,
+            fileManager,
+            freeCommanderPath,
+            autoConvertOnDrop,
+            maxParallelConversions,
+          }))
+        } catch (error) {
+          res.statusCode = 400
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: `Dateimanager-Einstellungen konnten nicht gespeichert werden: ${error.message || error}` }))
+        }
       })
 
       middlewares.use('/__api/list-models', async (req, res) => {

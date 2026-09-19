@@ -657,6 +657,10 @@ body {
   font-size: .7rem; color: var(--text-muted); margin-bottom: .45rem;
   font-family: var(--font-mono);
 }
+.card-short-text {
+  font-size: .72rem; color: var(--text-secondary); margin-bottom: .45rem;
+  overflow-wrap: anywhere;
+}
 .card-date svg { width: 11px; height: 11px; opacity: .5; flex-shrink: 0; }
 
 .card-specs { display: grid; grid-template-columns: 1fr 1fr; gap: .3rem .75rem; }
@@ -673,6 +677,9 @@ body {
   font-size: .7rem;
 }
 .card-conversion-status strong { font-weight: 700; }
+.card-color-rule-status { margin-top: .25rem; font-size: .72rem; color: var(--text-muted); }
+.card-color-rule-status[data-state="complete"] { color: var(--success); }
+.card-color-rule-status[data-state="partial"] { color: var(--warning); }
 .conversion-status-not-converted strong { color: var(--text-muted); }
 .conversion-status-waiting strong { color: var(--warning); }
 .conversion-status-running strong { color: var(--info); }
@@ -920,6 +927,13 @@ textarea.review-notes:focus { border-color: var(--accent); }
   display: flex; align-items: center; gap: .5rem;
   min-width: 0; flex: 1;
 }
+.detail-heading { min-width: 0; max-width: 360px; }
+.detail-heading .detail-title { display: block; }
+.detail-short-text {
+  margin-top: .15rem; font-size: .72rem; color: var(--text-secondary);
+  line-height: 1.4; overflow-wrap: anywhere;
+}
+.detail-short-text-value { white-space: normal; overflow-wrap: anywhere; }
 .detail-title {
   font-size: 1.1rem; font-weight: 700; letter-spacing: -.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px;
@@ -1119,6 +1133,11 @@ textarea.review-notes:focus { border-color: var(--accent); }
   text-transform: none; letter-spacing: 0;
   font-size: .72rem; padding: .28rem .55rem;
 }
+.detail-help { margin: 0 0 .5rem; color: var(--text-muted); font-size: .72rem; line-height: 1.4; }
+.detail-help-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-help-content { margin-top: .4rem; }
+.detail-help-toggle { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.detail-help-toggle:hover, .detail-help-toggle:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
 
 .field-row {
   display: grid;
@@ -1568,6 +1587,11 @@ select.field-value { cursor: pointer; appearance: none; background-image: url("d
 }
 .mesh-name-context-menu button:hover,
 .mesh-name-context-menu button:focus-visible { background: var(--bg-elevated); }
+.mesh-name-context-menu-ral {
+  display: grid; gap: .3rem; padding: .55rem .75rem;
+  color: var(--text-secondary); font-size: .72rem; font-weight: 700;
+}
+.mesh-name-context-menu-ral select { min-width: 250px; max-width: calc(100vw - 2rem); }
 .btn-link-inline {
   background: none; border: none; padding: 0;
   font: inherit; font-size: .78rem; color: var(--accent);
@@ -1819,6 +1843,15 @@ select.field-value { cursor: pointer; appearance: none; background-image: url("d
   flex-shrink: 0;
 }
 .name-rules-modal-actions-spacer { flex: 1; min-width: .5rem; }
+.file-manager-settings-panel { width: min(96vw, 480px); }
+.file-manager-settings-body { display: grid; gap: var(--space-4); padding: var(--space-5) var(--space-6) var(--space-6); }
+.file-manager-settings-section { display: grid; gap: var(--space-4); }
+.file-manager-settings-section + .file-manager-settings-section { padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
+.file-manager-settings-section-title { margin: 0; color: var(--text-primary); font-size: .9rem; }
+.file-manager-settings-field { display: grid; gap: .4rem; color: var(--text-secondary); font-size: .82rem; font-weight: 700; }
+.file-manager-settings-field .detail-input, .file-manager-settings-field .sort-select { width: 100%; }
+.file-manager-settings-toggle { grid-template-columns: 1fr auto; align-items: center; }
+.file-manager-settings-toggle input { inline-size: 1rem; block-size: 1rem; }
 .archive-removal-modal-panel { width: min(96vw, 1120px); max-height: min(88vh, 760px); }
 .archive-removal-summary { display: grid; gap: .25rem; font-size: .78rem; color: var(--text-secondary); }
 .archive-removal-body { overflow: auto; padding: var(--space-5) var(--space-6) var(--space-6); }
