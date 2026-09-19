@@ -35,7 +35,7 @@
 <body class="bg-gray-900">
   <div id="canvas-container"></div>
 
-  <div id="ui-layer" x-data="showroomApp()" x-cloak>
+  <div id="ui-layer" x-data="showroomApp()" @keydown.window="fitView($event)" x-cloak>
 
     <!-- Overlay: quadratischer Ausschnitt (Vorschau für Blender-Render bei Seitenverhältnis 1:1). -->
     <div class="sr-aspect-overlay" x-show="blenderAspectId === 'square'" x-cloak aria-hidden="true">
@@ -65,7 +65,7 @@
         </a>
         <span class="sr-topbar-sep"></span>
         <span class="sr-topbar-title">3D Showroom</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.19.t</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.19.aa</span></span>
         <a href="/dashboard.html" class="sr-page-switch" title="Zur Produktverwaltung">Produktverwaltung</a>
       </div>
       <div class="sr-topbar-center" x-show="currentProduct">
@@ -81,6 +81,9 @@
         <a href="/converter.html" class="sr-topbar-link" title="GLB Konvertierung">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </a>
+        <button type="button" @click="fitView()" class="sr-topbar-btn" title="F – Ansicht einpassen" aria-label="Ansicht einpassen" aria-keyshortcuts="F">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+        </button>
         <button type="button" @click="resetCamera()" class="sr-topbar-btn" title="Kamera zurücksetzen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
         </button>
@@ -141,6 +144,10 @@
       <img :src="productPreviewUrl(hoveredProduct)" alt="">
     </div>
 
+    <section class="sr-color-controls" aria-label="Farbsteuerung" data-collapsed="false">
+      <button type="button" class="sr-color-toggle" aria-controls="colorControlsBody" aria-expanded="true"
+              aria-label="Farbauswahl einklappen" title="Farbauswahl einklappen">▼</button>
+      <div class="sr-color-controls-body" id="colorControlsBody">
     <!-- ─── Farbfilter: nur Produkte in gewählter RAL-Farbe ─── -->
     <div class="sr-color-filter">
       <span class="sr-color-filter-label">Farbfilter:</span>
@@ -179,6 +186,9 @@
         </button>
       </template>
     </div>
+
+      </div>
+    </section>
 
     <!-- ─── Anbau button (floating, contextual) ─── -->
     <button type="button" x-show="canAddAnbau" x-transition @click="addAnbau()"
@@ -506,15 +516,15 @@
         <span class="sr-perf-label">Geometrie</span>
         <p class="sr-perf-muted" x-show="!perfStats">Kein Modell geladen.</p>
         <div class="sr-perf-rows" x-show="perfStats">
-          <div class="sr-perf-row"><span>Vertices</span><span x-text="perfStats.vertices.toLocaleString('de-DE')"></span></div>
-          <div class="sr-perf-row"><span>Triangles</span><span x-text="perfStats.triangles.toLocaleString('de-DE')"></span></div>
-          <div class="sr-perf-row"><span>Meshes</span><span x-text="String(perfStats.meshes)"></span></div>
-          <div class="sr-perf-row"><span>Unique Geometrien</span><span x-text="String(perfStats.uniqueGeometries)"></span></div>
-          <div class="sr-perf-row"><span>Unique Materialien</span><span x-text="String(perfStats.uniqueMaterials)"></span></div>
+          <div class="sr-perf-row"><span>Vertices</span><span x-text="(perfStats?.vertices ?? 0).toLocaleString('de-DE')"></span></div>
+          <div class="sr-perf-row"><span>Triangles</span><span x-text="(perfStats?.triangles ?? 0).toLocaleString('de-DE')"></span></div>
+          <div class="sr-perf-row"><span>Meshes</span><span x-text="String(perfStats?.meshes ?? 0)"></span></div>
+          <div class="sr-perf-row"><span>Unique Geometrien</span><span x-text="String(perfStats?.uniqueGeometries ?? 0)"></span></div>
+          <div class="sr-perf-row"><span>Unique Materialien</span><span x-text="String(perfStats?.uniqueMaterials ?? 0)"></span></div>
         </div>
         <div class="sr-perf-top-wrap" x-show="perfStats && perfStats.topMeshes && perfStats.topMeshes.length">
           <span class="sr-perf-sublabel">Top-Meshes (Triangles)</span>
-          <template x-for="row in perfStats.topMeshes" :key="row.index">
+          <template x-for="row in (perfStats?.topMeshes ?? [])" :key="row.index">
             <button type="button" class="sr-perf-top-row"
                     @click="toggleMeshPartIsolate(row.index)"
                     title="Nur dieses Mesh anzeigen (wie Mesh-Info)">
@@ -529,9 +539,9 @@
         <span class="sr-perf-label">GPU-Memory (Schätzung)</span>
         <p class="sr-perf-muted" x-show="!perfStats">–</p>
         <div class="sr-perf-rows" x-show="perfStats">
-          <div class="sr-perf-row"><span>Geometrie</span><span x-text="perfStats.geomMb.toFixed(2) + ' MB'"></span></div>
-          <div class="sr-perf-row"><span>Texturen</span><span x-text="perfStats.texMb.toFixed(2) + ' MB'"></span></div>
-          <div class="sr-perf-row sr-perf-row-strong"><span>Summe</span><span x-text="perfStats.totalMb.toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row"><span>Geometrie</span><span x-text="(perfStats?.geomMb ?? 0).toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row"><span>Texturen</span><span x-text="(perfStats?.texMb ?? 0).toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row sr-perf-row-strong"><span>Summe</span><span x-text="(perfStats?.totalMb ?? 0).toFixed(2) + ' MB'"></span></div>
         </div>
       </div>
 

@@ -1,5 +1,36 @@
 # Changelog
 
+## MARA09.19.aa - 2026-09-19
+
+- Farbsteuerung bleibt unten und klappt per Pfeil vollständig ein/aus. Nur der kompakte Griff bleibt sichtbar; Zustand lokal gespeichert. Die bisherige Positionsumschaltung entfällt, Farb- und RAL-Logik bleiben erhalten.
+
+## MARA09.19.z - 2026-09-19
+
+- Farbfilter und RAL-Palette als gemeinsame Farbsteuerung per Pfeil oben/unten positionierbar. Lokale Speicherung, responsive Begrenzung auf den 3D-Viewport und Abstand zum ViewCube in allen drei Positionen. Farb- und Modelllogik unverändert.
+- Build-Ausgabe aus der Entwicklungsserver-Dateiüberwachung ausgeschlossen, damit ein Build unter Windows keinen EBUSY-Absturz des Showroom-Webservers auslöst.
+
+## MARA09.19.y - 2026-09-19
+
+- Performance-Anzeige gegen noch nicht geladene Statistiken abgesichert; keine Null-Zugriffe beim Showroom-Start. Ausgefallenen lokalen Webserver auf Port 5050 wieder gestartet.
+
+## MARA09.19.x - 2026-09-19
+
+- ViewCube proportional auf 125 % skaliert: Darstellung, Beschriftungen und Klickbereiche wachsen gemeinsam. Zentrale CSS-Variable mit passendem Skalierungsursprung je Position; Kamera- und Synchronisationslogik unverändert.
+
+## MARA09.19.w - 2026-09-19
+
+- Einstellungsdialog mit viewportbegrenzter Höhe und scrollbarerer Inhaltsmitte. Kopf und Fußleiste bleiben sichtbar, auch bei kleinen Fensterhöhen und weiteren Einstellungsbereichen. Bestehende Einstellungen und Speicherlogik bleiben unverändert.
+
+## MARA09.19.v - 2026-09-19
+
+- F und ein Navigationsbutton passen die sichtbaren Produkt-Meshes mit Rand in den aktuellen 3D-Viewport ein. Berücksichtigt Mesh-Isolation, aktuelle Blickrichtung, Fensterformat und Zoom; ausschließlich Kamera und Orbit-Ziel werden angepasst.
+- Texteingaben, Tastenkombinationen und laufende Texteingabe bleiben ausgenommen. ViewCube und Einpassen verwenden dieselbe Kamera; Modellgeometrie, Position, Orientierung und GLB bleiben unverändert.
+
+## MARA09.19.u - 2026-09-19
+
+- ViewCube in Showroom und Produktdetail-Vorschau mit sechs Hauptansichten, Kanten/Ecken und synchroner Kameraorientierung. Weiche Wechsel mit bestehenden OrbitControls, ohne Produktrotation oder GLB zu bearbeiten.
+- Zentraler Bereich 3D-Ansicht: ViewCube standardmäßig sichtbar, Position Links/Mittig/Rechts (Standard Rechts); dauerhaft gespeichert und nach Speichern sofort angewendet, auch in anderen offenen Tabs.
+
 ## MARA09.19.t - 2026-09-19
 
 - Sidebar-Mindestbreite auf 25 % reduziert; Mesh-Liste, RAL, Vertexzahl, Stammdaten und Footer passen sich an schmale Sidebar-Breiten an. Maximum 60 %, Standard/Reset 45 % und lokale Speicherung unveraendert.

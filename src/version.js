@@ -1,6 +1,13 @@
 const APP_VERSION_INFO = {
-  version: 'MARA09.19.t',
+  version: 'MARA09.19.aa',
   history: [
+    { version: 'MARA09.19.aa', description: 'Farbsteuerung am unteren Rand ein- und ausklappbar statt verschiebbar. Eingeklappt bleibt nur der Pfeilgriff; Zustand lokal gespeichert, Farb- und RAL-Auswahl bleiben erhalten.' },
+    { version: 'MARA09.19.z', description: 'Farbfilter und RAL-Palette gemeinsam per Pfeil nach oben/unten verschiebbar. Position lokal gespeichert; Layout folgt dem 3D-Viewport und wahrt Abstand zum ViewCube.' },
+    { version: 'MARA09.19.y', description: 'Showroom-Start abgesichert: Performance-Anzeige behandelt noch nicht geladene Statistiken ohne JavaScript-Fehler.' },
+    { version: 'MARA09.19.x', description: 'ViewCube zentral auf 125 % skaliert, inklusive Beschriftungen und Klickbereichen. Positionen Links/Mittig/Rechts und bestehende Kameralogik bleiben erhalten.' },
+    { version: 'MARA09.19.w', description: 'Einstellungsdialog an die Fensterhöhe angepasst: Nur der mittlere Inhalt scrollt, Kopf und Buttons Abbrechen/Speichern bleiben sichtbar. Speicherlogik unverändert.' },
+    { version: 'MARA09.19.v', description: 'F passt das sichtbare Produkt oder isolierte Meshes in die Showroom-Ansicht ein. Kamera und Orbit-Ziel werden zentriert; Texteingaben bleiben unberührt. Kompatibel mit ViewCube, ohne Modell- oder GLB-Änderungen.' },
+    { version: 'MARA09.19.u', description: 'Synchroner ViewCube in Showroom und Produktvorschau: sechs Hauptansichten sowie Kanten und Ecken mit weichen Kamerawechseln. Sichtbarkeit und Position zentral gespeichert; Produktorientierung und GLB bleiben unverändert.' },
     { version: 'MARA09.19.t', description: 'Sidebar-Splitter auf 25 bis 60 % erweitert. Schmale Sidebar mit responsiver Mesh-Liste, Stammdaten und Footer-Buttons; lokale Speicherung und 45-%-Reset bleiben erhalten.' },
     { version: 'MARA09.19.s', description: 'Produktdetail-Sidebar per vertikalem Splitter live zwischen 35–60 % verstellbar, mit lokaler Speicherung und Doppelklick zurück auf 45 %. Dashboard und Kartenraster passen sich sofort an; die separate Prozent-Auswahl entfällt.' },
     { version: 'MARA09.19.r', description: 'Breite der Produktdetail-Sidebar zentral auf 35–55 % einstellbar, Standard 45 %. Die gespeicherte Auswahl wirkt sofort auf Sidebar und Dashboard-Restbreite; kleine Fenster bleiben durch Mindestbreite und Fensterbegrenzung bedienbar.' },

@@ -51,7 +51,7 @@ try {
   }
   await page.goto('http://dashboard.test/')
   await setup()
-  await page.addScriptTag({ content: 'let showMeshRal = true; function updateDetailMeshRowClasses() {}\n' + displayCode })
+  await page.addScriptTag({ content: 'let showMeshRal = true; function updateDetailMeshRowClasses() {} function applyViewCubeSettings() {}\n' + displayCode })
   for (const width of [25, 30, 34, 35, 45, 60]) {
     await page.evaluate(width => {
 
@@ -148,7 +148,7 @@ try {
   await setup()
   const loadStart = main.indexOf('async function loadMeshDisplaySettings(')
   const loader = main.slice(loadStart, main.indexOf('\n}', loadStart) + 2)
-  await page.addScriptTag({ content: 'let showMeshRal = true; function updateDetailMeshRowClasses() {} const parseJsonResponse = res => res.json(); const log = console;\n' + displayCode + loader })
+  await page.addScriptTag({ content: 'let showMeshRal = true; function updateDetailMeshRowClasses() {} function applyViewCubeSettings() {} const parseJsonResponse = res => res.json(); const log = console;\n' + displayCode + loader })
   await page.evaluate(async () => {
     await loadMeshDisplaySettings()
     document.getElementById('detailPanel').classList.add('open')

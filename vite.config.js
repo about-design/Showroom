@@ -63,6 +63,7 @@ export default defineConfig({
     },
     watch: {
       ignored: [
+        '**/dist/**', // Build output is replaced during builds; watching it can fail with EBUSY on Windows.
         '**/public/**',
         '**/src/data/products.json',
         '**/src/data/cad-index.json',

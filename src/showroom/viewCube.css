@@ -1,0 +1,50 @@
+.view-cube {
+  --view-cube-scale: 1.25;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 88px;
+  height: 88px;
+  z-index: 4;
+  perspective: 400px;
+  pointer-events: none;
+  user-select: none;
+  transform: scale(var(--view-cube-scale));
+  transform-origin: top right;
+}
+.view-cube[hidden] { display: none; }
+.view-cube[data-position="left"] { left: 8px; right: auto; transform-origin: top left; }
+.view-cube[data-position="center"] { left: calc(50% - 44px); right: auto; transform-origin: top center; }
+.view-cube-solid {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  left: 20px;
+  top: 20px;
+  transform-style: preserve-3d;
+}
+.view-cube-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 9px 30px 9px;
+  grid-template-rows: 9px 30px 9px;
+  backface-visibility: hidden;
+  background: #f4f5f7;
+  outline: 1px solid #9aa2ad;
+}
+.view-cube-face button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  background: transparent;
+  color: #263240;
+  font: 8px/1 system-ui, sans-serif;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.view-cube-face button:hover, .view-cube-face button:focus-visible { background: #f6b6b2; outline: 1px solid #d92d20; }
+#canvas-container > .view-cube { top: 76px; }

@@ -14,6 +14,8 @@ import ProductPlacement from './showroom/ProductPlacement.js'
 import MaterialManager from './showroom/MaterialManager.js'
 import HotspotManager from './showroom/HotspotManager.js'
 import CameraController from './showroom/CameraController.js'
+import { initColorControls } from './showroom/colorControls.js'
+import { isFitViewShortcut } from './showroom/fitToView.js'
 import ARManager from './showroom/ARManager.js'
 import LightDebugView from './showroom/LightDebugView.js'
 import PivotDebugView from './showroom/PivotDebugView.js'
@@ -194,6 +196,7 @@ function showroomApp() {
     },
 
     init() {
+      this.$nextTick(() => { this._disposeColorControls = initColorControls() })
       this.isMobile = ARManager.isTouchDevice()
       ProductLoader.on('load-progress', (e) => {
         this.loadProgress = e.detail.progress
@@ -564,9 +567,22 @@ function showroomApp() {
       ARManager.showAR(glb, hex, usdz)
     },
 
+    destroy() {
+      this._disposeColorControls?.()
+    },
+
     resetCamera() {
       this.selectedCameraId = 'orbit'
       CameraController.resetCamera()
+    },
+
+    fitView(event) {
+      if (event && !isFitViewShortcut(event)) return
+      const group = ProductPlacement.getPlacement(PRIMARY_ZONE)?.group
+      if (CameraController.fitVisibleProduct(group)) {
+        event?.preventDefault()
+        this.selectedCameraId = 'orbit'
+      }
     },
 
     /** Wechselt die virtuelle Objektiv-Brennweite (Kleinbild-Äquivalent, mm). */

@@ -1,3 +1,5 @@
+import { createViewCube } from '../showroom/ViewCube.js'
+import { applyViewCubeSettings } from '../lib/viewCubeSettings.js'
 import '../lib/loggerInit.js'
 import { createLogger } from '../lib/logger.js'
 import { resolveAssetUrl } from '../lib/resolveAssetUrl.js'
@@ -674,6 +676,7 @@ const fileManagerSettingsModal = $('#fileManagerSettingsModal')
 let showMeshRal = true
 
 function applyMeshDisplaySettings(settings) {
+  applyViewCubeSettings(settings)
   showMeshRal = settings.showMeshRal !== false
   updateDetailMeshRowClasses()
 }
@@ -862,6 +865,8 @@ async function openFileManagerSettings() {
     $('#autoConvertOnDrop').checked = settings.autoConvertOnDrop === true
     $('#maxParallelConversions').value = String(settings.maxParallelConversions || 3)
     $('#showMeshRal').checked = settings.showMeshRal !== false
+    $('#showViewCube').checked = settings.showViewCube !== false
+    $('#viewCubePosition').value = settings.viewCubePosition || 'right'
     fileManagerSettingsModal.classList.add('open')
     fileManagerSettingsModal.setAttribute('aria-hidden', 'false')
     syncFileManagerSettingsUi()
@@ -891,6 +896,8 @@ async function saveFileManagerSettings() {
         freeCommanderPath: $('#freeCommanderPath').value,
         autoConvertOnDrop: $('#autoConvertOnDrop').checked,
         showMeshRal: $('#showMeshRal').checked,
+        showViewCube: $('#showViewCube').checked,
+        viewCubePosition: $('#viewCubePosition').value,
         maxParallelConversions,
       }),
     })
@@ -3046,6 +3053,7 @@ function bindDetailVisibilityRules() {
 /* ═══════════════════════════════════════════════
    Detail panel
    ═══════════════════════════════════════════════ */
+let detailViewCube = null
 let detailRenderer = null, detailPreviewScene = null, detailControls = null, detailAnimId = null, detailResizeObs = null
 /** Detail-GLB: Kamera/Root für Einzelteil-Isolation (Meshes) */
 let detailPreviewCamera = null
@@ -4640,6 +4648,7 @@ function toggleDetailMeshIsolate(index) {
 }
 
 function focusDetailMeshPart(index) {
+  detailViewCube?.cancel()
   if (!detailPreviewModelRoot || !detailPreviewCamera || !detailControls) return
   const meshes = collectMeshesFromGroup(detailPreviewModelRoot)
   const mesh = meshes[index]
@@ -4947,6 +4956,7 @@ function loadDetailPreview(product) {
     const ph = wrap.querySelector('.card-preview-placeholder')
     if (ph) ph.style.display = 'none'
     wrap.insertBefore(renderer.domElement, wrap.firstChild)
+    detailViewCube = createViewCube(wrap, camera, controls)
     renderer.domElement.style.borderRadius = 'var(--radius-md)'
 
     function resizeDetailPreview() {
@@ -5000,6 +5010,8 @@ function loadDetailPreview(product) {
 }
 
 function disposeDetailPreview() {
+  detailViewCube?.dispose()
+  detailViewCube = null
   detailMeshIsolateIndex = null
   detailMeshExcluded = new Set()
   detailMeshSelectionReady = false

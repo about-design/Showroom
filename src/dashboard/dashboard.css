@@ -1950,7 +1950,20 @@ select.field-value { cursor: pointer; appearance: none; background-image: url("d
 }
 .name-rules-modal-actions-spacer { flex: 1; min-width: .5rem; }
 .file-manager-settings-panel { width: min(96vw, 480px); }
-.file-manager-settings-body { display: grid; gap: var(--space-4); padding: var(--space-5) var(--space-6) var(--space-6); }
+.name-rules-modal-panel.file-manager-settings-panel {
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+}
+.file-manager-settings-body {
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
 .file-manager-settings-section { display: grid; gap: var(--space-4); }
 .file-manager-settings-section + .file-manager-settings-section { padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
 .file-manager-settings-section-title { margin: 0; color: var(--text-primary); font-size: .9rem; }

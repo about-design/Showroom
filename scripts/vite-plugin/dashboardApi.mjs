@@ -379,6 +379,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
         freeCommanderPath: String(saved?.freeCommanderPath || '').trim(),
         autoConvertOnDrop: saved?.autoConvertOnDrop === true,
         showMeshRal: saved?.showMeshRal !== false,
+        showViewCube: saved?.showViewCube !== false,
+        viewCubePosition: ['left', 'center', 'right'].includes(saved?.viewCubePosition) ? saved.viewCubePosition : 'right',
         sidebarWidthPercent: [35, 40, 45, 50, 55].includes(Number(saved?.sidebarWidthPercent))
           ? Number(saved.sidebarWidthPercent) : 45,
         maxParallelConversions: [1, 2, 3, 4, 5].includes(Number(saved?.maxParallelConversions))
@@ -391,6 +393,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
         freeCommanderPath: '',
         autoConvertOnDrop: false,
         showMeshRal: true,
+        showViewCube: true,
+        viewCubePosition: 'right',
         sidebarWidthPercent: 45,
         maxParallelConversions: 3,
       }
@@ -2751,6 +2755,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const fileManager = body?.fileManager === 'freecommander' ? 'freecommander' : 'explorer'
           const freeCommanderPath = String(body?.freeCommanderPath || '').trim()
           const autoConvertOnDrop = body?.autoConvertOnDrop === true
+          const previousSettings = await getFileManagerSettings()
+          const showViewCube = typeof body?.showViewCube === 'boolean' ? body.showViewCube : previousSettings.showViewCube
+          const viewCubePosition = ['left', 'center', 'right'].includes(body?.viewCubePosition) ? body.viewCubePosition : previousSettings.viewCubePosition
           const showMeshRal = typeof body?.showMeshRal === 'boolean'
             ? body.showMeshRal
             : (await getFileManagerSettings()).showMeshRal
@@ -2766,6 +2773,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             freeCommanderPath,
             autoConvertOnDrop,
             showMeshRal,
+            showViewCube,
+            viewCubePosition,
             sidebarWidthPercent,
             maxParallelConversions,
           }, null, 2) + '\n', 'utf-8')
@@ -2776,6 +2785,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             freeCommanderPath,
             autoConvertOnDrop,
             showMeshRal,
+            showViewCube,
+            viewCubePosition,
             sidebarWidthPercent,
             maxParallelConversions,
           }))

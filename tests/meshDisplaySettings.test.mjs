@@ -24,6 +24,18 @@ test('central mesh display setting defaults on and survives file reloads', async
   }
   try {
     assert.equal((await create()('GET')).showMeshRal, true)
+    assert.equal((await create()('GET')).showViewCube, true)
+    assert.equal((await create()('GET')).viewCubePosition, 'right')
+    for (const viewCubePosition of ['left', 'center', 'right']) {
+      await create()('PUT', { showViewCube: false, viewCubePosition })
+      const saved = await create()('GET')
+      assert.equal(saved.showViewCube, false)
+      assert.equal(saved.viewCubePosition, viewCubePosition)
+    }
+    await create()('PUT', { showViewCube: true, viewCubePosition: 'left' })
+    await create()('PUT', { viewCubePosition: 'invalid' })
+    assert.equal((await create()('GET')).showViewCube, true)
+    assert.equal((await create()('GET')).viewCubePosition, 'left')
     assert.equal((await create()('GET')).sidebarWidthPercent, 45)
     for (const sidebarWidthPercent of [35, 40, 45, 50, 55]) {
       assert.equal((await create()('PUT', { sidebarWidthPercent })).sidebarWidthPercent, sidebarWidthPercent)
