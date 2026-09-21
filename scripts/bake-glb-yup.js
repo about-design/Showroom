@@ -1972,7 +1972,7 @@ async function main() {
 
   const files = singleFile ? [path.resolve(singleFile)] : findGlbs(inputDir)
   if (!files.length) { log.info(singleFile ? `Datei nicht gefunden: ${singleFile}` : 'Keine .glb-Dateien gefunden.'); return }
-  if (singleFile && !fs.existsSync(files[0])) { log.info(`Datei nicht gefunden: ${files[0]}`); return }
+  if (singleFile && !fs.existsSync(files[0])) { log.info(`Datei nicht gefunden: ${files[0]}`); process.exitCode = 1; return }
     log.info(`${files.length} GLB-Datei(en) gefunden.\n`)
 
   // IO vorbereiten (alle Extensions inkl. Meshopt + Draco)
@@ -2279,6 +2279,7 @@ async function main() {
     log.info(`  Eingebrannt:   ${modified}`)
     log.info(`  Übersprungen:  ${skipped} (bereits Y-up)`)
     log.info(`  Fehler:        ${errors}`)
+  if (errors > 0) process.exitCode = 1
   if (modified > 0 && !dryRun) {
     const totalPct = totalBefore > 0 ? ((totalAfter - totalBefore) / totalBefore * 100).toFixed(1) : '0.0'
     const totalSign = totalAfter > totalBefore ? '+' : ''

@@ -1,3 +1,4 @@
+import { recordColorRuleConversion, colorRulesVersion } from '../../src/lib/colorRuleConversion.js'
 import { defineConfig } from 'vite'
 import { resolveProductShortText } from '../lib/sapShortText.mjs'
 import { compareShortText } from '../lib/shortTextSort.mjs'
@@ -796,8 +797,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
       // Atomares Write + Serialisierung: verhindert Race-Conditions bei
       // parallelen PATCH/POST-Requests und teil-geschriebene products.json
       // bei Crash/Abbruch. Cache erst nach erfolgreichem rename aktualisieren.
-      async function saveProducts(data) {
+      async function saveProducts(data, reconcile = null) {
         const task = _saveQueue.then(async () => {
+          if (reconcile) reconcile(data, cloneProductsData(await ensureProductsCache()))
           const tmp = `${PRODUCTS_PATH}.tmp-${process.pid}-${Date.now()}`
           const json = JSON.stringify(data, null, 2) + '\n'
           await writeFile(tmp, json, 'utf-8')
@@ -828,7 +830,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
 
       // Invalidierung, wenn products.json extern (z.B. durch Scripts) geändert wurde
       try {
-        fsWatch(PRODUCTS_PATH, { persistent: false }, () => {
+        if (opts.watchProducts !== false) fsWatch(PRODUCTS_PATH, { persistent: false }, () => {
           _productsCache = null
           void writePublicProducts(ROOT)
         })
@@ -1338,7 +1340,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
           const body = JSON.parse((await readBody(req)).toString('utf-8'))
-          const { outputPaths = [], cadFileUrls = [], productId, conversionPreset } = body
+          const { outputPaths = [], cadFileUrls = [], productId, conversionPreset, conversionStatus } = body
           const data = await loadProducts()
           const warnings = []
 
@@ -1351,6 +1353,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const outputDir = resolve(ROOT, 'public/models/output')
           const bakeScript = resolve(ROOT, 'scripts/bake-glb-yup.js')
           const productForRal = productId ? data.products.find((x) => x.id === productId) : null
+          const bakePreset = conversionPreset && typeof conversionPreset === 'object' && !Array.isArray(conversionPreset) ? conversionPreset : productForRal?.conversionPreset
           const converterApiBase = process.env.CONVERTER_API_URL || 'http://localhost:3000'
 
           await ensureGlbOutputDir(outputDir, log)
@@ -1441,7 +1444,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const targetId = productId || (added.length === 1 ? added[0] : null)
             if (targetId) {
               const tgt = data.products.find((x) => x.id === targetId)
-              if (tgt) tgt.conversionPreset = conversionPreset
+              if (tgt && !productId) tgt.conversionPreset = conversionPreset
             }
           }
 
@@ -1499,10 +1502,10 @@ export function registerDashboardApi(middlewares, opts = {}) {
               const mappingRaw = await readFile(mappingPath, 'utf-8').catch(() => null)
               if (mappingRaw) {
                 const mapping = JSON.parse(mappingRaw)
-                mergedNameColorRuleEntries = mergeNameColorRuleEntries(mapping, productForRal.conversionPreset)
-                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(mapping, productForRal.conversionPreset)
-                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(mapping, productForRal.conversionPreset)
-                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(mapping, productForRal.conversionPreset)
+                mergedNameColorRuleEntries = mergeNameColorRuleEntries(mapping, bakePreset)
+                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(mapping, bakePreset)
+                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(mapping, bakePreset)
+                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(mapping, bakePreset)
                 const ralRaw = await readFile(resolve(ROOT, 'src/data/ralColors.json'), 'utf-8')
                 const ralPalette = JSON.parse(ralRaw)
                 const getRalHex = (ralKey) => {
@@ -1535,18 +1538,18 @@ export function registerDashboardApi(middlewares, opts = {}) {
                   }
                 }
               } else {
-                mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, productForRal.conversionPreset)
-                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, productForRal.conversionPreset)
-                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, productForRal.conversionPreset)
-                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, productForRal.conversionPreset)
+                mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, bakePreset)
+                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, bakePreset)
+                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, bakePreset)
+                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, bakePreset)
               }
             } catch (e) {
                             log.scoped("register-converted").warn("Mapping-Overrides für Bake:", e.message)
               mergedBakeOverrides = null
-              mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, productForRal?.conversionPreset)
-              mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, productForRal?.conversionPreset)
-              mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, productForRal?.conversionPreset)
-              mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, productForRal?.conversionPreset)
+              mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, bakePreset)
+              mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, bakePreset)
+              mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, bakePreset)
+              mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, bakePreset)
             }
           }
           if (mergedNameColorRuleEntries.length) {
@@ -1601,6 +1604,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
 
           for (const row of glbRows) {
             const { safe, rawBasename, glbUrl, localPath, p, absPath, previousGlbFile, previousUsdzFile, isNewProduct } = row
+            p._colorRulesDirty = true
             if (!isSafePath(outputDir, localPath)) {
                             log.warn(`[register-converted] Ungültiger Dateipfad abgewiesen: ${absPath}`)
               warnings.push({
@@ -1771,9 +1775,14 @@ export function registerDashboardApi(middlewares, opts = {}) {
               if (nameRulesFile) {
                 await unlink(nameRulesFile).catch(() => {})
               }
-              if (result.stdout) log.scoped("register-converted").info("STDOUT:n", + result.stdout)
-              if (result.stderr) log.scoped("register-converted").warn("STDERR:n", + result.stderr)
-              if (result.status !== 0) log.scoped("register-converted").warn("Bake EXIT:", result.status)
+              if (result.stdout) log.scoped("register-converted").info("STDOUT:", result.stdout)
+              if (result.stderr) log.scoped("register-converted").warn("STDERR:", result.stderr)
+              recordColorRuleConversion(p, bakePreset?.nameColorRules || [], mergedNameColorRuleEntries, result, !conversionStatus || conversionStatus === 'completed')
+              if (result.status !== 0 || result.error || result.signal) {
+                p.conversionError = { reason: 'color-rule-bake-failed', at: new Date().toISOString() }
+                warnings.push({ productId: p.id, reason: 'color-rule-bake-failed', expected: glbUrl })
+                continue
+              }
 
               // Prozessschutz: Farb-Kollaps früh sichtbar machen (STEP mehrfarbig, GLB einfarbig).
               try {
@@ -1876,7 +1885,17 @@ export function registerDashboardApi(middlewares, opts = {}) {
           for (const { p } of glbRows) {
             if (p && !p.conversionError) p.shortText = await resolveProductShortText(p)
           }
-          await saveProducts(data)
+          await saveProducts(data, (next, latest) => {
+            // Preserve rules edited while conversion/registration was running. The receipt
+            // deliberately records the older rules actually passed to the bake process.
+            for (const row of glbRows) {
+              const current = latest.products.find(item => item.id === row.p.id)
+              if (current && !row.isNewProduct) row.p.conversionPreset = current.conversionPreset
+            }
+            const touched = new Set(glbRows.map(row => row.p.id))
+            next.products = next.products.map(item => touched.has(item.id) ? item : latest.products.find(p => p.id === item.id) || item)
+            for (const item of latest.products) if (!next.products.some(p => p.id === item.id)) next.products.push(item)
+          })
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ ok: true, added, warnings }))
         } catch (e) {
@@ -2384,8 +2403,11 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const id = req.url.replace(/^\//, '').split('?')[0]
             if (!id) { res.statusCode = 400; res.end(JSON.stringify({ error: 'Keine ID' })); return }
             const patch = JSON.parse((await readBody(req)).toString('utf-8'))
+            delete patch._colorRuleConversion // Only successful server-side baking may certify a rule version.
+            delete patch._colorRulesDirty
             const data = await loadProducts()
             const idx = data.products.findIndex(p => p.id === id)
+            if ('conversionPreset' in patch && colorRulesVersion(data.products[idx]?.conversionPreset?.nameColorRules) !== colorRulesVersion(patch.conversionPreset?.nameColorRules)) patch._colorRulesDirty = true
             if (idx === -1) {
               data.products.push({ ...patch, id, createdAt: patch.createdAt || new Date().toISOString() })
             } else {

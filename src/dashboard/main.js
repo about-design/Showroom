@@ -1,3 +1,4 @@
+import { colorRulesAreConverted, colorRuleCoverageState, ruleMatchesMesh, colorRulesVersion } from '../lib/colorRuleConversion.js'
 import { createViewCube } from '../showroom/ViewCube.js'
 import { applyViewCubeSettings } from '../lib/viewCubeSettings.js'
 import '../lib/loggerInit.js'
@@ -927,7 +928,7 @@ async function init() {
   bindEvents()
   bindGlobalNameRulesModal()
   bindGlobalReductionRulesModal()
-  await Promise.all([loadMappingTargetOptions(), loadCategoryOptions(), loadMeshDisplaySettings()])
+  await Promise.all([loadMappingTargetOptions(), loadCategoryOptions(), loadMeshDisplaySettings(), loadColorRuleGlobals()])
   await fetchPage()
 
   // ?highlight=ID → Produkt direkt öffnen (kommt vom Converter nach Abschluss)
@@ -2516,6 +2517,7 @@ async function saveMeshNameRule(name, ral, matchingRule = null) {
   }
   try {
     await patchProduct(productId, { conversionPreset })
+    updateDetailMeshRowClasses()
     toast(`Namens-Farbregel für „${name}" gespeichert.`, 'success')
   } catch (error) {
     toast(`Namens-Farbregel konnte nicht gespeichert werden: ${error.message}`, 'error')
@@ -2670,6 +2672,9 @@ async function saveGlobalNameRules() {
     })
     const data = await parseJsonResponse(res)
     if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
+    await loadColorRuleGlobals()
+    updateDetailMeshRowClasses()
+    updateCardColorRuleStatuses(currentPageProducts)
     toast('Globale Namens-Regeln gespeichert', 'success')
     closeGlobalNameRulesModal()
   } catch (e) {
@@ -4560,21 +4565,29 @@ function updateMeshRalBadge(row, matchingRules) {
   badge.append(document.createTextNode(ral === 'RAL 9007' ? 'Verzinkt' : ral))
 }
 
-function colorRuleCoverage(names, rules = []) {
-  const assigned = names.filter((name) => rules.some((rule) =>
-    nameRuleMatches(name, String(rule.pattern || '').trim(), String(rule.flags || '').trim()))).length
-  const total = names.length
-  const complete = total > 0 && assigned === total
-  return {
-    text: `Farbregeln: ${assigned}/${total} Einzelteile zugeordnet${complete ? ' ✓' : ''}`,
-    state: complete ? 'complete' : assigned > 0 ? 'partial' : 'none',
-  }
+let colorRuleGlobals = null
+async function loadColorRuleGlobals() {
+  try {
+    const res = await fetch('/mtl-ral-color-mapping.json', { cache: 'no-store' })
+    if (res.ok) colorRuleGlobals = (await res.json()).nameColorRules || []
+  } catch { /* Keep the last known global version. */ }
+}
+function colorRuleCoverage(names, rules = [], product = null) {
+  const dirty = product?._colorRulesDirty || colorRulesVersion(rules) !== colorRulesVersion(product?.conversionPreset?.nameColorRules)
+  return colorRuleCoverageState(names, rules, { ...product, _colorRulesDirty: dirty }, colorRuleGlobals)
+}
+function renderColorRuleStatus(status, coverage) {
+  if (!status) return
+  status.textContent = coverage.text
+  status.dataset.state = coverage.state
+  status.title = coverage.title
 }
 
 let cardColorRuleGeneration = 0
 
 async function updateCardColorRuleStatuses(products) {
   const generation = ++cardColorRuleGeneration
+  await loadColorRuleGlobals()
   // Nacheinander laden, damit die Statusanalyse keine parallelen Modell-Ladevorgänge erzeugt.
   for (const product of products) {
     if (generation !== cardColorRuleGeneration) return
@@ -4593,9 +4606,10 @@ async function updateCardColorRuleStatuses(products) {
       }
       if (generation !== cardColorRuleGeneration || !status.isConnected) continue
       const current = productCache.get(product.id) || product
-      const coverage = colorRuleCoverage(names, current.conversionPreset?.nameColorRules || [])
-      status.textContent = coverage.text
-      status.dataset.state = coverage.state
+      const editor = product.id === selectedProductId ? document.getElementById('detailNameRulesRows') : null
+      const rules = editor ? collectNameRulesFromContainer(editor) : current.conversionPreset?.nameColorRules || []
+      const coverage = colorRuleCoverage(names, rules, current)
+      renderColorRuleStatus(status, coverage)
     } catch {
       if (generation === cardColorRuleGeneration && status.isConnected) {
         status.textContent = 'Farbregeln: nicht verfügbar'
@@ -4609,16 +4623,27 @@ function updateDetailMeshRowClasses() {
   const list = document.getElementById('detailMeshPartsList')
   if (!list) return
   list.classList.toggle('hide-mesh-ral', !showMeshRal)
+  const product = productCache.get(selectedProductId)
+  const editor = document.getElementById('detailNameRulesRows')
+  const rules = editor ? collectNameRulesFromContainer(editor) : product?.conversionPreset?.nameColorRules || []
+  const converted = colorRulesAreConverted(product, rules, colorRuleGlobals)
   list.querySelectorAll('.detail-mesh-row').forEach((row) => {
     const i = parseInt(row.dataset.meshIdx, 10)
     const name = row.querySelector('.detail-mesh-name')?.textContent || ''
     const matchingRules = getCurrentMatchingNameRules(name)
     const hasMatchingRule = matchingRules.length > 0
     updateMeshRalBadge(row, matchingRules)
-    row.classList.toggle('is-rule-match', hasMatchingRule)
-    row.classList.toggle('is-active', detailMeshIsolateIndex === i && !hasMatchingRule)
+    const previouslyMatched = product?._colorRuleConversion?.productRules?.some(rule => ruleMatchesMesh(name, rule))
+    const savedMatch = product?.conversionPreset?.nameColorRules?.some(rule => ruleMatchesMesh(name, rule))
+    const pending = !converted && (hasMatchingRule || previouslyMatched || savedMatch)
+    row.classList.toggle('is-rule-match', hasMatchingRule && converted)
+    row.classList.toggle('is-rule-pending', !!pending)
+    row.classList.toggle('is-active', detailMeshIsolateIndex === i && !hasMatchingRule && !pending)
     row.classList.toggle('is-excluded', detailMeshExcluded.has(i))
   })
+  const card = [...productGrid.querySelectorAll('.product-card')].find(el => el.dataset.id === String(selectedProductId))
+  const names = [...list.querySelectorAll('.detail-mesh-name-trigger')].map(el => el.textContent || '')
+  renderColorRuleStatus(card?.querySelector('.card-color-rule-status'), colorRuleCoverage(names, rules, product))
   const clearBtn = document.getElementById('detailMeshClearBtn')
   if (clearBtn) clearBtn.hidden = detailMeshIsolateIndex === null
   updateDetailMeshSelectionCount()
@@ -5077,6 +5102,7 @@ function updateDetailNavState() {
 }
 
 function closeDetail() {
+  updateCardColorRuleStatuses(currentPageProducts)
   closeMeshNameExpansion()
   closeMeshNameMenu()
   disposeDetailPreview()
@@ -5204,9 +5230,8 @@ async function saveDetail() {
       const ruleStatus = card.querySelector('.card-color-rule-status')
       if (ruleStatus && detailPreviewModelRoot && changes.glbFile === p.glbFile) {
         const names = collectMeshesFromGroup(detailPreviewModelRoot).map((mesh) => mesh.name || '(ohne Namen)')
-        const coverage = colorRuleCoverage(names, updated.conversionPreset?.nameColorRules || [])
-        ruleStatus.textContent = coverage.text
-        ruleStatus.dataset.state = coverage.state
+        const coverage = colorRuleCoverage(names, updated.conversionPreset?.nameColorRules || [], updated)
+        renderColorRuleStatus(ruleStatus, coverage)
       } else {
         updateCardColorRuleStatuses(currentPageProducts)
       }
@@ -5920,7 +5945,7 @@ async function pollConversionInBackground(jobId, productId, productName, convers
           : (data.outputPath ? [data.outputPath] : [])
         const partial = status === 'partially_completed'
         if (outputPaths.length) {
-          const regBody = { outputPaths, productId }
+          const regBody = { outputPaths, productId, conversionStatus: status }
           if (
             conversionPresetUsed &&
             typeof conversionPresetUsed === 'object' &&
@@ -5958,6 +5983,7 @@ async function pollConversionInBackground(jobId, productId, productName, convers
                   const fresh = await parseJsonResponse(pr)
                   if (fresh?.specs) updateDimensionsUi(fresh)
                   if (fresh) {
+                    productCache.set(productId, fresh)
                     detailRotationOffsetDeg = { x: 0, y: 0, z: 0 }
                     lastBakeAxis = ''
                     updateDetailRotationLabels()

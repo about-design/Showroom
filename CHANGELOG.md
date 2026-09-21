@@ -1,5 +1,11 @@
 # Changelog
 
+## MARA09.21.a - 2026-09-21
+
+- Farbregel-Zuordnungen bleiben nach Hinzufügen, Änderung oder Löschung gelb, bis die aktuelle Regelversion erfolgreich in die GLB übernommen wurde. Mesh-Zeilen behalten RAL/Verzinkt sichtbar; vollständig zugeordnete Produktkarten erhalten erst danach Grün und ✓.
+- Serverseitig gespeicherter Konvertierungsnachweis berücksichtigt Produkt- und globale Namens-Farbregeln. Fehler, Abbrüche und Teilergebnisse bestätigen keinen neuen Stand; zwischenzeitlich geänderte Regeln bleiben erhalten und gelb. Bestehende Produkte ohne Nachweis benötigen eine erfolgreiche Neu-Konvertierung.
+- Geprüft mit Status- und Browser-Tests sowie isoliertem API-Test mit echter GLB-Farbübernahme, anschließender Änderung, älterem Konvertierungsstand und fehlgeschlagenem Bake.
+
 ## MARA09.19.aa - 2026-09-19
 
 - Farbsteuerung bleibt unten und klappt per Pfeil vollständig ein/aus. Nur der kompakte Griff bleibt sichtbar; Zustand lokal gespeichert. Die bisherige Positionsumschaltung entfällt, Farb- und RAL-Logik bleiben erhalten.

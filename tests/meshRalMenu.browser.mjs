@@ -26,6 +26,7 @@ try {
     ]
     const ColorService = { getAllColors: () => colors, getRAL: ral => colors.find(c => c.code === ral) }
     let showMeshRal = true
+    const applyViewCubeSettings = () => {}
     let refreshBadge = () => {}
     const esc = text => String(text).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')
     const selectedProductId = 'test'

@@ -729,6 +729,7 @@ body {
 .card-color-rule-status { margin-top: .25rem; font-size: .72rem; color: var(--text-muted); }
 .card-color-rule-status[data-state="complete"] { color: var(--success); }
 .card-color-rule-status[data-state="partial"] { color: var(--warning); }
+.card-color-rule-status[data-state="pending"] { color: #a16207; }
 .conversion-status-not-converted strong { color: var(--text-muted); }
 .conversion-status-waiting strong { color: var(--warning); }
 .conversion-status-running strong { color: var(--info); }
@@ -1129,6 +1130,10 @@ textarea.review-notes:focus { border-color: var(--accent); }
 .detail-mesh-row.is-rule-match {
   border-color: #319451;
   background: #edf8f0;
+}
+.detail-mesh-row.is-rule-pending {
+  border-color: #d5a11e;
+  background: #fff7d6;
 }
 .detail-mesh-row.is-excluded {
   opacity: .55;
