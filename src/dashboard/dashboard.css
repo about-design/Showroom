@@ -698,7 +698,7 @@ body {
 .card-id {
   font-family: var(--font-mono); font-size: .72rem;
   color: var(--text-muted); margin-bottom: .6rem;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: normal; overflow-wrap: anywhere;
 }
 
 .card-date {

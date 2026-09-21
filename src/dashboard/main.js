@@ -34,7 +34,7 @@ import {
   PAGE_SIZES,
   CARD_PREVIEW_POOL_MAX,
 } from './modules/constants.js'
-import { parseJsonResponse, esc, formatDate, formatProductShortText, fmtNumOrDash, cssEscapeId } from './modules/helpers.js'
+import { parseJsonResponse, esc, formatDate, formatProductShortText, formatProductSapIdentifiers, fmtNumOrDash, cssEscapeId } from './modules/helpers.js'
 import {
   stripModelLights,
   createCardScene,
@@ -1638,7 +1638,7 @@ function renderGrid() {
           ${mainCat ? `<span class="card-main-cat-badge" title="Hauptkategorie">${esc(mainCat)}</span>` : ''}
           ${renderCategoryQuickSelect(p)}
         </div>
-        <div class="card-id" title="${p.id}">${p.id}</div>
+        <div class="card-id" title="${esc(formatProductSapIdentifiers(p))}">${esc(formatProductSapIdentifiers(p))}</div>
         <div class="card-short-text">Kurztext (SAP): ${esc(formatProductShortText(p))}</div>
         ${p.createdAt ? `<div class="card-date" title="${new Date(p.createdAt).toLocaleString('de-DE')}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>

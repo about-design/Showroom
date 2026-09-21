@@ -36,6 +36,12 @@ export function formatProductShortText(product) {
     : '–'
 }
 
+export function formatProductSapIdentifiers(product) {
+  const ean = String(product.sapEan ?? '').trim()
+  const article = String(product.sapArticleNumber ?? '').trim()
+  return [ean && `EAN: ${ean}`, article && `Artikel: ${article}`].filter(Boolean).join(' · ') || String(product.id ?? '')
+}
+
 export function formatDate(iso) {
   if (!iso) return ''
   const d = new Date(iso)

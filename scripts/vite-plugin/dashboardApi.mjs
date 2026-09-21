@@ -1,6 +1,6 @@
 import { recordColorRuleConversion, colorRulesVersion } from '../../src/lib/colorRuleConversion.js'
 import { defineConfig } from 'vite'
-import { resolveProductShortText } from '../lib/sapShortText.mjs'
+import { resolveProductSapRecord } from '../lib/sapShortText.mjs'
 import { compareShortText } from '../lib/shortTextSort.mjs'
 import { resolve, dirname, relative, isAbsolute, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
@@ -1883,7 +1883,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           }
 
           for (const { p } of glbRows) {
-            if (p && !p.conversionError) p.shortText = await resolveProductShortText(p)
+            if (p && !p.conversionError) Object.assign(p, await resolveProductSapRecord(p))
           }
           await saveProducts(data, (next, latest) => {
             // Preserve rules edited while conversion/registration was running. The receipt

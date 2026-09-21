@@ -45,9 +45,9 @@ async function readWorkbookFiles(filename) {
 export function createShortTextIndex(rows) {
   const ean = new Map(), article = new Map()
   for (const row of rows) {
-    const text = key(row.E)
-    if (key(row.A) && !ean.has(key(row.A))) ean.set(key(row.A), text)
-    if (key(row.B) && !article.has(key(row.B))) article.set(key(row.B), text)
+    const record = { shortText: key(row.E), sapEan: key(row.A), sapArticleNumber: key(row.B) }
+    if (key(row.A) && !ean.has(key(row.A))) ean.set(key(row.A), record)
+    if (key(row.B) && !article.has(key(row.B))) article.set(key(row.B), record)
   }
   return { ean, article }
 }
@@ -88,16 +88,20 @@ export function productIdentifiers(product) {
   }
 }
 
-export function lookupShortText(product, index) {
+export function lookupSapRecord(product, index) {
   const { ean, article } = productIdentifiers(product)
   if (ean && index.ean.has(ean)) return index.ean.get(ean)
-  return article ? index.article.get(article) || '' : ''
+  return (article && index.article.get(article)) || { shortText: '', sapEan: '', sapArticleNumber: '' }
+}
+
+export function lookupShortText(product, index) {
+  return lookupSapRecord(product, index).shortText
 }
 
 let cachedIndex
 let cachedStamp
-/** Datenquellenadapter: Liefert ausschließlich den zu speichernden Kurztext. */
-export async function resolveProductShortText(product, filename = SAP_EXCEL_PATH) {
+/** Ein Treffer liefert Kurztext und Kennungen gemeinsam, ohne weiteren Lookup. */
+export async function resolveProductSapRecord(product, filename = SAP_EXCEL_PATH) {
   try {
     const info = await stat(filename)
     const stamp = `${filename}:${info.mtimeMs}:${info.size}`
@@ -105,8 +109,12 @@ export async function resolveProductShortText(product, filename = SAP_EXCEL_PATH
       cachedIndex = await readShortTextIndex(filename)
       cachedStamp = stamp
     }
-    return lookupShortText(product, cachedIndex)
+    return lookupSapRecord(product, cachedIndex)
   } catch {
-    return ''
+    return { shortText: '', sapEan: '', sapArticleNumber: '' }
   }
+}
+
+export async function resolveProductShortText(product, filename = SAP_EXCEL_PATH) {
+  return (await resolveProductSapRecord(product, filename)).shortText
 }

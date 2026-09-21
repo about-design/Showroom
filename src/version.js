@@ -1,6 +1,7 @@
 const APP_VERSION_INFO = {
-  version: 'MARA09.21.a',
+  version: 'MARA09.21.b',
   history: [
+    { version: 'MARA09.21.b', description: 'Produktkarten zeigen EAN und Artikelnummer aus demselben SAP-Excel-Treffer wie den Kurztext. Werte werden gemeinsam gespeichert, ohne zusätzliche Suche; ohne Treffer bleibt die Produkt-ID sichtbar.' },
     { version: 'MARA09.21.a', description: 'Neue, geänderte und gelöschte Farbregeln bleiben bis zur erfolgreichen Neu-Konvertierung gelb. Mesh-Zeilen und Produktkarten vergleichen den aktuellen Regelstand mit dem tatsächlich gebackenen GLB-Stand; erst dann erscheinen Grün und Häkchen. Fehlgeschlagene Konvertierungen bestätigen keine Regeln.' },
     { version: 'MARA09.19.aa', description: 'Farbsteuerung am unteren Rand ein- und ausklappbar statt verschiebbar. Eingeklappt bleibt nur der Pfeilgriff; Zustand lokal gespeichert, Farb- und RAL-Auswahl bleiben erhalten.' },
     { version: 'MARA09.19.z', description: 'Farbfilter und RAL-Palette gemeinsam per Pfeil nach oben/unten verschiebbar. Position lokal gespeichert; Layout folgt dem 3D-Viewport und wahrt Abstand zum ViewCube.' },

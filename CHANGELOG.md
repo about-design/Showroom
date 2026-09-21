@@ -1,5 +1,10 @@
 # Changelog
 
+## MARA09.21.b - 2026-09-21
+
+- Der vorhandene SAP-Kurztext-Lookup übernimmt aus demselben Excel-Datensatz zusätzlich EAN (A) und Artikelnummer (B) in eigene Anzeigefelder. Keine zweite Excel-Suche, unveränderte Produkt-ID und Dateizuordnung.
+- Produktkarten zeigen vorhandene Kennungen als „EAN: … · Artikel: …“, bei fehlendem Treffer weiterhin die Produkt-ID. Lange Angaben umbrechen; Bestandsabgleich verwendet den bestehenden SAP-Sync.
+
 ## MARA09.21.a - 2026-09-21
 
 - Farbregel-Zuordnungen bleiben nach Hinzufügen, Änderung oder Löschung gelb, bis die aktuelle Regelversion erfolgreich in die GLB übernommen wurde. Mesh-Zeilen behalten RAL/Verzinkt sichtbar; vollständig zugeordnete Produktkarten erhalten erst danach Grün und ✓.
