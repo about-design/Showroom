@@ -101,6 +101,7 @@ if (colorOverridesPathArg) {
 /** JSON: { nameColorRules?, geometryColorRules?, vertexReductionRules?, visibilityRules? } oder reines Array (= nur nameColorRules) */
 const nameRulesPathArg = flag('name-rules')
 let nameColorRulesCompiled = null
+let removedNameColorRulesCompiled = null
 let geometryColorRulesCompiled = null
 let vertexReductionRulesCompiled = null
 let visibilityRulesCompiled = null
@@ -114,6 +115,8 @@ if (nameRulesPathArg) {
       const parsed = JSON.parse(fs.readFileSync(nrPath, 'utf-8'))
       const raw = Array.isArray(parsed) ? parsed : parsed?.nameColorRules
       nameColorRulesCompiled = compileNameColorRules(Array.isArray(raw) ? raw : [])
+      const removedRaw = Array.isArray(parsed) ? null : parsed?.removedNameColorRules
+      removedNameColorRulesCompiled = compileNameColorRules(Array.isArray(removedRaw) ? removedRaw : [])
       const geoRaw = Array.isArray(parsed) ? null : parsed?.geometryColorRules
       geometryColorRulesCompiled = compileGeometryColorRules(Array.isArray(geoRaw) ? geoRaw : [])
       const reductionRaw = Array.isArray(parsed) ? null : parsed?.vertexReductionRules
@@ -1252,8 +1255,14 @@ function applyVertexReductionRules(doc, rules, simplifier) {
  */
 function applyMappingAndCliRalBaseColors(doc) {
   const locked = new WeakSet()
+  const neutralized = removedNameColorRulesCompiled?.length
+    ? resetRemovedNameColorRuleMatches(doc, removedNameColorRulesCompiled)
+    : new Set()
   if (nameColorRulesCompiled && nameColorRulesCompiled.length > 0) {
     applyNameColorRules(doc, nameColorRulesCompiled, locked)
+  }
+  for (const material of neutralized) {
+    if (!locked.has(material)) locked.add(material)
   }
   if (geometryColorRulesCompiled && geometryColorRulesCompiled.length > 0) {
     applyGeometryColorRules(doc, geometryColorRulesCompiled, locked)
@@ -1263,6 +1272,51 @@ function applyMappingAndCliRalBaseColors(doc) {
   }
   applyAutomaticColorAliasRules(doc, locked)
   applyCliRalBaseColor(doc, locked)
+}
+
+/** Setzt frühere Regeltreffer zunächst auf das zentrale Standard-Grau RAL 7035 zurück. */
+function resetRemovedNameColorRuleMatches(doc, removedRules) {
+  const palette = loadRalPalette()
+  const gray = palette.find(entry => String(entry.code || '').trim().toUpperCase() === 'RAL 7035')
+  const reset = new Set()
+  if (!gray || !removedRules.length) return reset
+  const materialRules = removedRules.filter(rule => rule.target === 'material')
+  const sceneRules = sceneNameColorRulesInOrder(removedRules)
+  isolateSharedMaterialsForSceneRules(doc, sceneRules)
+
+  const neutralize = material => {
+    if (!material || reset.has(material)) return
+    material.setBaseColorTexture(null)
+    material.setMetallicRoughnessTexture(null)
+    const factor = material.getBaseColorFactor() || [1, 1, 1, 1]
+    material.setBaseColorFactor([gray.rLin, gray.gLin, gray.bLin, factor[3] ?? 1])
+    material.setMetallicFactor(0)
+    material.setRoughnessFactor(0.35)
+    finishLockedMaterials.add(material)
+    reset.add(material)
+  }
+  for (const material of doc.getRoot().listMaterials()) {
+    const name = material.getName() || ''
+    if (materialRules.some(rule => matchesRuleRegex(rule.regex, name))) neutralize(material)
+  }
+  function visit(node) {
+    const mesh = node.getMesh()
+    if (mesh) {
+      const meshName = (mesh.getName() || '').trim() || (node.getName() || '').trim()
+      const nodePath = getNodePathString(node)
+      for (const primitive of mesh.listPrimitives()) {
+        const extras = buildExtrasMatchString(node, mesh, primitive)
+        if (sceneRules.some(rule => matchesRuleRegex(rule.regex,
+          rule.target === 'node' ? node.getName() || '' :
+          rule.target === 'mesh' ? meshName :
+          rule.target === 'nodePath' ? nodePath : extras))) neutralize(primitive.getMaterial())
+      }
+    }
+    for (const child of node.listChildren()) visit(child)
+  }
+  for (const scene of doc.getRoot().listScenes()) for (const child of scene.listChildren()) visit(child)
+  if (reset.size) log.info(`    Entfernte Farbregeln: ${reset.size} Material(ien) auf Standard-Grau RAL 7035 zurückgesetzt`)
+  return reset
 }
 
 /**

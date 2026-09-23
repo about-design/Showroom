@@ -1,5 +1,176 @@
 # Changelog
 
+## MARA09.23.f - 2026-09-23
+
+- Neuer Einstellungsbereich „Automatische Kategoriezuordnung“ mit frei eingebbaren Kürzeln, Hauptkategorie-Pulldown sowie Funktionen zum Hinzufügen, Ändern und Löschen. Die initialen gespeicherten Zuordnungen lauten `MP → Palettenregale`, `CL → Fachbodenregale` und `KR → Kragarmregale`.
+- Produkte ohne Hauptkategorie werden nach der vorhandenen SAP-Kurztext-Anreicherung anhand des getrimmten Textanfangs ohne Beachtung der Groß-/Kleinschreibung zugeordnet. Bereits gesetzte Kategorien werden nicht überschrieben; die Zuordnung stammt ausschließlich aus der gespeicherten Einstellung.
+- „Nicht zugeordnete Produkte prüfen“ zeigt zunächst die Trefferzahl und übernimmt erst nach Bestätigung. Sichtbare Karten und die geöffnete Sidebar werden ohne Listen-Neurendering aktualisiert, sodass Produktauswahl, Filter und Scrollposition erhalten bleiben.
+- Funktionsprüfung für `MP`, `CL`, `KR`, unbekannte Kürzel, bestehende manuelle Kategorien und mehrdeutige Regeln erfolgreich; Produktions-Build und responsiver Einstellungsdialog ebenfalls geprüft.
+
+## MARA09.23.e - 2026-09-23
+
+- Bei einer Textmarkierung im Mesh-Namen übernimmt „Als Namens-Farbregel übernehmen“ beziehungsweise die RAL-Auswahl exakt den markierten Text als Regex, ohne automatisch ergänzte Produktdaten oder `^`/`$`.
+- Die Markierung wird vor dem Öffnen des Kontextmenüs gesichert. Eine Regel mit identischem Mesh-Ziel und Regex wird aktualisiert und für „letzter Treffer gewinnt“ ans Ende verschoben; ohne Markierung bleibt die verankerte Vollnamen-Regel erhalten.
+- Browserprüfung mit echter Mausmarkierung und Rechtsklick erfolgreich: `35-00036` steht unverändert im Regex-Feld, trifft passende Geschwister-Meshes und kein Mesh ohne diesen Text.
+
+## MARA09.23.d - 2026-09-23
+
+- Die RAL-Auswahl direkt unter „Als Namens-Farbregel übernehmen“ erzeugt eine exakte Mesh-Regel nach dem Schema `^vollständiger Mesh-Name$`, auch wenn im Namen zuvor nur ein Textausschnitt markiert war.
+- Eine vorhandene exakte Einzelregel wird aktualisiert statt dupliziert. Sie wird ans Ende der Produktregeln verschoben und überschreibt dadurch nach der bestehenden Last-wins-Logik allgemeinere Regeln ausschließlich für dieses Mesh.
+- Die Mesh-Liste zeigt die neue Zuordnung sofort und kennzeichnet die erforderliche Neu-Konvertierung. Browser- und Bake-Test bestätigen: allgemeine Regel weiterhin RAL 9007/Verzinkt, einzelnes Mesh abweichend RAL 7035.
+
+## MARA09.23.c - 2026-09-23
+
+- Beim Löschen einer Namens-Farbregel über X wird die Mesh-Liste sofort ausschließlich anhand der aktuell vorhandenen Regeln neu ausgewertet.
+- Ohne verbleibenden Treffer verschwinden RAL-/Oberflächenanzeige und gelbe Regelmarkierung unmittelbar; die Mesh-Zeile kehrt zur neutralen Darstellung zurück. Eine verbleibende passende Regel wird sofort gemäß „letzter Treffer gewinnt“ angezeigt.
+- Der Kartenstatus weist weiterhin auf die erforderliche Neu-Konvertierung hin. Die bereits erzeugte GLB wird erst bei dieser Konvertierung auf Standard-Grau RAL 7035 zurückgesetzt.
+
+## MARA09.23.b - 2026-09-23
+
+- Beim nächsten erfolgreichen Bake werden entfernte Namens-Farbregeln mit dem zuletzt konvertierten Regelstand verglichen. Frühere Treffer ohne weitere gültige Regel erhalten wieder das zentrale Standard-Grau RAL 7035 und keine alte Regeloberfläche.
+- Verbleibende passende Regeln bestimmen weiterhin mit der bestehenden Reihenfolge „letzter Treffer gewinnt“ die Farbe. Der aktuelle Regelstand bleibt bis zur erfolgreichen Neu-Konvertierung als geändert markiert; die Mesh-Anzeige entfernt gelöschte RAL-Zuordnungen sofort.
+- GLB-Bake funktional geprüft: gelöschte einzige Regel setzt ein zuvor farbiges Mesh auf Grau zurück; eine verbleibende Regel gewinnt weiterhin. Export-/Sichtbarkeitsauswahl und Geometrie bleiben unverändert.
+
+## MARA09.23.a - 2026-09-23
+
+- STEP/STP/STPZ/P21-Uploads archivieren vorherige Versionen vor der Übernahme unter `D:\Showroom Datei Move\Ersetzte STEP\<Produkt-ID>`, auch bei identischem Dateinamen. Bestehende Archivdateien werden niemals überschrieben; Kollisionen erhalten Zeitstempel und eindeutigen Zusatz.
+- Serverablauf mit temporärer Upload-Datei, geprüfter Archivkopie und Entfernung der Quelle erst nach Größenprüfung, exklusiver Übernahme, Produktaktualisierung und Rollback bei Fehlern. Bei Rollback bleibt eine zusätzliche Archivkopie erhalten. Fehler werden sichtbar gemeldet.
+- Neue Erfolgsmeldungen und dauerhaftes Protokoll in `logs/step-replacements.jsonl`; der bisherige Lösch-Endpunkt lehnt STEP-Dateien ab. Persistierte STEP-Verweise haben Vorrang vor alten CAD-Index-Einträgen. GLB, USDZ und Vorschaubilder werden nicht verändert.
+- Acht isolierte Tests erfolgreich: alle sechs geforderten Upload-/Fehlerfälle, STEP-Familienabgrenzung und HTTP-Integration einschließlich gespeicherter Produktverweise.
+
+## MARA09.22.v - 2026-09-22
+
+- Der 14 px breite Scrollbalken des mittleren Produktdetailbereichs wird direkt an der linken Sidebar-Kante neben dem Splitter angezeigt.
+- Produktdetails und Formulare behalten ihre normale linksbündige Leserichtung; Header, Footer, Splitter und andere Scrollbereiche bleiben unverändert.
+
+## MARA09.22.u - 2026-09-22
+
+- Der mittlere Inhalt der permanenten Produktdetail-Sidebar erhält einen 14 px breiten, deutlich sichtbaren vertikalen Scrollbalken mit dezentem Track und gut greifbarem Thumb.
+- Die globale dünne Scrollbar-Regel bleibt bestehen und wird ausschließlich für den Sidebar-Scrollcontainer überschrieben. Horizontaler Sidebar-Scroll sowie Änderungen an Header, Footer, Splitter und linkem Produktbereich sind ausgeschlossen.
+
+## MARA09.22.t - 2026-09-22
+
+- Neue Stammdaten-Aktion „Dateinamen anpassen“ bei EAN-/Artikelabweichungen mit Vorschau aller eindeutig referenzierten STEP/GLB/USDZ/PNG-Dateien.
+- Erst nach Bestätigung werden Dateien kollisionssicher umbenannt und Produkt-ID, Name, Datei-URLs sowie zusammengesetzte Produktverweise atomar aktualisiert; Fehler lösen einen Rollback aus, vorhandene Ziele werden niemals überschrieben.
+
+## MARA09.22.s - 2026-09-22
+
+- Gemeinsame EAN-/Artikel-Plausibilitätsübersicht für alle gefundenen Abweichungen, mit Fehleranzahl, scrollbarerer Liste und manuellen Schließen-Aktionen; automatische Anzeige höchstens einmal pro Sitzung.
+- Ein Klick auf einen Fehlereintrag lädt und markiert die betreffende Produktkarte und positioniert ihre Zeile mit der bestehenden Karten-Nachführung oben. Produktdaten bleiben unverändert.
+
+## MARA09.22.r - 2026-09-22
+
+- Kategorieänderungen in der ausgewählten Produktkarte aktualisieren nur noch den betroffenen Kategorie-Badge statt die gesamte Kartenliste neu zu rendern.
+- Karte und Scrollposition bleiben dadurch bei wiederholten Änderungen pixelstabil; die automatische Nachführung für echte Produktwechsel bleibt unverändert.
+
+## MARA09.22.q - 2026-09-22
+
+- Produktkarten vergleichen EAN und Artikelnummer im oberen Namen mit den vorhandenen SAP-Feldern.
+- Ausschließlich abweichende Nummern im Produktnamen werden rot markiert. Produktdaten, Dateinamen und die untere EAN-/Artikel-Zeile bleiben unverändert.
+
+## MARA09.22.p - 2026-09-22
+
+- Beim Öffnen oder Fokussieren des Kategorie-Pulldowns wird die zugehörige Produktkarte sofort ausgewählt und rot markiert; eine vorherige Auswahl verliert ihre Markierung.
+- Die bestehende Zeilen-Nachführung bleibt aktiv. Das Pulldown wird beim Auswahlwechsel nicht neu gerendert und bleibt normal bedienbar; erst `change` speichert die Kategorie.
+
+## MARA09.22.o - 2026-09-22
+
+- Nach einer Kategorieänderung innerhalb der ausgewählten Produktkarte wird dieselbe Kartenzeile nach dem Neurendern erneut oben im sichtbaren Produktbereich positioniert.
+- Die ausgewählte Produkt-ID bleibt erhalten; verwendet wird dieselbe Zeilen-Nachführung wie bei einer echten Produktauswahl.
+
+## MARA09.22.n - 2026-09-22
+
+- Bei Änderungen der Hauptkategorie in einer Produktkarte bleibt die aktuelle Scrollposition der Produktübersicht exakt erhalten.
+- Die automatische Karten-Nachführung bleibt auf echte Produktauswahl und Produktwechsel beschränkt.
+
+## MARA09.22.m - 2026-09-22
+
+- Das Explorer-Symbol der Showroom-Produktliste ist in kompakte grüne GLB- und blaue STEP-Badges aufgeteilt.
+- Beide markieren die jeweils vorhandene Datei direkt im Windows Explorer, ohne Produktauswahl oder Hover-Vorschau auszulösen.
+
+## MARA09.22.l - 2026-09-22
+
+- Die linke Showroom-Produktliste erhält ein dezentes Ordner-Symbol.
+- Ein Klick markiert die vorhandene CAD-/Quelldatei im Windows Explorer, ohne Produktauswahl oder Hover-Vorschau auszulösen; fehlende Dateien werden verständlich gemeldet.
+
+## MARA09.22.k - 2026-09-22
+
+- Die Showroom-Produktsuche berücksichtigt zusätzlich den vorhandenen SAP-Kurztext `shortText`.
+- Mehrere Suchbegriffe werden als AND-Suche über Name, Kennungen, bestehende Suchfelder und Kurztext ausgewertet; Groß-/Kleinschreibung und Teilbegriffe bleiben unterstützt.
+
+## MARA09.22.j - 2026-09-22
+
+- Die zweite Zeile der linken Showroom-Produktliste zeigt den vorhandenen SAP-Kurztext in Weiß.
+- Lange Kurztexte umbrechen vollständig innerhalb der verfügbaren Breite; ohne Kurztext bleibt die Produktkennung als Fallback sichtbar. Produktverwaltung und Produktlogik bleiben unverändert.
+
+## MARA09.22.i - 2026-09-22
+
+- Die tatsächliche Oberkante der ausgewählten Kartenzeile wird ermittelt und direkt unterhalb der sichtbaren META-/Steuerleiste positioniert.
+- Eine einmalige Nachmessung im nächsten Layout-Frame korrigiert verbleibende Abweichungen in beide Scrollrichtungen.
+
+## MARA09.22.h - 2026-09-22
+
+- Jede ausgewählte Produktkarte wird am oberen sichtbaren Rand des tatsächlichen Karten-Scrollbereichs ausgerichtet, damit auch bei der ersten Auswahl kein oberer Kartenabschnitt abgeschnitten bleibt.
+
+## MARA09.22.g - 2026-09-22
+
+- Die Karten-Nachführung setzt den Scrollwert direkt am tatsächlich scrollenden Element. Dadurch wird die Aufwärtskorrektur nicht mehr durch die globale Smooth-Scroll-Einstellung verzögert.
+
+## MARA09.22.f - 2026-09-22
+
+- Beim Wechsel in eine andere Kartenreihe wird die ausgewählte Reihe im tatsächlichen Produkt-Scrollcontainer gezielt mit 10 px Abstand nach oben nachgeführt.
+- Das bestehende Verhalten für abgeschnittene Karten und die einmalige Nachmessung nach dem Layout-Frame bleiben erhalten.
+
+## MARA09.22.e - 2026-09-22
+
+- Der tatsächlich scrollende DOM-Container wird anhand von `overflow-y` und `scrollHeight` ermittelt; falls die Seite selbst scrollt, wird dort gezielt verschoben.
+- Nach dem nächsten Layout-Frame wird die Sichtbarkeit der vollständigen Karte einschließlich Statuszeile einmalig erneut geprüft und bei Bedarf korrigiert.
+
+## MARA09.22.d - 2026-09-22
+
+- Die Karten-Sichtbarkeitsprüfung verwendet ausschließlich den tatsächlich sichtbaren linken Scrollcontainer und berücksichtigt einen Abstand von 10 px zu dessen Ober- und Unterkante.
+- Das Browser-Clipping wird berücksichtigt, damit auch der untere Statusbereich der ausgewählten Karte vollständig sichtbar wird.
+
+## MARA09.22.c - 2026-09-22
+
+- Ausgewählte Produktkarten werden beim Öffnen und beim Wechsel über die Sidebar-Navigation im linken Produktbereich nur bei Bedarf vollständig sichtbar gescrollt.
+- Rechte Sidebar, Steuerleiste und getrennte Scrollbereiche bleiben unverändert.
+
+## MARA09.22.b - 2026-09-22
+
+- Permanente Produktdetail-Sidebar reicht vom oberen bis zum unteren Fensterrand.
+- META-Kopfzeile, Steuerleiste, Filter/Aktionen/Seitennavigation und Produktkarten teilen sich links die verbleibende Breite bis zum bestehenden Splitter; Collapse-Zustand, Sidebar-Breite, Scrollbereiche und Detail-Header/Footer bleiben unverändert.
+
+## MARA09.21.i - 2026-09-21
+
+- Obere Steuerleiste verwendet wieder die gesamte Fensterbreite; die rechte Sidebar-Breite wird dort nicht mehr reserviert. Unterhalb der Steuerleiste bleibt die Aufteilung aus Produktkarten, Splitter und Sidebar unverändert.
+
+## MARA09.21.h - 2026-09-21
+
+- Die bestehende Steuerleiste unter der META-Kopfzeile bleibt vollständig ein-/ausklappbar. Der gespeicherte Pfeil-Zustand, alle Kennzahlen, Filter, Aktionen und Seitennavigation bleiben unverändert; die dauerhaft sichtbare Sidebar folgt der aktuellen Steuerleistenhöhe.
+
+## MARA09.21.g - 2026-09-21
+
+- Die dauerhaft sichtbare Produktdetail-Sidebar wird dynamisch unter META-Kopfzeile und der vorhandenen ein-/ausklappbaren Steuerleiste positioniert. Pfeil, Kennzahlen, Suche, Filter, Sortierung, Aktionen und gespeicherter Auf-/Zuklapp-Zustand der Steuerleiste bleiben unverändert.
+
+## MARA09.21.f - 2026-09-21
+
+- Produktdetail-Sidebar beim Öffnen der Produktverwaltung dauerhaft sichtbar und nicht modal. Der graue Schleier entfällt; Karten links und Details rechts bleiben unabhängig scrollbar. Kartenwechsel aktualisiert nur den Sidebar-Inhalt, der vorhandene Splitter und die gespeicherte Breite bleiben erhalten.
+
+## MARA09.21.e - 2026-09-21
+
+- Einstellung „Produktdetail-Sidebar fixiert anzeigen“ ergänzt (Standard aktiv). Kopf und Fuß bleiben sichtbar, der mittlere Detailinhalt scrollt separat; bei Deaktivierung bleibt das bisherige Verhalten erhalten. Sidebar-Breitenanpassung bleibt unverändert.
+
+## MARA09.21.d - 2026-09-21
+
+- XYZ-Achsenkreuz unten links in der Produktdetail-Vorschau, X rot, Y grün, Z blau. Verwendet die bestehende Achsendarstellung und liest die aktuelle Kamerarotation nach dem Orbit-Update im vorhandenen Renderzyklus.
+- Folgt Mausrotation und ViewCube-Kamerawechseln, bleibt bei 25–60 % Sidebar-Breite unten links und fängt keine Mausaktionen ab. Kein zusätzlicher Renderer; Modell, gespeicherte Orientierung, GLB und Thumbnail bleiben unverändert.
+
+## MARA09.21.c - 2026-09-21
+
+- Bestehender Thumbnail-Export speichert die Kamera-Weltrotation als Quaternion, sowohl automatisch als auch bei „Vorschaubild neu erzeugen“. Aufnahme und Kameradaten stammen aus demselben Frame.
+- Produktkarten zeigen daraus ein kleines XYZ-SVG unten links (X rot, Y grün, Z blau), ohne Mausereignisse abzufangen. Ohne gültige Kameradaten kein Overlay. Keine Neuerzeugung alter Thumbnails, kein zusätzlicher Renderer und keine Änderung an PNG, GLB oder Produktorientierung.
+
 ## MARA09.21.b - 2026-09-21
 
 - Der vorhandene SAP-Kurztext-Lookup übernimmt aus demselben Excel-Datensatz zusätzlich EAN (A) und Artikelnummer (B) in eigene Anzeigefelder. Keine zweite Excel-Suche, unveränderte Produkt-ID und Dateizuordnung.

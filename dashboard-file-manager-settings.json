@@ -3,6 +3,23 @@
   "freeCommanderPath": "C:\\Program Files (x86)\\FreeCommander XE\\FreeCommander.exe",
   "autoConvertOnDrop": true,
   "showMeshRal": true,
+  "showViewCube": true,
+  "viewCubePosition": "right",
+  "detailSidebarPinned": true,
   "sidebarWidthPercent": 35,
-  "maxParallelConversions": 3
+  "maxParallelConversions": 3,
+  "automaticCategoryMappings": [
+    {
+      "prefix": "MP",
+      "category": "Palettenregale"
+    },
+    {
+      "prefix": "CL",
+      "category": "Fachbodenregale"
+    },
+    {
+      "prefix": "KR",
+      "category": "Kragarmregale"
+    }
+  ]
 }

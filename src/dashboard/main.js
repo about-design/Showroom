@@ -1,3 +1,4 @@
+import { thumbnailAxesMarkup, updateThumbnailAxes, createLiveCameraAxes } from './modules/thumbnailAxes.js'
 import { colorRulesAreConverted, colorRuleCoverageState, ruleMatchesMesh, colorRulesVersion } from '../lib/colorRuleConversion.js'
 import { createViewCube } from '../showroom/ViewCube.js'
 import { applyViewCubeSettings } from '../lib/viewCubeSettings.js'
@@ -34,7 +35,7 @@ import {
   PAGE_SIZES,
   CARD_PREVIEW_POOL_MAX,
 } from './modules/constants.js'
-import { parseJsonResponse, esc, formatDate, formatProductShortText, formatProductSapIdentifiers, fmtNumOrDash, cssEscapeId } from './modules/helpers.js'
+import { parseJsonResponse, esc, formatDate, formatProductShortText, formatProductSapIdentifiers, formatValidatedProductName, getProductNameIdentifierMismatch, fmtNumOrDash, cssEscapeId } from './modules/helpers.js'
 import {
   stripModelLights,
   createCardScene,
@@ -83,6 +84,7 @@ let selectedProductId = null
 let searchQuery = (typeof localStorage !== 'undefined' && localStorage.getItem('dash_search')) || ''
 let _searchDebounce = null
 let dirty = false
+let identifierMismatchCheckStarted = false
 
 let currentPage = 1
 let pageSize = parseInt(localStorage.getItem('dash_pageSize')) || 24
@@ -666,6 +668,23 @@ const detailPanel = $('#detailPanel')
 initDetailSplitter()
 const detailTitle = $('#detailTitle')
 const detailContent = $('#detailContent')
+function showEmptyDetailPanel() {
+  detailTitle.textContent = 'Produkt auswählen'
+  document.getElementById('detailShortText').textContent = ''
+  detailContent.innerHTML = '<div class="detail-empty-state">Produkt auswählen</div>'
+  detailPanel.classList.add('open')
+  appShell.classList.add('detail-open')
+}
+function updateDetailPanelTop() {
+  document.documentElement.style.setProperty('--detail-panel-top', '0px')
+}
+showEmptyDetailPanel()
+updateDetailPanelTop()
+if (typeof ResizeObserver !== 'undefined') {
+  const detailTopObserver = new ResizeObserver(updateDetailPanelTop)
+  document.querySelector('.top-bar') && detailTopObserver.observe(document.querySelector('.top-bar'))
+  document.getElementById('dashboardControls') && detailTopObserver.observe(document.getElementById('dashboardControls'))
+}
 const dropOverlay = $('#dropOverlay')
 const glbFileInput = $('#glbFileInput')
 const toastContainer = $('#toastContainer')
@@ -676,9 +695,14 @@ const categorySelect = $('#categorySelect')
 const fileManagerSettingsModal = $('#fileManagerSettingsModal')
 let showMeshRal = true
 
+function applyDetailSidebarPinnedSetting(settings) {
+  document.documentElement.classList.toggle('detail-sidebar-unpinned', settings.detailSidebarPinned === false)
+}
+
 function applyMeshDisplaySettings(settings) {
   applyViewCubeSettings(settings)
   showMeshRal = settings.showMeshRal !== false
+  applyDetailSidebarPinnedSetting(settings)
   updateDetailMeshRowClasses()
 }
 
@@ -868,6 +892,9 @@ async function openFileManagerSettings() {
     $('#showMeshRal').checked = settings.showMeshRal !== false
     $('#showViewCube').checked = settings.showViewCube !== false
     $('#viewCubePosition').value = settings.viewCubePosition || 'right'
+    $('#detailSidebarPinned').checked = settings.detailSidebarPinned !== false
+    renderAutomaticCategoryMappings(settings.automaticCategoryMappings)
+    $('#automaticCategoryAssignmentStatus').textContent = ''
     fileManagerSettingsModal.classList.add('open')
     fileManagerSettingsModal.setAttribute('aria-hidden', 'false')
     syncFileManagerSettingsUi()
@@ -886,6 +913,95 @@ function syncFileManagerSettingsUi() {
   $('#freeCommanderPathRow').hidden = !freeCommander
 }
 
+function automaticCategoryOptions(selected = '') {
+  const options = productCategoriesCache.map((category) =>
+    `<option value="${esc(category)}"${category === selected ? ' selected' : ''}>${esc(category)}</option>`,
+  ).join('')
+  return `<option value=""${selected ? '' : ' selected'}>— Hauptkategorie —</option>${options}`
+}
+
+function addAutomaticCategoryMappingRow(mapping = {}) {
+  const rows = $('#automaticCategoryMappingsRows')
+  if (!rows) return
+  const row = document.createElement('div')
+  row.className = 'automatic-category-mapping-row'
+  row.innerHTML = `
+    <input class="detail-input automatic-category-prefix" type="text" maxlength="64" value="${esc(String(mapping.prefix || ''))}" placeholder="z. B. MP" aria-label="Kürzel">
+    <select class="sort-select automatic-category-value" aria-label="Hauptkategorie">${automaticCategoryOptions(String(mapping.category || ''))}</select>
+    <button type="button" class="btn btn-ghost automatic-category-remove" title="Zuordnung löschen" aria-label="Zuordnung löschen">×</button>`
+  rows.append(row)
+}
+
+function renderAutomaticCategoryMappings(mappings) {
+  const rows = $('#automaticCategoryMappingsRows')
+  if (!rows) return
+  rows.replaceChildren()
+  for (const mapping of Array.isArray(mappings) ? mappings : []) addAutomaticCategoryMappingRow(mapping)
+}
+
+function collectAutomaticCategoryMappings() {
+  return [...document.querySelectorAll('.automatic-category-mapping-row')].map((row) => ({
+    prefix: row.querySelector('.automatic-category-prefix')?.value.trim() || '',
+    category: row.querySelector('.automatic-category-value')?.value.trim() || '',
+  })).filter((row) => row.prefix && row.category)
+}
+
+function applyAutomaticCategoryAssignmentsToUi(assignments) {
+  for (const { id, category } of assignments || []) {
+    const cached = productCache.get(id)
+    if (cached) cached.mainCategory = category
+    const pageProduct = currentPageProducts.find((product) => String(product.id) === String(id))
+    if (pageProduct) pageProduct.mainCategory = category
+    const quick = document.querySelector(`.card-cat-quick[data-product-id="${cssEscapeId(id)}"]`)
+    if (!quick) continue
+    if (![...quick.options].some((option) => option.value === category)) quick.add(new Option(category, category))
+    quick.value = category
+    const categoryRow = quick.closest('.card-cat-row')
+    let badge = categoryRow?.querySelector('.card-main-cat-badge')
+    if (!badge) {
+      badge = document.createElement('span')
+      badge.className = 'card-main-cat-badge'
+      badge.title = 'Hauptkategorie'
+      categoryRow?.insertBefore(badge, quick)
+    }
+    badge.textContent = category
+  }
+  const selected = (assignments || []).find((item) => String(item.id) === String(selectedProductId))
+  const detailSelect = document.querySelector('[data-field="mainCategory"]')
+  if (selected && detailSelect) detailSelect.value = selected.category
+}
+
+async function checkAutomaticCategoryAssignments() {
+  const button = $('#automaticCategoryApply')
+  const status = $('#automaticCategoryAssignmentStatus')
+  const mappings = collectAutomaticCategoryMappings()
+  if (!mappings.length) { status.textContent = 'Bitte mindestens eine vollständige Zuordnung anlegen.'; return }
+  button.disabled = true
+  try {
+    const request = async (apply) => {
+      const res = await fetch('/__api/automatic-category-assignment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mappings, apply }),
+      })
+      const data = await parseJsonResponse(res)
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return data
+    }
+    const preview = await request(false)
+    status.textContent = `${preview.count} nicht zugeordnete Produkte würden eine Hauptkategorie erhalten.`
+    if (!preview.count || !window.confirm(`${preview.count} nicht zugeordnete Produkte würden eine Hauptkategorie erhalten.\n\nJetzt übernehmen?`)) return
+    const result = await request(true)
+    applyAutomaticCategoryAssignmentsToUi(result.assignments)
+    await loadCategoryOptions()
+    status.textContent = `${result.count} Produkte wurden zugeordnet.`
+    toast(`${result.count} Produkte automatisch zugeordnet`, 'success')
+  } catch (error) {
+    status.textContent = error.message || 'Prüfung fehlgeschlagen.'
+    toast(status.textContent, 'error')
+  } finally {
+    button.disabled = false
+  }
+}
+
 async function saveFileManagerSettings() {
   try {
     const maxParallelConversions = Number.parseInt($('#maxParallelConversions').value, 10)
@@ -899,7 +1015,9 @@ async function saveFileManagerSettings() {
         showMeshRal: $('#showMeshRal').checked,
         showViewCube: $('#showViewCube').checked,
         viewCubePosition: $('#viewCubePosition').value,
+        detailSidebarPinned: $('#detailSidebarPinned').checked,
         maxParallelConversions,
+        automaticCategoryMappings: collectAutomaticCategoryMappings(),
       }),
     })
     const data = await parseJsonResponse(res)
@@ -1049,7 +1167,24 @@ function bindEvents() {
     if (uploadCard) glbFileInput.click()
   })
 
-  detailOverlay.addEventListener('click', closeDetail)
+  const selectCardFromCategoryControl = (target) => {
+    const quick = target.closest('.card-cat-quick')
+    if (!quick) return
+    const card = quick.closest('.product-card')
+    const id = card?.dataset.id
+    if (!id || selectedProductId === id) return
+
+    selectedProductId = id
+    productGrid.querySelectorAll('.product-card').forEach((item) => {
+      item.classList.toggle('selected', item.dataset.id === id)
+    })
+    ensureProductCardVisible(id, true)
+    void openDetail(id)
+  }
+  productGrid.addEventListener('pointerdown', (event) => selectCardFromCategoryControl(event.target))
+  productGrid.addEventListener('focusin', (event) => selectCardFromCategoryControl(event.target))
+
+  detailOverlay.addEventListener('click', (event) => event.preventDefault())
   $('#detailClose').addEventListener('click', closeDetail)
   $('#btnCancelDetail').addEventListener('click', closeDetail)
   $('#detailPrev').addEventListener('click', () => navigateDetail(-1))
@@ -1086,6 +1221,11 @@ function bindEvents() {
   $('#fileManagerSettingsCancel')?.addEventListener('click', closeFileManagerSettings)
   $('#fileManagerSettingsSave')?.addEventListener('click', saveFileManagerSettings)
   $('#fileManagerChoice')?.addEventListener('change', syncFileManagerSettingsUi)
+  $('#automaticCategoryMappingAdd')?.addEventListener('click', () => addAutomaticCategoryMappingRow())
+  $('#automaticCategoryMappingsRows')?.addEventListener('click', (event) => {
+    event.target.closest('.automatic-category-remove')?.closest('.automatic-category-mapping-row')?.remove()
+  })
+  $('#automaticCategoryApply')?.addEventListener('click', checkAutomaticCategoryAssignments)
 
   const btnToggleUsdz = $('#btnToggleUsdz')
   if (btnToggleUsdz) btnToggleUsdz.addEventListener('click', toggleExportUsdz)
@@ -1125,7 +1265,19 @@ function bindEvents() {
         await patchProduct(id, { mainCategory: val })
         toast('Hauptkategorie gespeichert', 'success')
         await loadCategoryOptions()
-        await fetchPage()
+        const categoryRow = quick.closest('.card-cat-row')
+        let badge = categoryRow?.querySelector('.card-main-cat-badge')
+        if (val) {
+          if (!badge) {
+            badge = document.createElement('span')
+            badge.className = 'card-main-cat-badge'
+            badge.title = 'Hauptkategorie'
+            categoryRow?.insertBefore(badge, quick)
+          }
+          badge.textContent = val
+        } else {
+          badge?.remove()
+        }
       } catch (err) {
         toast(err.message, 'error')
         quick.value = prev || ''
@@ -1216,10 +1368,11 @@ const UPLOAD_OVERWRITE_CANCELLED = 'UPLOAD_OVERWRITE_CANCELLED'
  * @param {File} file
  * @param {string} xFilenameHeaderValue für X-Filename (encodeURIComponent)
  */
-async function uploadBinaryWithOverwritePrompt(apiPath, file, xFilenameHeaderValue) {
+async function uploadBinaryWithOverwritePrompt(apiPath, file, xFilenameHeaderValue, extraHeaders = {}) {
   const baseHeaders = {
     'Content-Type': 'application/octet-stream',
     'X-Filename': encodeURIComponent(xFilenameHeaderValue),
+    ...extraHeaders,
   }
   const post = (overwrite) =>
     fetch(apiPath, {
@@ -1232,7 +1385,9 @@ async function uploadBinaryWithOverwritePrompt(apiPath, file, xFilenameHeaderVal
   let data = await parseJsonResponse(res)
   if (res.status === 409 && data?.conflict) {
     const hint = data.path ? ` (${data.path})` : ''
-    const msg = `Die Datei „${file.name}“ existiert bereits im Projekt${hint}.\n\nVorhandene Datei überschreiben?`
+    const msg = hasStepExtension(file.name)
+      ? `Die Datei „${file.name}“ existiert bereits im Projekt${hint}.\n\nVorherige STEP-Version archivieren und durch die neue Datei ersetzen?`
+      : `Die Datei „${file.name}“ existiert bereits im Projekt${hint}.\n\nVorhandene Datei überschreiben?`
     if (!window.confirm(msg)) {
       const err = new Error('Upload abgebrochen')
       err.code = UPLOAD_OVERWRITE_CANCELLED
@@ -1393,7 +1548,12 @@ async function processCadUploadsNewProducts(files) {
       const id = deriveProductIdFromUploadFilename(file.name)
       const existing = await fetchProductById(id)
       const up = await uploadCadFile(file, id)
-      if (existing) {
+      if (hasStepExtension(file.name)) {
+        productCache.set(id, up.product)
+        if (existing) appended++
+        else added++
+        toast(up.archived ? `${file.name} hochgeladen – vorherige STEP-Version archiviert` : 'STEP-Datei erfolgreich hochgeladen', 'success')
+      } else if (existing) {
         const base = [...(existing.cadFiles || [])]
         const next = mergeCadFilesReplaceFamily(base, up.path)
         const removed = base.filter((x) => !next.includes(x))
@@ -1615,6 +1775,7 @@ function renderGrid() {
     return `
     <div class="product-card${selectedProductId === p.id ? ' selected' : ''}" data-id="${p.id}" style="animation-delay:${Math.min(i, 12) * 25}ms">
       <div class="card-preview${hasThumb ? ' has-thumb' : ''}"${hasThumb ? '' : ` data-glb="${p.glbFile || ''}"`} data-product-id="${p.id}" data-default-color="${esc(p.defaultColor || '')}" data-surface-finish="${esc(p.surfaceFinish || 'auto')}">
+        ${hasThumb ? thumbnailAxesMarkup(p.previewCameraQuaternion) : ''}
         ${hasThumb
           ? `<img class="card-preview-img" src="${esc(resolveAssetUrl(p.previewImage))}" loading="lazy" decoding="async" alt="" width="640" height="400">`
           : `<div class="card-preview-placeholder">
@@ -1633,7 +1794,7 @@ function renderGrid() {
         </div>` : ''}
       </div>
       <div class="card-body">
-        <div class="card-name" title="${esc(p.name)}">${esc(p.name)}</div>
+        <div class="card-name" title="${esc(p.name)}">${formatValidatedProductName(p)}</div>
         <div class="card-cat-row">
           ${mainCat ? `<span class="card-main-cat-badge" title="Hauptkategorie">${esc(mainCat)}</span>` : ''}
           ${renderCategoryQuickSelect(p)}
@@ -1683,6 +1844,146 @@ function renderGrid() {
     cb.checked = selectedForConversion.has(cb.dataset.productId)
   })
   updateConvertSelectedButton()
+  scheduleProductIdentifierMismatchCheck()
+}
+
+function closeProductIdentifierMismatchModal() {
+  const modal = document.getElementById('productIdentifierMismatchModal')
+  if (!modal) return
+  modal.classList.remove('open')
+  modal.setAttribute('aria-hidden', 'true')
+}
+
+async function navigateToIdentifierMismatchProduct(productId) {
+  closeProductIdentifierMismatchModal()
+  currentFilter = 'all'
+  currentStatus = 'all'
+  mappingTargetFilter = 'all'
+  categoryFilter = 'all'
+  searchInput.value = ''
+  searchQuery = ''
+  filterGroup?.querySelectorAll('[data-filter]').forEach((button) => button.classList.toggle('active', button.dataset.filter === 'all'))
+  statusFilterGroup?.querySelectorAll('[data-status]').forEach((button) => button.classList.toggle('active', button.dataset.status === 'all'))
+  if (mappingTargetSelect) mappingTargetSelect.value = 'all'
+  if (categorySelect) categorySelect.value = 'all'
+  searchClear.hidden = true
+  const lookupParams = buildApiParams()
+  lookupParams.set('page', '1')
+  lookupParams.set('limit', '200')
+  const lookupResponse = await fetch(`/__api/products?${lookupParams}`)
+  const lookupData = await parseJsonResponse(lookupResponse)
+  const productIndex = (lookupData.products || []).findIndex((product) => product.id === productId)
+  if (!lookupResponse.ok || productIndex < 0) {
+    toast('Die betroffene Produktkarte konnte nicht geladen werden.', 'error')
+    return
+  }
+  currentPage = Math.floor(productIndex / pageSize) + 1
+  await fetchPage()
+  if (!currentPageProducts.some((product) => product.id === productId)) {
+    toast('Die betroffene Produktkarte konnte nicht geladen werden.', 'error')
+    return
+  }
+  await openDetail(productId)
+  setTimeout(() => {
+    if (selectedProductId === productId) requestAnimationFrame(() => ensureProductCardVisible(productId, true))
+  }, 600)
+}
+
+function showProductIdentifierMismatchModal(products) {
+  const mismatches = products
+    .map((product) => ({ product, mismatch: getProductNameIdentifierMismatch(product) }))
+    .filter((entry) => entry.mismatch)
+  if (mismatches.length === 0) return
+
+  const modal = document.createElement('div')
+  modal.className = 'name-rules-modal product-identifier-mismatch-modal open'
+  modal.id = 'productIdentifierMismatchModal'
+  modal.setAttribute('aria-hidden', 'false')
+  modal.innerHTML = `
+    <div class="name-rules-modal-backdrop"></div>
+    <div class="name-rules-modal-panel product-identifier-mismatch-panel" role="dialog" aria-modal="true" aria-labelledby="productIdentifierMismatchTitle">
+      <div class="name-rules-modal-header product-identifier-mismatch-header">
+        <div>
+          <h2 class="name-rules-modal-title" id="productIdentifierMismatchTitle">EAN-/Artikelprüfung – Abweichungen gefunden</h2>
+          <p class="name-rules-modal-hint">${mismatches.length} fehlerhafte${mismatches.length === 1 ? 's Produkt' : ' Produkte'} gefunden</p>
+        </div>
+        <button type="button" class="product-identifier-mismatch-x" aria-label="Schließen" title="Schließen">×</button>
+      </div>
+      <div class="product-identifier-mismatch-list">
+        ${mismatches.map(({ product, mismatch }) => {
+          const reason = mismatch.eanMismatch && mismatch.articleMismatch
+            ? 'EAN und Artikelnummer stimmen nicht'
+            : mismatch.eanMismatch ? 'EAN stimmt nicht' : 'Artikelnummer stimmt nicht'
+          return `<button type="button" class="product-identifier-mismatch-item" data-product-id="${esc(product.id)}">
+            <strong>${esc(product.name)}</strong><span>→ ${reason}</span>
+          </button>`
+        }).join('')}
+      </div>
+      <div class="name-rules-modal-actions">
+        <div class="name-rules-modal-actions-spacer"></div>
+        <button type="button" class="btn btn-ghost product-identifier-mismatch-close">Schließen</button>
+      </div>
+    </div>`
+  document.body.appendChild(modal)
+  modal.querySelector('.product-identifier-mismatch-x')?.addEventListener('click', closeProductIdentifierMismatchModal)
+  modal.querySelector('.product-identifier-mismatch-close')?.addEventListener('click', closeProductIdentifierMismatchModal)
+  modal.querySelector('.product-identifier-mismatch-list')?.addEventListener('click', (event) => {
+    const item = event.target.closest('.product-identifier-mismatch-item')
+    if (item) void navigateToIdentifierMismatchProduct(item.dataset.productId)
+  })
+}
+
+function scheduleProductIdentifierMismatchCheck() {
+  if (identifierMismatchCheckStarted) return
+  identifierMismatchCheckStarted = true
+  void fetchAllProducts()
+    .then(showProductIdentifierMismatchModal)
+    .catch((error) => log.scoped('identifier-check').warn('Plausibilitätsprüfung fehlgeschlagen', error?.message || error))
+}
+
+function closeProductFilenameRenameModal() {
+  document.getElementById('productFilenameRenameModal')?.remove()
+}
+
+async function openProductFilenameRenamePreview(productId) {
+  try {
+    const response = await fetch(`/__api/products/${encodeURIComponent(productId)}/rename-files-preview`, { method: 'POST' })
+    const plan = await parseJsonResponse(response)
+    const modal = document.createElement('div')
+    modal.className = 'name-rules-modal open'
+    modal.id = 'productFilenameRenameModal'
+    modal.setAttribute('aria-hidden', 'false')
+    const files = plan.files || []
+    modal.innerHTML = `
+      <div class="name-rules-modal-backdrop"></div>
+      <div class="name-rules-modal-panel filename-rename-panel" role="dialog" aria-modal="true" aria-labelledby="filenameRenameTitle">
+        <div class="name-rules-modal-header"><h2 class="name-rules-modal-title" id="filenameRenameTitle">Dateinamen korrigieren</h2>
+          <p class="name-rules-modal-hint">Aktuell: <code>${esc(plan.oldBase || productId)}</code><br>Neu: <code>${esc(plan.newBase || '–')}</code></p></div>
+        <div class="filename-rename-list">${files.map((file) => `<div class="filename-rename-item ${file.blocking ? 'is-blocking' : ''}"><strong>${esc(file.type)}</strong><code>${esc(file.oldName)} → ${esc(file.newName)}</code><span>${esc(file.status)}</span></div>`).join('') || '<p>Keine eindeutig zugeordneten Dateien gefunden.</p>'}</div>
+        <div class="name-rules-modal-actions"><span class="filename-rename-warning">${response.ok ? 'Die Produkt-ID, der Produktname und alle aufgeführten Verweise werden gemeinsam aktualisiert.' : esc(plan.error || 'Umbenennung ist nicht sicher möglich.')}</span><div class="name-rules-modal-actions-spacer"></div>
+          <button type="button" class="btn btn-ghost filename-rename-cancel">Abbrechen</button><button type="button" class="btn btn-primary filename-rename-confirm" ${response.ok ? '' : 'disabled'}>Umbenennen bestätigen</button></div>
+      </div>`
+    document.body.appendChild(modal)
+    modal.querySelector('.filename-rename-cancel')?.addEventListener('click', closeProductFilenameRenameModal)
+    modal.querySelector('.filename-rename-confirm')?.addEventListener('click', async (event) => {
+      event.currentTarget.disabled = true
+      try {
+        const executeResponse = await fetch(`/__api/products/${encodeURIComponent(productId)}/rename-files-execute`, { method: 'POST' })
+        const result = await parseJsonResponse(executeResponse)
+        if (!executeResponse.ok) throw new Error(result.error || 'Umbenennung fehlgeschlagen')
+        closeProductFilenameRenameModal()
+        document.getElementById('productIdentifierMismatchModal')?.remove()
+        productCache.delete(productId)
+        toast(`${result.files.length} Datei(en) umbenannt`, 'success')
+        await navigateToIdentifierMismatchProduct(result.newId)
+      } catch (error) {
+        toast(error.message || 'Umbenennung fehlgeschlagen', 'error', 6000)
+        event.currentTarget.disabled = false
+      }
+    })
+  } catch (error) {
+    toast(error.message || 'Vorschau konnte nicht erstellt werden.', 'error', 6000)
+  }
 }
 
 function specBit(icon, val) {
@@ -1971,7 +2272,12 @@ async function persistCardThumbnailFromRenderer(product, renderer, container) {
       requestAnimationFrame(() => requestAnimationFrame(resolve))
     })
     let dataUrl
+    let cameraQuaternion
     try {
+      const frame = previewRenderers.get(product.id)
+      if (!frame || frame.renderer !== renderer) return
+      renderer.render(frame.scene, frame.camera)
+      cameraQuaternion = frame.camera.getWorldQuaternion(new THREE.Quaternion()).toArray()
       dataUrl = renderer.domElement.toDataURL('image/png')
     } catch (e) {
             log.scoped("Dashboard").warn("Thumbnail dataURL:", e)
@@ -1986,7 +2292,7 @@ async function persistCardThumbnailFromRenderer(product, renderer, container) {
     const res = await fetch(`/__api/products/${encodeURIComponent(product.id)}/preview-png`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataUrl }),
+      body: JSON.stringify({ dataUrl, cameraQuaternion }),
     })
     let data = {}
     try {
@@ -2053,6 +2359,10 @@ async function persistCardThumbnailFromRenderer(product, renderer, container) {
       if (data.previewImageGeneratedAt) cached.previewImageGeneratedAt = data.previewImageGeneratedAt
     }
     product.previewImage = data.previewImage
+    product.previewCameraQuaternion = data.previewCameraQuaternion
+    if (cached) cached.previewCameraQuaternion = data.previewCameraQuaternion
+    if (cpIdx >= 0) currentPageProducts[cpIdx].previewCameraQuaternion = data.previewCameraQuaternion
+    updateThumbnailAxes(container, data.previewCameraQuaternion)
 
     container.dataset.thumbPersist = 'done'
   } catch (e) {
@@ -2496,18 +2806,37 @@ function escapeNameRulePattern(name) {
   return String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-async function saveMeshNameRule(name, ral, matchingRule = null) {
+function exactMeshNameRulePattern(name) {
+  return `^${escapeNameRulePattern(name)}$`
+}
+
+function findMeshNameRuleByPattern(pattern) {
+  const rows = document.getElementById('detailNameRulesRows')
+  if (!rows) return null
+  const row = [...rows.querySelectorAll('.detail-name-rule-row')].find(candidate =>
+    candidate.querySelector('.name-rule-target')?.value === 'mesh' &&
+    candidate.querySelector('.name-rule-pattern')?.value.trim() === pattern,
+  )
+  return row ? { row, pattern } : null
+}
+
+async function saveMeshNameRule(name, ral, selectedPattern = '') {
   const rows = document.getElementById('detailNameRulesRows')
   const productId = selectedProductId
   const product = productId ? productCache.get(productId) : null
   if (!rows || !product || !ral) return
 
-  const pattern = escapeNameRulePattern(name)
+  const pattern = selectedPattern || exactMeshNameRulePattern(name)
   const finish = ral === 'RAL 9007' ? 'verzinkt' : 'pulver'
-  const existingRow = matchingRule?.row
+  const existingRow = findMeshNameRuleByPattern(pattern)?.row
   const row = existingRow || appendDetailNameRule(pattern)
+  row.querySelector('.name-rule-target').value = 'mesh'
+  row.querySelector('.name-rule-pattern').value = pattern
   row.querySelector('.name-rule-ral').value = ral
   row.querySelector('.name-rule-finish').value = finish
+  // Produktregeln werden in DOM-Reihenfolge gespeichert; die exakte Regel muss
+  // für „letzter Treffer gewinnt“ hinter allgemeineren Regeln stehen.
+  rows.append(row)
   refreshNameRuleSummaries(rows)
   updateDetailMeshRowClasses()
 
@@ -2563,9 +2892,12 @@ document.addEventListener('selectionchange', () => {
   selectedMeshNameText = text
 })
 
-function openMeshNameMenu(event, name, matchingRules = []) {
+function openMeshNameMenu(event, name, matchingRules = [], fullMeshName = name, selectedText = '') {
   closeMeshNameMenu()
+  const rows = document.getElementById('detailNameRulesRows')
   const matchingRule = getMatchingMeshColorRule(matchingRules) || matchingRules.at(-1)
+  const rulePattern = selectedText || exactMeshNameRulePattern(fullMeshName)
+  const existingRule = findMeshNameRuleByPattern(rulePattern)
   const menu = document.createElement('div')
   menu.id = 'meshNameContextMenu'
   menu.className = 'mesh-name-context-menu'
@@ -2604,15 +2936,16 @@ function openMeshNameMenu(event, name, matchingRules = []) {
   menu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - menu.offsetHeight))}px`
   action.addEventListener('click', () => {
     closeMeshNameMenu()
-    const pattern = escapeNameRulePattern(name)
-    const row = appendDetailNameRule(pattern)
+    const row = existingRule?.row || appendDetailNameRule(rulePattern)
+    rows?.append(row)
+    updateDetailMeshRowClasses()
     focusDetailNameRule(row)
   })
   ralSelect.addEventListener('change', async () => {
     const ral = ralSelect.value
     if (!ral) return
     closeMeshNameMenu()
-    await saveMeshNameRule(name, ral, matchingRule)
+    await saveMeshNameRule(fullMeshName, ral, selectedText)
   })
   meshNameMenuController = new AbortController()
   const options = { capture: true, signal: meshNameMenuController.signal }
@@ -3059,6 +3392,7 @@ function bindDetailVisibilityRules() {
    Detail panel
    ═══════════════════════════════════════════════ */
 let detailViewCube = null
+let detailCameraAxes = null
 let detailRenderer = null, detailPreviewScene = null, detailControls = null, detailAnimId = null, detailResizeObs = null
 /** Detail-GLB: Kamera/Root für Einzelteil-Isolation (Meshes) */
 let detailPreviewCamera = null
@@ -3315,6 +3649,75 @@ function bindCollapsibleDetailHelp() {
   })
 }
 
+function ensureProductCardVisible(productId, alignRow = false) {
+  const card = [...productGrid.querySelectorAll('.product-card')]
+    .find((element) => element.dataset.id === String(productId))
+  if (!card) return
+
+  const scrollArea = (() => {
+    let node = card.parentElement
+    while (node && node !== document.body) {
+      const style = getComputedStyle(node)
+      if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 1) return node
+      node = node.parentElement
+    }
+    return document.scrollingElement || document.documentElement
+  })()
+
+  const area = scrollArea.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+  const rowTop = Math.min(...[...productGrid.querySelectorAll('.product-card')]
+    .map((element) => element.getBoundingClientRect().top)
+    .filter((top) => Math.abs(top - cardRect.top) < 2))
+  const inset = 10
+  const stickyBottom = [...document.querySelectorAll('.top-bar, #dashboardControls')]
+    .reduce((bottom, element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.bottom > 0 && rect.top < window.innerHeight ? Math.max(bottom, rect.bottom) : bottom
+    }, 0)
+  const visibleTop = Math.max(area.top, stickyBottom, 0) + inset
+  const visibleBottom = Math.min(area.bottom, window.innerHeight) - inset
+  let delta = 0
+  if (alignRow) delta = rowTop - visibleTop
+  else if (cardRect.top < visibleTop) delta = cardRect.top - visibleTop
+  else if (cardRect.bottom > visibleBottom) delta = cardRect.bottom - visibleBottom
+  if (delta) {
+    // Direktes Setzen umgeht das globale html{scroll-behavior:smooth}; die
+    // Nachmessung muss den neuen Wert sofort sehen.
+    scrollArea.scrollTop += delta
+  }
+
+  // Nach dem Layout-Frame einmalig nachmessen; spätes Karten-Rendering darf
+  // die untere Statuszeile nicht wieder aus dem sichtbaren Bereich schieben.
+  requestAnimationFrame(() => {
+    if (selectedProductId === productId) ensureProductCardVisibleOnce(productId, scrollArea)
+  })
+}
+
+function ensureProductCardVisibleOnce(productId, scrollArea) {
+  const card = [...productGrid.querySelectorAll('.product-card')]
+    .find((element) => element.dataset.id === String(productId))
+  if (!card) return
+  const area = scrollArea.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+  const rowTop = Math.min(...[...productGrid.querySelectorAll('.product-card')]
+    .map((element) => element.getBoundingClientRect().top)
+    .filter((candidateTop) => Math.abs(candidateTop - cardRect.top) < 2))
+  const stickyBottom = [...document.querySelectorAll('.top-bar, #dashboardControls')]
+    .reduce((bottom, element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.bottom > 0 && rect.top < window.innerHeight ? Math.max(bottom, rect.bottom) : bottom
+    }, 0)
+  const top = Math.max(area.top, stickyBottom, 0) + 10
+  const bottom = Math.min(area.bottom, window.innerHeight) - 10
+  let delta = Math.abs(rowTop - top) > 1
+    ? rowTop - top
+    : cardRect.bottom > bottom ? cardRect.bottom - bottom : 0
+  if (delta) {
+    scrollArea.scrollTop += delta
+  }
+}
+
 async function openDetail(id) {
   closeMeshNameExpansion()
   disposeDetailPartPreviews()
@@ -3327,11 +3730,14 @@ async function openDetail(id) {
   }
   selectedProductId = id
   productGrid.querySelectorAll('.product-card').forEach(c => c.classList.toggle('selected', c.dataset.id === id))
+  // Jede Auswahl wird am oberen Rand des Kartenbereichs ausgerichtet. Dadurch
+  // bleibt auch bei der ersten Auswahl oder einem Sprung in eine höhere Reihe
+  // kein oberer Kartenabschnitt abgeschnitten.
+  ensureProductCardVisible(id, true)
 
   detailTitle.textContent = p.name
   document.getElementById('detailShortText').textContent = `Kurztext (SAP): ${formatProductShortText(p)}`
   updateDetailNavState()
-  detailOverlay.classList.add('open')
   detailPanel.classList.add('open')
   appShell.classList.add('detail-open')
 
@@ -3410,6 +3816,7 @@ async function openDetail(id) {
       <div class="field-row"><label class="field-label">ID</label><input class="field-value" value="${esc(p.id)}" readonly></div>
       <div class="field-row"><span class="field-label">Kurztext (SAP)</span><div class="field-value detail-short-text-value">${esc(formatProductShortText(p))}</div></div>
       <div class="field-row"><label class="field-label">Name</label><input class="field-value" data-field="name" value="${esc(p.name)}"></div>
+      <div class="field-row"><span class="field-label">Dateien</span><button type="button" class="btn btn-sm ${getProductNameIdentifierMismatch(p) ? 'btn-primary' : 'btn-ghost'}" id="btnRenameProductFiles" ${getProductNameIdentifierMismatch(p) ? '' : 'disabled'}>Dateinamen anpassen</button></div>
       ${renderMainCategoryFieldRowHtml(p)}
       <div class="field-row"><label class="field-label">Typ</label><input class="field-value" value="${isComposed ? 'Zusammengebaut' : 'Einzelteil'}" readonly></div>
       ${!isComposed && p.glbFile ? `
@@ -3656,6 +4063,7 @@ async function openDetail(id) {
   })
 
   bindDetailRotationControls()
+  detailContent.querySelector('#btnRenameProductFiles')?.addEventListener('click', () => openProductFilenameRenamePreview(p.id))
 
   // GLB upload zone in detail
   const uploadZone = document.getElementById('detailGlbUpload')
@@ -4378,7 +4786,10 @@ async function uploadCadFile(file, productId) {
   const p = productCache.get(productId)
   const subFolder = cadUploadSubFolder(p, productId)
   const filename = subFolder ? `${subFolder}/${file.name}` : file.name
-  return uploadBinaryWithOverwritePrompt('/__api/upload-cad', file, filename)
+  return uploadBinaryWithOverwritePrompt('/__api/upload-cad', file, filename, hasStepExtension(file.name) ? {
+    'X-Product-Id': encodeURIComponent(productId),
+    'X-Product-Template': encodeURIComponent(JSON.stringify(makeProductFromCadFile(productId, ''))),
+  } : {})
 }
 
 function bindCadSection(p) {
@@ -4453,6 +4864,15 @@ async function doUploadCad(file, p, listEl) {
   try {
     const before = [...(p.cadFiles || [])]
     const result = await uploadCadFile(file, p.id)
+    if (hasStepExtension(file.name)) {
+      p.cadFiles = result.product.cadFiles
+      productCache.set(p.id, result.product)
+      const index = currentPageProducts.findIndex(product => product.id === p.id)
+      if (index !== -1) currentPageProducts[index] = result.product
+      listEl.innerHTML = renderCadFileList(p)
+      toast(result.archived ? `${file.name} hochgeladen – vorherige STEP-Version archiviert` : 'STEP-Datei erfolgreich hochgeladen', 'success')
+      return
+    }
     p.cadFiles = mergeCadFilesReplaceFamily(before, result.path)
     const removed = before.filter((x) => !p.cadFiles.includes(x))
     await patchProduct(p.id, { cadFiles: p.cadFiles })
@@ -4631,11 +5051,11 @@ function updateDetailMeshRowClasses() {
     const i = parseInt(row.dataset.meshIdx, 10)
     const name = row.querySelector('.detail-mesh-name')?.textContent || ''
     const matchingRules = getCurrentMatchingNameRules(name)
-    const hasMatchingRule = matchingRules.length > 0
+    const hasMatchingRule = !!getMatchingMeshColorRule(matchingRules)
     updateMeshRalBadge(row, matchingRules)
-    const previouslyMatched = product?._colorRuleConversion?.productRules?.some(rule => ruleMatchesMesh(name, rule))
-    const savedMatch = product?.conversionPreset?.nameColorRules?.some(rule => ruleMatchesMesh(name, rule))
-    const pending = !converted && (hasMatchingRule || previouslyMatched || savedMatch)
+    // Die Zeile bildet ausschließlich den aktuellen Editorstand ab. Frühere bzw.
+    // noch gespeicherte Regeln beeinflussen nur den Kartenstatus „Neu konvertieren“.
+    const pending = !converted && hasMatchingRule
     row.classList.toggle('is-rule-match', hasMatchingRule && converted)
     row.classList.toggle('is-rule-pending', !!pending)
     row.classList.toggle('is-active', detailMeshIsolateIndex === i && !hasMatchingRule && !pending)
@@ -4784,7 +5204,7 @@ function buildDetailMeshPartsUI() {
     const matchingRules = getCurrentMatchingNameRules(mesh.name)
     e.preventDefault()
     e.stopPropagation()
-    openMeshNameMenu(e, selectedText || mesh.name, matchingRules)
+    openMeshNameMenu(e, selectedText || mesh.name, matchingRules, mesh.name, selectedText)
   }
   listEl.ondblclick = (e) => {
     const label = e.target.closest('.detail-mesh-name-trigger')
@@ -4861,6 +5281,7 @@ function applyPreviewImageToProductCard(productId, previewImageUrl) {
     wrap.insertBefore(img, wrap.firstChild)
   }
   img.src = resolveAssetUrl(previewImageUrl)
+  updateThumbnailAxes(wrap, productCache.get(productId)?.previewCameraQuaternion)
   const ph = wrap.querySelector('.card-preview-placeholder')
   if (ph) ph.style.display = 'none'
 }
@@ -4889,6 +5310,8 @@ async function regenerateDashboardThumbnail() {
     await new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve))
     })
+    detailRenderer.render(detailPreviewScene, detailPreviewCamera)
+    const cameraQuaternion = detailPreviewCamera.getWorldQuaternion(new THREE.Quaternion()).toArray()
     const dataUrl = detailRenderer.domElement.toDataURL('image/png')
     if (!dataUrl || dataUrl.length < 200) {
       throw new Error('Screenshot leer')
@@ -4896,7 +5319,7 @@ async function regenerateDashboardThumbnail() {
     const res = await fetch(`/__api/products/${encodeURIComponent(id)}/preview-png`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataUrl }),
+      body: JSON.stringify({ dataUrl, cameraQuaternion }),
     })
     let data = {}
     try {
@@ -4907,9 +5330,11 @@ async function regenerateDashboardThumbnail() {
     if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
     if (!data.previewImage) throw new Error('Keine previewImage in der Antwort')
     p.previewImage = data.previewImage
+    p.previewCameraQuaternion = data.previewCameraQuaternion
     if (data.previewImageGeneratedAt) p.previewImageGeneratedAt = data.previewImageGeneratedAt
     const idx = currentPageProducts.findIndex((x) => x.id === id)
     if (idx >= 0) {
+      currentPageProducts[idx].previewCameraQuaternion = data.previewCameraQuaternion
       currentPageProducts[idx].previewImage = data.previewImage
       if (data.previewImageGeneratedAt) {
         currentPageProducts[idx].previewImageGeneratedAt = data.previewImageGeneratedAt
@@ -4982,6 +5407,7 @@ function loadDetailPreview(product) {
     if (ph) ph.style.display = 'none'
     wrap.insertBefore(renderer.domElement, wrap.firstChild)
     detailViewCube = createViewCube(wrap, camera, controls)
+    detailCameraAxes = createLiveCameraAxes(wrap, camera)
     renderer.domElement.style.borderRadius = 'var(--radius-md)'
 
     function resizeDetailPreview() {
@@ -5000,6 +5426,7 @@ function loadDetailPreview(product) {
     function animate() {
       detailAnimId = requestAnimationFrame(animate)
       controls.update()
+      detailCameraAxes?.update()
       renderer.render(scene, camera)
     }
     animate()
@@ -5035,6 +5462,8 @@ function loadDetailPreview(product) {
 }
 
 function disposeDetailPreview() {
+  detailCameraAxes?.dispose()
+  detailCameraAxes = null
   detailViewCube?.dispose()
   detailViewCube = null
   detailMeshIsolateIndex = null
@@ -5108,11 +5537,11 @@ function closeDetail() {
   disposeDetailPreview()
   disposeDetailPartPreviews()
   detailColorCompareState = null
-  detailOverlay.classList.remove('open')
   detailPanel.classList.remove('open')
   appShell.classList.remove('detail-open')
   productGrid.querySelectorAll('.product-card.selected').forEach(c => c.classList.remove('selected'))
   selectedProductId = null
+  showEmptyDetailPanel()
   // Header-Bake-Drehung bleibt erhalten: Wenn der User vorher manuell einen Override gewählt hat,
   // soll der für die nächste Karten-/Bulk-Konvertierung verfügbar bleiben. Beim Öffnen eines
   // anderen Produkts wird der Detail-State über seedDetailRotationFromProduct korrekt neu gesetzt.

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { colorRuleCoverageState, colorRulesAreConverted, recordColorRuleConversion } from '../src/lib/colorRuleConversion.js'
+import { colorRuleCoverageState, colorRulesAreConverted, recordColorRuleConversion, removedColorRules } from '../src/lib/colorRuleConversion.js'
 
 const rule = { target: 'mesh', pattern: 'Teil', ral: 'RAL 7035', finish: 'pulver' }
 const names = ['Teil A', 'Teil B']
@@ -24,6 +24,13 @@ test('new assignment, completed conversion, edits and failed/aborted conversions
   assert.equal(colorRuleCoverageState(names, changed, product).state, 'complete')
   assert.equal(colorRuleCoverageState(names, [], product).state, 'pending', 'Deletion is pending even with zero assigned meshes')
   assert.equal(colorRuleCoverageState(names, [...changed, rule], product).state, 'pending')
+})
+test('removed rules are detected while equivalent rules remain active', () => {
+  const keep = { target: 'mesh', pattern: 'Keep', ral: 'RAL 5010' }
+  const remove = { target: 'mesh', pattern: 'Remove', ral: 'RAL 3000' }
+  assert.deepEqual(removedColorRules([keep, remove], [keep]), [remove])
+  assert.deepEqual(removedColorRules([keep], [{ ...keep, ral: 'RAL 2001' }]), [keep])
+  assert.deepEqual(removedColorRules([keep], [{ ...keep, flags: '' }]), [])
 })
 test('snapshot survives JSON reload and does not certify a newer or global rule version', () => {
   const product = { glbFile: '/test.glb' }, rules = [rule], globals = [{ ...rule, pattern: 'global' }]

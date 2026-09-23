@@ -126,17 +126,37 @@ function showroomApp() {
     /** RAL-Code oder null = alle Farben. Filtert die Produktliste nach defaultColor. */
     colorFilter: null,
 
+    async revealProductSource(productId, sourceType) {
+      try {
+        const response = await fetch(`/__api/products/${encodeURIComponent(productId)}/reveal-source?source=${encodeURIComponent(sourceType)}`, { method: 'POST' })
+        let data = {}
+        try { data = await response.json() } catch {}
+        if (!response.ok) throw new Error(data.error || 'Die CAD-/Quelldatei konnte nicht gefunden werden.')
+      } catch (error) {
+        window.alert(error.message || 'Die CAD-/Quelldatei konnte nicht im Explorer angezeigt werden.')
+      }
+    },
+
     /** Produkte, gefiltert nach Farbe sowie Name oder ID. */
     get filteredProducts() {
-      const searchTerm = this.productSearch.trim().toLocaleLowerCase('de-DE')
+      const searchTerms = this.productSearch.trim().toLocaleLowerCase('de-DE').split(/\s+/).filter(Boolean)
       return this.products.filter((product) => {
         const matchesColor = !this.colorFilter
           || resolveEffectiveDefaultColorOrFallback(product) === this.colorFilter
-        const searchableText = [product.name, product.id, product.specs?.load]
+        const searchableText = [
+          product.name,
+          product.id,
+          product.sapEan,
+          product.sapArticleNumber,
+          product.articleNumber,
+          product.shopwareProductId,
+          product.specs?.load,
+          product.shortText,
+        ]
           .filter(Boolean)
           .join(' ')
           .toLocaleLowerCase('de-DE')
-        return matchesColor && (!searchTerm || searchableText.includes(searchTerm))
+        return matchesColor && searchTerms.every((term) => searchableText.includes(term))
       })
     },
 

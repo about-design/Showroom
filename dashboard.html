@@ -42,7 +42,7 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.21.b</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.23.f</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
@@ -281,6 +281,24 @@
         <label class="file-manager-settings-field file-manager-settings-toggle">
           <span>RAL-Farbe in Mesh-Liste anzeigen</span>
           <input type="checkbox" id="showMeshRal" checked>
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="automaticCategorySettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="automaticCategorySettingsTitle">Automatische Kategoriezuordnung</h3>
+        <p class="automatic-category-help">Produkte ohne Hauptkategorie werden anhand des Anfangs ihres SAP-Kurztexts zugeordnet.</p>
+        <div class="automatic-category-table-head" aria-hidden="true"><span>Kürzel</span><span>Hauptkategorie</span><span></span></div>
+        <div class="automatic-category-mappings" id="automaticCategoryMappingsRows"></div>
+        <div class="automatic-category-actions">
+          <button type="button" class="btn btn-ghost" id="automaticCategoryMappingAdd">Zuordnung hinzufügen</button>
+          <button type="button" class="btn btn-ghost" id="automaticCategoryApply">Nicht zugeordnete Produkte prüfen</button>
+        </div>
+        <div class="automatic-category-status" id="automaticCategoryAssignmentStatus" role="status" aria-live="polite"></div>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="detailSidebarSettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="detailSidebarSettingsTitle">Produktdetail-Sidebar</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Produktdetail-Sidebar fixiert anzeigen</span>
+          <input type="checkbox" id="detailSidebarPinned" checked>
         </label>
       </section>
     </div>

@@ -62,7 +62,7 @@ export async function closeThumbnailBrowser() {
  * @param {number} [opts.width]
  * @param {number} [opts.height]
  * @param {number} [opts.timeoutMs]
- * @returns {Promise<boolean>}
+ * @returns {Promise<false|{cameraQuaternion: number[]|null}>}
  */
 export async function captureDashboardThumbnailPng({
   serverOrigin,
@@ -115,25 +115,27 @@ export async function captureDashboardThumbnailPng({
     await page.waitForFunction(() => window.__thumbReady === true, { timeout: 15000 })
 
     const productJson = JSON.stringify(product ?? {})
-    const dataUrl = await page.evaluate(
+    const capture = await page.evaluate(
       async ({ glbUrl: u, productJson: pj, width: ww, height: hh }) => {
         if (typeof window.renderDashboardThumbnail !== 'function') return null
-        return await window.renderDashboardThumbnail({
+        const dataUrl = await window.renderDashboardThumbnail({
           glbUrl: u,
           productJson: pj,
           width: ww,
           height: hh,
         })
+        return { dataUrl, cameraQuaternion: window.__thumbnailCameraQuaternion }
       },
       { glbUrl, productJson, width, height },
     )
 
+    const dataUrl = capture?.dataUrl
     if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) {
       return false
     }
     const b64 = dataUrl.replace(/^data:image\/png;base64,/, '')
     await writeFile(outAbsPath, Buffer.from(b64, 'base64'))
-    return true
+    return { cameraQuaternion: capture.cameraQuaternion || null }
   } catch (e) {
         log.scoped("thumbnail").warn("captureDashboardThumbnailPng:", e?.message || e)
     // Browser/Seite können nach einem Navigations-/Kontextfehler in einem kaputten

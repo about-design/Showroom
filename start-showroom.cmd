@@ -31,7 +31,9 @@ REM --- Memurai / Redis ---
 sc query Memurai >nul 2>&1
 if !errorlevel! equ 0 (
     for /f "tokens=3" %%s in ('sc query Memurai ^| findstr /i "STATE"') do set "MEM_STATE=%%s"
-    if /i not "!MEM_STATE!"=="RUNNING" (
+    if "!MEM_STATE!"=="4" (
+        echo Memurai: OK
+    ) else (
         echo Memurai-Dienst wird gestartet...
         net start Memurai >nul 2>&1
         if !errorlevel! neq 0 (
@@ -56,10 +58,11 @@ REM Eine zuvor (evtl. minimiert) laufende Instanz blockiert sonst 3000/5050/8001
 REM wodurch der Neustart mit "Port belegt" abbricht. Wir raeumen unsere eigenen
 REM Dienste hier auf, bevor wir frisch starten.
 echo Eventuell laufende Showroom-Dienste werden beendet...
-taskkill /FI "WINDOWTITLE eq META Showroom Stack*" /T /F >nul 2>&1
+REM Der Stack startet ohne Konsolenfenster. Keine globale Fenstertitelsuche:
+REM taskkill kann hier bei blockiertem Windows-WMI unbegrenzt haengen.
 for %%P in (3000 8001 5050 5051 5052 5053 5054 5055) do (
     for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R /C:"TCP.*:%%P .*0.0.0.0:0"') do (
-        taskkill /PID %%a /F >nul 2>&1
+        powershell.exe -NoProfile -Command "Stop-Process -Id %%a -Force -ErrorAction SilentlyContinue" >nul 2>&1
     )
 )
 REM Kurz warten, bis Windows die Ports wieder freigibt.

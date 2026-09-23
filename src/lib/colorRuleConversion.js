@@ -15,6 +15,10 @@ export function colorRulesVersion(rules = []) {
     finish: normalizeNameRuleFinish(rule.finish),
   }))))
 }
+export function removedColorRules(previousRules = [], currentRules = []) {
+  const current = new Set((Array.isArray(currentRules) ? currentRules : []).map(rule => colorRulesVersion([rule])))
+  return (Array.isArray(previousRules) ? previousRules : []).filter(rule => !current.has(colorRulesVersion([rule])))
+}
 export function recordColorRuleConversion(product, productRules, mergedRules, result, completed = true) {
   product._colorRulesDirty = true
   if (!completed || result?.status !== 0 || result.error || result.signal) return false

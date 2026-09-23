@@ -166,10 +166,20 @@ async function ensureMcpVenv() {
     }
   }
 
-  log.info('Installing/verifying MCP dependencies...')
-  const { ok } = run(venvPython, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
+  log.info('Checking installed MCP dependencies (offline)...')
+  const check = run(venvPython, [path.join(__dirname, 'check-mcp-deps.py'), path.join(mcpDir, 'requirements.txt')], {
+    cwd: mcpDir, timeout: 15000,
+  })
+  if (check.ok) {
+    log.info('MCP deps: OK (offline; no installation needed)')
+    return true
+  }
+  log.warn(`MCP dependency check failed: ${check.stdout} ${check.stderr}`)
+  log.info('Installing missing/incompatible MCP dependencies...')
+  const { ok } = run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--timeout', '15', '--retries', '1', '-r', 'requirements.txt'], {
     cwd: mcpDir,
     stdio: 'inherit',
+    timeout: 120000,
   })
   if (!ok) {
     log.error('MCP pip install failed.')

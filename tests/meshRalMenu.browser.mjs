@@ -27,6 +27,7 @@ try {
     const ColorService = { getAllColors: () => colors, getRAL: ral => colors.find(c => c.code === ral) }
     let showMeshRal = true
     const applyViewCubeSettings = () => {}
+    const applyDetailSidebarPinnedSetting = () => {}
     let refreshBadge = () => {}
     const esc = text => String(text).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')
     const selectedProductId = 'test'
@@ -54,7 +55,7 @@ try {
     check(ralBadge.textContent === 'RAL 2001' && !ralBadge.hidden, 'Initial mesh RAL missing')
     check(ralBadge.querySelector('.detail-mesh-ral-chip').style.backgroundColor === 'rgb(186, 72, 28)', 'Wrong RAL chip color')
     const show = (meshName = name, selectedText = meshName) => {
-      open({ clientX: 10, clientY: 10 }, selectedText, match(meshName))
+      open({ clientX: 10, clientY: 10 }, selectedText, match(meshName), meshName, selectedText === meshName ? '' : selectedText)
       return document.querySelector('#meshNameContextMenu select')
     }
     check(show().selectedOptions[0].textContent === 'RAL 2001 Rotorange', 'Initial RAL not selected')
@@ -70,31 +71,34 @@ try {
     check(ralBadge.hidden && !ralBadge.textContent, 'Disabled badge must be empty and hidden')
     settings({ showMeshRal: true })
     check(!ralBadge.hidden && ralBadge.textContent === 'RAL 7035', 'Re-enabled badge missing')
-    check(savedRules.length === 1, 'Duplicate rule created')
-    check(savedRules[0].pattern === initial.pattern && savedRules[0].flags === 'i' && savedRules[0].target === 'mesh', 'Match altered')
-    check(savedRules[0].finish === 'pulver', 'Wrong powder finish')
+    check(savedRules.length === 2, 'Exact override rule was not added')
+    check(savedRules[0].pattern === initial.pattern && savedRules[0].ral === 'RAL 2001', 'General rule was altered')
+    check(savedRules[1].pattern === '35-00036' && savedRules[1].target === 'mesh', 'Selected text was not adopted verbatim')
+    check(savedRules[1].finish === 'pulver', 'Wrong powder finish')
     check(show().selectedOptions[0].textContent === 'RAL 7035 Lichtgrau', 'Updated RAL not selected')
-    await change('RAL 9007')
+    await change('RAL 9007', '35-00036')
     check(ralBadge.textContent === 'Verzinkt' && ralBadge.title.includes('RAL 9007'), 'Galvanized badge missing')
-    check(savedRules[0].finish === 'verzinkt', 'Wrong galvanized finish')
+    check(savedRules.length === 2 && savedRules[1].finish === 'verzinkt', 'Existing exact rule was duplicated or has wrong finish')
+    check(match('4026212347029_189675_RAL_35-00036_2').some(rule => rule.pattern === '35-00036'), 'Selected regex does not match sibling mesh')
+    check(!match('4026212347029_189675_OTHER_2').some(rule => rule.pattern === '35-00036'), 'Selected regex matches unrelated mesh')
     rows.innerHTML = render([{ ...initial, ral: 'RAL 7035' }, initial, { ...initial, ral: '' }])
     check(show().value === 'RAL 2001', 'Last valid matching rule must win')
     await change('RAL 9007')
-    check(savedRules.length === 2 && savedRules[0].ral === 'RAL 7035' && savedRules[1].ral === 'RAL 9007', 'Wrong overlapping rule updated')
+    check(savedRules.length === 3 && savedRules.at(-1).pattern === '^4026212347029_189675_RAL_35-00036_1$' && savedRules.at(-1).ral === 'RAL 9007', 'Exact override was not moved to highest priority')
     rows.innerHTML = render([{ ...initial, ral: '' }])
     refreshBadge()
     check(ralBadge.hidden && ralBadge.textContent === '', 'Unassigned badge must be empty')
     check(show().value === '', 'Missing RAL must show placeholder')
     await change('RAL 2001')
-    check(rows.children.length === 1 && savedRules.length === 1, 'Unassigned matching rule duplicated')
+    check(rows.children.length === 2 && savedRules.length === 1 && savedRules.at(-1).pattern === '^4026212347029_189675_RAL_35-00036_1$', 'Unassigned general row must receive an exact override')
     check(show('unmatched').value === '', 'Unmatched mesh must show placeholder')
     const select = show('unmatched')
     select.value = 'RAL 7035'
     select.dispatchEvent(new Event('change'))
     await new Promise(resolve => setTimeout(resolve, 0))
-    check(savedRules.length === 2 && savedRules[1].pattern === 'unmatched', 'New rule missing')
+    check(savedRules.length === 2 && savedRules.at(-1).pattern === '^unmatched$', 'New exact rule missing')
     check(summaries >= 5 && markings >= 5, 'Rule display/mesh marking not refreshed')
-    return { passed: true, checks: ['2001 to 7035 without duplicate', 'regex and flags preserved with selected text', '9007 galvanized', 'last matching color rule wins', 'missing RAL and unmatched mesh', 'rule and mesh refresh'] }
+    return { passed: true, checks: ['general rule preserved', 'selected text adopted verbatim', 'selected rule updated without duplicate', 'fallback exact rule keeps last-wins priority', 'matching sibling and unrelated mesh', 'rule and mesh refresh'] }
   }, functions)
   assert.equal(result.passed, true)
   console.log(JSON.stringify(result, null, 2))

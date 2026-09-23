@@ -65,7 +65,7 @@
         </a>
         <span class="sr-topbar-sep"></span>
         <span class="sr-topbar-title">3D Showroom</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.21.b</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.22.m</span></span>
         <a href="/dashboard.html" class="sr-page-switch" title="Zur Produktverwaltung">Produktverwaltung</a>
       </div>
       <div class="sr-topbar-center" x-show="currentProduct">
@@ -129,7 +129,11 @@
                   :data-product-id="product.id"
                   :class="currentProduct?.id === product.id && 'active'">
             <span class="sr-sidebar-item-name" x-text="product.name"></span>
-            <span class="sr-sidebar-item-sub" x-text="product.specs?.load && product.specs.load !== '–' ? product.specs.load : product.id"></span>
+            <span class="sr-sidebar-item-sub" x-text="product.shortText?.trim() || product.id"></span>
+            <span class="sr-sidebar-item-file-actions" @mouseenter.stop @mousemove.stop @mouseleave.stop>
+              <span class="sr-sidebar-item-file-badge sr-sidebar-item-file-glb" role="button" tabindex="0" title="GLB-Datei im Explorer anzeigen" aria-label="GLB-Datei im Explorer anzeigen" @click.stop.prevent="revealProductSource(product.id, 'glb')" @keydown.enter.stop.prevent="revealProductSource(product.id, 'glb')" @keydown.space.stop.prevent="revealProductSource(product.id, 'glb')">GLB</span>
+              <span class="sr-sidebar-item-file-badge sr-sidebar-item-file-step" role="button" tabindex="0" title="STEP-Datei im Explorer anzeigen" aria-label="STEP-Datei im Explorer anzeigen" @click.stop.prevent="revealProductSource(product.id, 'step')" @keydown.enter.stop.prevent="revealProductSource(product.id, 'step')" @keydown.space.stop.prevent="revealProductSource(product.id, 'step')">STEP</span>
+            </span>
           </button>
         </template>
       </div>
