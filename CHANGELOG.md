@@ -1,5 +1,42 @@
 # Changelog
 
+## MARA09.30.a - 2026-09-30
+
+- Die XYZ-Achsen des Produkt-Koordinatensystems werden browserunabhängig als deutlich kräftigere 3D-Zylinder dargestellt.
+- Die Ursprungsmarkierung ist vergrößert; Ursprung, Achsenrichtungen, Achsenlängen, Skalierung, Beschriftungen und Produkttransformationen bleiben unverändert.
+
+## MARA09.24.f - 2026-09-25
+
+- Responsive kompakte Desktop-Darstellung für kleinere Browser-Viewports (z. B. 1366 × 768) ergänzt. Sidebar, META-Kopfzeile, Suche und Produkteinträge nutzen weniger Leerraum; Produktname, SAP-Kurztext und GLB/STEP-Badges bleiben gut lesbar und der 3D-Bereich erhält mehr Fläche.
+- Große Darstellungen und bestehende Funktionen bleiben unverändert; der vorhandene Mobile-Breakpoint hat weiterhin Vorrang bei kleinen Fensterbreiten.
+
+## MARA09.24.e - 2026-09-25
+
+- Temporäre Status-, Erfolgs-, Warn- und Fehlermeldungen der geöffneten Produkt-Sidebar werden einheitlich direkt oberhalb der festen Aktionsleiste angezeigt.
+- Meldungstexte, Farben, Ein-/Ausblendzeiten, Funktionen und Scrollverhalten bleiben unverändert; die Aktionsleiste bleibt vollständig sichtbar und anklickbar.
+
+## MARA09.24.d - 2026-09-25
+
+- Konvertierungs-Statusmeldungen erscheinen direkt oberhalb der festen Aktionsleiste in der Produkt-Sidebar und werden innerhalb der verfügbaren Breite gestapelt.
+- Die Aktionsbuttons bleiben vollständig sichtbar und anklickbar; Konvertierungslogik, Meldungstexte, Farben und Scrollverhalten bleiben unverändert.
+
+## MARA09.24.c - 2026-09-25
+
+- Der vorhandene SAP-Kurztext wird in der Produkt-Sidebar zusätzlich kompakt direkt unter der 3D-Vorschau und oberhalb von „Vorschaubild neu erzeugen“ angezeigt.
+- Die neue Anzeige verwendet dieselbe Kurztext-Quelle wie Kopfzeile und Stammdaten; 3D-Vorschau, Thumbnail-Aktion, Stammdaten und Scrollverhalten bleiben unverändert.
+
+## MARA09.24.b - 2026-09-24
+
+- Die Dashboard-Shell bleibt auf die Fensterhöhe begrenzt; ihre Grid-Spalte kann nicht mehr durch Karteninhalt über die verfügbare Breite wachsen.
+- Nur Produktkarten und Sidebar-Inhalt scrollen vertikal. Ihre Scrollbereiche reichen bis zum Splitter beziehungsweise rechten Fensterrand.
+- Im Browser geprüft: unabhängiges Mausrad-Scrollen, keine zusätzliche Seitenscrollbar, korrekte Kanten nach Ein-/Ausklappen der Steuerleiste und nach Sidebar-Breitenänderung.
+
+## MARA09.24.a - 2026-09-24
+
+- Produktkarten und permanente Produktdetail-Sidebar besitzen nun vollständig unabhängige Vollhöhen-Scrollcontainer.
+- Der Produktkarten-Scrollbalken sitzt direkt links neben Splitter/Sidebar; der Sidebar-Scrollbalken bleibt am rechten Sidebar-Rand.
+- META-Kopfzeile, ein-/ausklappbare Steuerleiste, Sidebar-Breite, automatische Kartennachführung, Auswahl und Navigation bleiben unverändert.
+
 ## MARA09.23.f - 2026-09-23
 
 - Neuer Einstellungsbereich „Automatische Kategoriezuordnung“ mit frei eingebbaren Kürzeln, Hauptkategorie-Pulldown sowie Funktionen zum Hinzufügen, Ändern und Löschen. Die initialen gespeicherten Zuordnungen lauten `MP → Palettenregale`, `CL → Fachbodenregale` und `KR → Kragarmregale`.

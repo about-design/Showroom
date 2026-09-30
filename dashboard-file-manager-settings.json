@@ -4,6 +4,7 @@
   "autoConvertOnDrop": true,
   "showMeshRal": true,
   "showViewCube": true,
+  "showCoordinateSystem": true,
   "viewCubePosition": "right",
   "detailSidebarPinned": true,
   "sidebarWidthPercent": 35,

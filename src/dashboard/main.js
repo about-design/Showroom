@@ -1,6 +1,7 @@
 import { thumbnailAxesMarkup, updateThumbnailAxes, createLiveCameraAxes } from './modules/thumbnailAxes.js'
 import { colorRulesAreConverted, colorRuleCoverageState, ruleMatchesMesh, colorRulesVersion } from '../lib/colorRuleConversion.js'
 import { createViewCube } from '../showroom/ViewCube.js'
+import { CoordinateSystemView } from '../showroom/CoordinateSystemView.js'
 import { applyViewCubeSettings } from '../lib/viewCubeSettings.js'
 import '../lib/loggerInit.js'
 import { createLogger } from '../lib/logger.js'
@@ -656,6 +657,7 @@ function fillDetailColorCompareGlb(p, root) {
 const $ = (s) => document.querySelector(s)
 const statsStrip = $('#statsStrip')
 const productGrid = $('#productGrid')
+const productScroll = $('#productScroll')
 const searchInput = $('#searchInput')
 const searchClear = $('#searchClear')
 const filterGroup = $('#filterGroup')
@@ -688,6 +690,7 @@ if (typeof ResizeObserver !== 'undefined') {
 const dropOverlay = $('#dropOverlay')
 const glbFileInput = $('#glbFileInput')
 const toastContainer = $('#toastContainer')
+const detailConversionStatus = $('#detailConversionStatus')
 const statusFilterGroup = $('#statusFilterGroup')
 const sortSelect = $('#sortSelect')
 const mappingTargetSelect = $('#mappingTargetSelect')
@@ -891,6 +894,7 @@ async function openFileManagerSettings() {
     $('#maxParallelConversions').value = String(settings.maxParallelConversions || 3)
     $('#showMeshRal').checked = settings.showMeshRal !== false
     $('#showViewCube').checked = settings.showViewCube !== false
+    $('#showCoordinateSystem').checked = settings.showCoordinateSystem === true
     $('#viewCubePosition').value = settings.viewCubePosition || 'right'
     $('#detailSidebarPinned').checked = settings.detailSidebarPinned !== false
     renderAutomaticCategoryMappings(settings.automaticCategoryMappings)
@@ -1014,6 +1018,7 @@ async function saveFileManagerSettings() {
         autoConvertOnDrop: $('#autoConvertOnDrop').checked,
         showMeshRal: $('#showMeshRal').checked,
         showViewCube: $('#showViewCube').checked,
+        showCoordinateSystem: $('#showCoordinateSystem').checked,
         viewCubePosition: $('#viewCubePosition').value,
         detailSidebarPinned: $('#detailSidebarPinned').checked,
         maxParallelConversions,
@@ -1685,7 +1690,7 @@ function applyFilters() {
 function goToPage(page) {
   currentPage = Math.max(1, Math.min(page, totalPages))
   fetchPage()
-  document.querySelector('.main-content')?.scrollTo({ top: 0, behavior: 'smooth' })
+  productScroll?.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 /* ═══════════════════════════════════════════════
@@ -3392,6 +3397,9 @@ function bindDetailVisibilityRules() {
    Detail panel
    ═══════════════════════════════════════════════ */
 let detailViewCube = null
+let detailCoordinateSystem = null
+const DETAIL_COORDINATE_SYSTEM_KEY = 'mara.dashboard.detailCoordinateSystem'
+let detailCoordinateSystemVisible = localStorage.getItem(DETAIL_COORDINATE_SYSTEM_KEY) === 'true'
 let detailCameraAxes = null
 let detailRenderer = null, detailPreviewScene = null, detailControls = null, detailAnimId = null, detailResizeObs = null
 /** Detail-GLB: Kamera/Root für Einzelteil-Isolation (Meshes) */
@@ -3764,6 +3772,11 @@ async function openDetail(id) {
         </svg>
         <span>${p.glbFile ? '3D-Vorschau lädt …' : 'Kein 3D-Modell'}</span>
       </div>
+      <button type="button" class="detail-coordinate-toggle" id="detailCoordinateToggle" aria-pressed="false" title="Koordinatensystem anzeigen"><span class="coordinate-letter-x">X</span><span class="coordinate-letter-y">Y</span><span class="coordinate-letter-z">Z</span></button>
+      </div>
+      <div class="detail-preview-short-text">
+        <span class="detail-preview-short-text-label">Kurztext (SAP):</span>
+        <span>${esc(formatProductShortText(p))}</span>
       </div>
       ${!isComposed && p.glbFile ? `
     <div class="detail-preview-toolbar">
@@ -4187,6 +4200,21 @@ async function openDetail(id) {
   const btnRegenThumb = detailContent.querySelector('#btnRegenerateThumbnail')
   if (btnRegenThumb) {
     btnRegenThumb.addEventListener('click', () => void regenerateDashboardThumbnail())
+  }
+
+  const detailCoordinateToggle = detailContent.querySelector('#detailCoordinateToggle')
+  if (detailCoordinateToggle) {
+    const syncDetailCoordinateToggle = () => {
+      detailCoordinateToggle.classList.toggle('is-active', detailCoordinateSystemVisible)
+      detailCoordinateToggle.setAttribute('aria-pressed', String(detailCoordinateSystemVisible))
+    }
+    syncDetailCoordinateToggle()
+    detailCoordinateToggle.addEventListener('click', () => {
+      detailCoordinateSystemVisible = !detailCoordinateSystemVisible
+      localStorage.setItem(DETAIL_COORDINATE_SYSTEM_KEY, String(detailCoordinateSystemVisible))
+      detailCoordinateSystem?.setVisible(detailCoordinateSystemVisible)
+      syncDetailCoordinateToggle()
+    })
   }
 
   const meshDrawerToggle = detailContent.querySelector('#detailMeshDrawerToggle')
@@ -5407,6 +5435,9 @@ function loadDetailPreview(product) {
     if (ph) ph.style.display = 'none'
     wrap.insertBefore(renderer.domElement, wrap.firstChild)
     detailViewCube = createViewCube(wrap, camera, controls)
+    detailCoordinateSystem = new CoordinateSystemView({ syncShowroomSettings: false })
+    detailCoordinateSystem.setVisible(detailCoordinateSystemVisible)
+    detailCoordinateSystem.updateTarget(model)
     detailCameraAxes = createLiveCameraAxes(wrap, camera)
     renderer.domElement.style.borderRadius = 'var(--radius-md)'
 
@@ -5426,6 +5457,7 @@ function loadDetailPreview(product) {
     function animate() {
       detailAnimId = requestAnimationFrame(animate)
       controls.update()
+      detailCoordinateSystem?.updateTarget(model)
       detailCameraAxes?.update()
       renderer.render(scene, camera)
     }
@@ -5466,6 +5498,8 @@ function disposeDetailPreview() {
   detailCameraAxes = null
   detailViewCube?.dispose()
   detailViewCube = null
+  detailCoordinateSystem?.clear()
+  detailCoordinateSystem = null
   detailMeshIsolateIndex = null
   detailMeshExcluded = new Set()
   detailMeshSelectionReady = false
@@ -6270,7 +6304,7 @@ async function startProductConversion(productId, { onComplete } = {}) {
   btns.forEach(b => { b.disabled = true; b.style.opacity = '.5' })
 
   try {
-    toast(`Konvertierung wird gestartet für „${p.name}" …`, 'info')
+    detailToast(`Konvertierung wird gestartet für „${p.name}" …`, 'info')
     const payload = { productId }
     if (usesProductDefaultSurfaceColor(p)) {
       payload.defaultColorHex = ColorService.ralToHex(resolveEffectiveDefaultColorOrFallback(p))
@@ -6327,14 +6361,14 @@ async function startProductConversion(productId, { onComplete } = {}) {
     const jobId = data.jobId ?? data.job_id ?? data.id
     if (!res.ok || !jobId) throw new Error(data.error || data.message || 'Kein Job-ID erhalten')
 
-    toast(`Konvertierung läuft im Hintergrund – Sie können weiterarbeiten.`, 'success')
+    detailToast(`Konvertierung läuft im Hintergrund – Sie können weiterarbeiten.`, 'success')
     btns.forEach(b => { b.disabled = false; b.style.opacity = '' })
 
     pollConversionInBackground(jobId, productId, p.name, usedOptions, onComplete)
   } catch (err) {
     dashConvCardStatuses.set(productId, { key: 'failed', label: 'fehlgeschlagen' })
     renderGrid()
-    toast(`Fehler: ${err.message}`, 'error')
+    detailToast(`Fehler: ${err.message}`, 'error')
     btns.forEach(b => { b.disabled = false; b.style.opacity = '' })
     onComplete?.()
   }
@@ -6352,7 +6386,7 @@ async function pollConversionInBackground(jobId, productId, productName, convers
   const poll = async () => {
     count++
     if (count > CONVERT_POLL_MAX) {
-      toast(`Konvertierung für „${productName}" läuft noch – Status im Converter prüfen.`, 'info')
+      detailToast(`Konvertierung für „${productName}" läuft noch – Status im Converter prüfen.`, 'info')
       dashConvUnregister(jobId, 'aborted')
       finish()
       return true
@@ -6439,16 +6473,16 @@ async function pollConversionInBackground(jobId, productId, productName, convers
               } else {
                 hint = first?.message || first?.reason || 'Registrierung mit Hinweisen abgeschlossen.'
               }
-              toast(`Konvertierung abgeschlossen: „${productName}" – ${hint}`, 'warning', 8000)
+              detailToast(`Konvertierung abgeschlossen: „${productName}" – ${hint}`, 'warning', 8000)
             } else {
-              toast(`Konvertierung abgeschlossen: „${productName}" – GLB/USDZ in der Übersicht.`, 'success')
+              detailToast(`Konvertierung abgeschlossen: „${productName}" – GLB/USDZ in der Übersicht.`, 'success')
             }
             fetchPage()
           } else {
-            toast(`Konvertierung fertig, Registrierung fehlgeschlagen: ${regData.error || 'Unbekannt'}`, 'error')
+            detailToast(`Konvertierung fertig, Registrierung fehlgeschlagen: ${regData.error || 'Unbekannt'}`, 'error')
           }
         } else {
-          toast(`Konvertierung abgeschlossen: „${productName}" (keine Ausgabedateien).`, 'info')
+          detailToast(`Konvertierung abgeschlossen: „${productName}" (keine Ausgabedateien).`, 'info')
         }
         notifyDashConvDone(jobId, partial ? 'partial' : 'ok', productName, outputPaths)
         dashConvUnregister(jobId, 'ok', { partial })
@@ -6486,7 +6520,7 @@ async function pollConversionInBackground(jobId, productId, productName, convers
               'Ohne Erweiterung der Konverter-API bleiben stderr/Logs nur im Server-Terminal sichtbar.',
           )
         }
-        toast(`Konvertierung fehlgeschlagen: „${productName}" – ${errMsg}`, 'error')
+        detailToast(`Konvertierung fehlgeschlagen: „${productName}" – ${errMsg}`, 'error')
         notifyDashConvDone(jobId, 'fail', productName, [], errMsg)
         dashConvUnregister(jobId, 'fail')
         finish()
@@ -6515,10 +6549,30 @@ function renderAll() {
    Toast
    ═══════════════════════════════════════════════ */
 function toast(msg, type = 'info', duration = 3000) {
+  if (detailPanel?.classList.contains('open') && detailConversionStatus) {
+    detailToast(msg, type, duration)
+    return
+  }
   const el = document.createElement('div')
   el.className = `toast toast-${type}`
   el.textContent = msg
   toastContainer.appendChild(el)
+  const ms = Number.isFinite(duration) && duration > 0 ? duration : 3000
+  setTimeout(() => {
+    el.classList.add('removing')
+    setTimeout(() => el.remove(), 200)
+  }, ms)
+}
+
+function detailToast(msg, type = 'info', duration = 3000) {
+  if (!detailConversionStatus) {
+    toast(msg, type, duration)
+    return
+  }
+  const el = document.createElement('div')
+  el.className = `detail-conversion-toast toast-${type}`
+  el.textContent = msg
+  detailConversionStatus.appendChild(el)
   const ms = Number.isFinite(duration) && duration > 0 ? duration : 3000
   setTimeout(() => {
     el.classList.add('removing')

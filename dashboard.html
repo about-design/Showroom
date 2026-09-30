@@ -42,7 +42,7 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
-        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.23.f</span></span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.24.b</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
@@ -223,7 +223,9 @@
         <span>GLB- oder CAD-Dateien hier ablegen</span>
       </div>
     </div>
-    <div class="product-grid" id="productGrid"></div>
+    <div class="product-scroll" id="productScroll">
+      <div class="product-grid" id="productGrid"></div>
+    </div>
   </main>
 </div>
 
@@ -267,6 +269,10 @@
         <label class="file-manager-settings-field file-manager-settings-toggle">
           <span>ViewCube anzeigen</span>
           <input type="checkbox" id="showViewCube" checked>
+        </label>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Koordinatensystem anzeigen</span>
+          <input type="checkbox" id="showCoordinateSystem">
         </label>
         <label class="file-manager-settings-field">Position
           <select class="sort-select" id="viewCubePosition">
@@ -332,6 +338,7 @@
     </button>
   </div>
   <div class="detail-content" id="detailContent"></div>
+  <div class="detail-conversion-status" id="detailConversionStatus" aria-live="polite" aria-atomic="false"></div>
   <div class="detail-footer">
     <button class="btn btn-danger" id="btnDeleteProduct">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>

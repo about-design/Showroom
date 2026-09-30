@@ -442,6 +442,10 @@
               :class="showPivotDebug && 'active'">
         <span x-text="showPivotDebug ? 'Pivots ausblenden' : 'Pivots anzeigen'"></span>
       </button>
+      <button type="button" @click="toggleCoordinateSystem()" class="sr-settings-btn"
+              :class="showCoordinateSystem && 'active'">
+        <span x-text="showCoordinateSystem ? 'Koordinatensystem ausblenden' : 'Koordinatensystem anzeigen'"></span>
+      </button>
       <button type="button" @click="toggleMeshInfo()" class="sr-settings-btn"
               :class="showMeshInfo && 'active'">
         <span x-text="showMeshInfo ? 'Mesh-Info ausblenden' : 'Mesh-Info anzeigen'"></span>

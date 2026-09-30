@@ -385,6 +385,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         autoConvertOnDrop: saved?.autoConvertOnDrop === true,
         showMeshRal: saved?.showMeshRal !== false,
         showViewCube: saved?.showViewCube !== false,
+        showCoordinateSystem: saved?.showCoordinateSystem === true,
         viewCubePosition: ['left', 'center', 'right'].includes(saved?.viewCubePosition) ? saved.viewCubePosition : 'right',
         detailSidebarPinned: saved?.detailSidebarPinned !== false,
         sidebarWidthPercent: [35, 40, 45, 50, 55].includes(Number(saved?.sidebarWidthPercent))
@@ -401,6 +402,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         autoConvertOnDrop: false,
         showMeshRal: true,
         showViewCube: true,
+        showCoordinateSystem: false,
         viewCubePosition: 'right',
         detailSidebarPinned: true,
         sidebarWidthPercent: 45,
@@ -3004,6 +3006,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const autoConvertOnDrop = body?.autoConvertOnDrop === true
           const previousSettings = await getFileManagerSettings()
           const showViewCube = typeof body?.showViewCube === 'boolean' ? body.showViewCube : previousSettings.showViewCube
+          const showCoordinateSystem = typeof body?.showCoordinateSystem === 'boolean' ? body.showCoordinateSystem : previousSettings.showCoordinateSystem
           const viewCubePosition = ['left', 'center', 'right'].includes(body?.viewCubePosition) ? body.viewCubePosition : previousSettings.viewCubePosition
           const detailSidebarPinned = typeof body?.detailSidebarPinned === 'boolean' ? body.detailSidebarPinned : previousSettings.detailSidebarPinned
           const showMeshRal = typeof body?.showMeshRal === 'boolean'
@@ -3023,6 +3026,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             autoConvertOnDrop,
             showMeshRal,
             showViewCube,
+            showCoordinateSystem,
             viewCubePosition,
             detailSidebarPinned,
             sidebarWidthPercent,
@@ -3037,6 +3041,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             autoConvertOnDrop,
             showMeshRal,
             showViewCube,
+            showCoordinateSystem,
             viewCubePosition,
             detailSidebarPinned,
             sidebarWidthPercent,

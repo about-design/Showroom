@@ -19,6 +19,7 @@ import { isFitViewShortcut } from './showroom/fitToView.js'
 import ARManager from './showroom/ARManager.js'
 import LightDebugView from './showroom/LightDebugView.js'
 import PivotDebugView from './showroom/PivotDebugView.js'
+import CoordinateSystemView from './showroom/CoordinateSystemView.js'
 import performanceMonitor from './showroom/PerformanceMonitor.js'
 
 // products.public.json = products.json ohne interne Dashboard/Konverter-Felder
@@ -85,6 +86,7 @@ function showroomApp() {
     freeLightPitch: -27,
     showLightDebug: false,
     showPivotDebug: false,
+    showCoordinateSystem: false,
     showMeshInfo: false,
     /** Performance-Test-Overlay (Geometrie, GPU-Schätzung, Stresstest) */
     perfPanelOpen: false,
@@ -248,6 +250,7 @@ function showroomApp() {
         HotspotManager.updatePositions()
         LightDebugView.updatePositions()
         PivotDebugView.updatePositions(PRIMARY_ZONE)
+        CoordinateSystemView.update(PRIMARY_ZONE)
       }
       SceneManager.start()
       this.setLightIntensity()
@@ -466,6 +469,7 @@ function showroomApp() {
       ProductPlacement.placeProduct(PRIMARY_ZONE, product.id, product, hex, this.products).then((group) => {
         this.isLoading = false
         this.showOriginalOrientation = false
+        CoordinateSystemView.update(PRIMARY_ZONE)
         if (group) {
           HotspotManager.setProductHotspots(group, product.hotspots)
           this.productCameras = ProductPlacement.getProductCameras(PRIMARY_ZONE)
@@ -820,6 +824,12 @@ function showroomApp() {
     togglePivotDebug() {
       this.showPivotDebug = !this.showPivotDebug
       PivotDebugView.setVisible(this.showPivotDebug)
+    },
+
+    toggleCoordinateSystem() {
+      this.showCoordinateSystem = !this.showCoordinateSystem
+      CoordinateSystemView.setVisible(this.showCoordinateSystem)
+      CoordinateSystemView.update(PRIMARY_ZONE)
     },
 
     toggleOriginalOrientation() {

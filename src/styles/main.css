@@ -1230,6 +1230,59 @@ html, body {
 .hotspot-pulse { animation: hotspot-pulse 2s ease-in-out infinite; }
 
 /* ─── Responsive ─── */
+/* Desktop compact mode: based on the available viewport, not the physical monitor size. */
+@media (min-width: 769px) and (max-width: 1440px),
+       (min-width: 769px) and (max-height: 850px) {
+  :root { --sr-sidebar-w: 280px; }
+
+  .sr-topbar {
+    height: 46px;
+    padding-inline: 1rem;
+  }
+  .sr-topbar-btn, .sr-topbar-link { width: 32px; height: 32px; }
+  .sr-topbar-center { gap: .45rem; }
+  .sr-product-name { font-size: .86rem; max-width: 240px; }
+
+  .sr-sidebar {
+    top: 56px;
+    bottom: 10px;
+    left: 10px;
+    border-radius: 12px;
+  }
+  .sr-sidebar-header {
+    padding: .65rem .85rem .5rem;
+  }
+  .sr-sidebar-search {
+    padding: 0 .7rem .5rem;
+  }
+  .sr-sidebar-search-input {
+    padding: .5rem 2rem .5rem .65rem;
+    font-size: .78rem;
+  }
+  .sr-sidebar-list {
+    padding: 0 .5rem .5rem;
+    gap: 1px;
+  }
+  .sr-sidebar-item {
+    gap: .08rem;
+    padding: .48rem .6rem;
+    padding-right: 4.55rem;
+  }
+  .sr-sidebar-item-name {
+    font-size: .82rem;
+  }
+  .sr-sidebar-item-sub {
+    font-size: .75rem;
+    line-height: 1.25;
+  }
+  .sr-sidebar-item-file-actions { right: .45rem; gap: .16rem; }
+  .sr-sidebar-item-file-badge {
+    min-width: 1.65rem;
+    height: 1.1rem;
+    font-size: .61rem;
+  }
+}
+
 @media (max-width: 768px) {
   #canvas-container { left: 0; }
   .sr-product-hover-preview { display: none; }

@@ -1,8 +1,9 @@
 const key = 'mara.viewCubeSettings'
 const listeners = new Set()
-let settings = { showViewCube: true, viewCubePosition: 'right' }
+let settings = { showViewCube: true, showCoordinateSystem: false, viewCubePosition: 'right' }
 const normalize = value => ({
   showViewCube: value?.showViewCube !== false,
+  showCoordinateSystem: value?.showCoordinateSystem === true,
   viewCubePosition: ['left', 'center', 'right'].includes(value?.viewCubePosition) ? value.viewCubePosition : 'right',
 })
 try { settings = normalize(JSON.parse(localStorage.getItem(key)) || settings) } catch {}
