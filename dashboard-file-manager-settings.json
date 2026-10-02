@@ -48,6 +48,11 @@
       "drawingNumber": "31-01789",
       "ral": "RAL 2001",
       "always": false
+    },
+    {
+      "drawingNumber": "06-01710",
+      "ral": "RAL 2001",
+      "always": true
     }
   ]
 }

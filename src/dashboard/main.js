@@ -698,6 +698,8 @@ const mappingTargetSelect = $('#mappingTargetSelect')
 const categorySelect = $('#categorySelect')
 const fileManagerSettingsModal = $('#fileManagerSettingsModal')
 const automaticColorMappingsModal = $('#automaticColorMappingsModal')
+let automaticColorMappingsOpener = null
+let automaticColorMappingsKeydownHandler = null
 let showMeshRal = true
 
 function applyDetailSidebarPinnedSetting(settings) {
@@ -921,14 +923,22 @@ function syncFileManagerSettingsUi() {
 
 function filterAutomaticColorMappingRows() {
   const query = ($('#automaticColorMappingsSearch')?.value || '').trim().toLowerCase()
-  document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row').forEach((row) => {
+  document.querySelectorAll('#automaticColorMappingsRows .automatic-color-group').forEach((group) => {
+    let matchingRows = 0
+    group.querySelectorAll('.automatic-color-mapping-row').forEach((row) => {
     const drawingNumber = row.querySelector('.automatic-color-drawing-number')?.value.trim().toLowerCase() || ''
-    row.hidden = !!query && !drawingNumber.includes(query)
+      row.hidden = !!query && !drawingNumber.includes(query)
+      if (!row.hidden) matchingRows += 1
+    })
+    group.hidden = !!query && matchingRows === 0
+    if (query && matchingRows) setAutomaticColorGroupCollapsed(group, false, false)
+    else if (!query) setAutomaticColorGroupCollapsed(group, group.dataset.collapsed === 'true', false)
   })
 }
 
-async function openAutomaticColorMappings() {
+async function openAutomaticColorMappings(opener = document.activeElement) {
   if (!automaticColorMappingsModal) return
+  automaticColorMappingsOpener = opener
   try {
     const res = await fetch('/__api/file-manager-settings')
     const settings = await parseJsonResponse(res)
@@ -938,15 +948,63 @@ async function openAutomaticColorMappings() {
     filterAutomaticColorMappingRows()
     automaticColorMappingsModal.classList.add('open')
     automaticColorMappingsModal.setAttribute('aria-hidden', 'false')
+    automaticColorMappingsKeydownHandler = (event) => {
+      if (event.key !== 'Escape') return
+      if (event.target instanceof HTMLSelectElement && event.target.matches(':open')) return
+      let subelementConsumedEscape = event.defaultPrevented
+      const originalPreventDefault = event.preventDefault
+      const originalStopPropagation = event.stopPropagation
+      const originalStopImmediatePropagation = event.stopImmediatePropagation
+      Object.defineProperties(event, {
+        preventDefault: {
+          configurable: true,
+          value() {
+            subelementConsumedEscape = true
+            return originalPreventDefault.call(this)
+          },
+        },
+        stopPropagation: {
+          configurable: true,
+          value() {
+            subelementConsumedEscape = true
+            return originalStopPropagation.call(this)
+          },
+        },
+        stopImmediatePropagation: {
+          configurable: true,
+          value() {
+            subelementConsumedEscape = true
+            return originalStopImmediatePropagation.call(this)
+          },
+        },
+      })
+      setTimeout(() => {
+        delete event.preventDefault
+        delete event.stopPropagation
+        delete event.stopImmediatePropagation
+        if (!automaticColorMappingsModal?.classList.contains('open')) return
+        if (subelementConsumedEscape) return
+        closeAutomaticColorMappings()
+      }, 0)
+    }
+    document.addEventListener('keydown', automaticColorMappingsKeydownHandler, true)
     requestAnimationFrame(() => $('#automaticColorMappingsSearch')?.focus())
   } catch (error) {
+    automaticColorMappingsOpener = null
     toast(error.message || 'Farb-Zuordnungen konnten nicht geladen werden.', 'error')
   }
 }
 
 function closeAutomaticColorMappings() {
+  if (automaticColorMappingsKeydownHandler) {
+    document.removeEventListener('keydown', automaticColorMappingsKeydownHandler, true)
+    automaticColorMappingsKeydownHandler = null
+  }
   automaticColorMappingsModal?.classList.remove('open')
   automaticColorMappingsModal?.setAttribute('aria-hidden', 'true')
+  const opener = automaticColorMappingsOpener
+  automaticColorMappingsOpener = null
+  if (opener?.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true })
 }
 
 function automaticCategoryOptions(selected = '') {
@@ -982,40 +1040,133 @@ function collectAutomaticCategoryMappings() {
   })).filter((row) => row.prefix && row.category)
 }
 
-function addAutomaticColorMappingRow(mapping = {}) {
-  const rows = $('#automaticColorMappingsRows')
-  if (!rows) return
+function automaticColorMappingGroupLabel(ral) {
+  if (!ral) return 'RAL-Farbe auswählen'
+  const color = ColorService.getRAL(ral)
+  return `${ral}${color?.name ? ` ${color.name}` : ''}`
+}
+
+function setAutomaticColorGroupCollapsed(group, collapsed, remember = true) {
+  group.classList.toggle('is-collapsed', collapsed)
+  if (remember) group.dataset.collapsed = String(collapsed)
+  const toggle = group.querySelector('.automatic-color-group-toggle')
+  toggle?.setAttribute('aria-expanded', String(!collapsed))
+}
+
+function createAutomaticColorMappingGroup(rows, ral, collapsed = false) {
+  const group = document.createElement('section')
+  group.className = 'automatic-color-group'
+  group.dataset.ral = ral
+  const toggle = document.createElement('button')
+  toggle.type = 'button'
+  toggle.className = 'automatic-color-group-toggle'
+  toggle.setAttribute('aria-expanded', String(!collapsed))
+  toggle.innerHTML = `<span class="automatic-color-group-label">${esc(automaticColorMappingGroupLabel(ral))}</span><span class="automatic-color-group-count">0</span><span class="automatic-color-group-chevron" aria-hidden="true">⌄</span>`
+  const groupRows = document.createElement('div')
+  groupRows.className = 'automatic-color-group-rows'
+  group.append(toggle, groupRows)
+  rows.append(group)
+  setAutomaticColorGroupCollapsed(group, collapsed)
+  return group
+}
+
+function updateAutomaticColorGroupSummary(group) {
+  const count = group.querySelectorAll('.automatic-color-mapping-row').length
+  const countElement = group.querySelector('.automatic-color-group-count')
+  if (countElement) countElement.textContent = `${count} ${count === 1 ? 'Zeichnungsnummer' : 'Zeichnungsnummern'}`
+  if (!count) group.remove()
+}
+
+const automaticColorRalOptionsHtml = ColorService.getAllColors().map((color) =>
+  `<option value="${esc(color.code)}">${esc(color.code)} ${esc(color.name)}</option>`,
+).join('')
+
+function addAutomaticColorMappingRow(mapping = {}, groupRows = null) {
   const drawingNumber = String(mapping.drawingNumber || '')
   const ral = String(mapping.ral || '')
-  const options = ColorService.getAllColors().map((color) =>
-    `<option value="${esc(color.code)}"${ral === color.code ? ' selected' : ''}>${esc(color.code)} ${esc(color.name)}</option>`,
-  ).join('')
   const row = document.createElement('div')
   row.className = 'automatic-category-mapping-row automatic-color-mapping-row'
+  row.dataset.originalDrawingNumber = drawingNumber
   row.innerHTML = `
     <input class="detail-input automatic-color-drawing-number" type="text" maxlength="8" value="${esc(drawingNumber)}" placeholder="z. B. 06-00763" aria-label="Zeichnungsnummer">
-    <select class="sort-select automatic-color-ral" aria-label="RAL-Farbe"><option value="">— RAL-Farbe —</option>${options}</select>
+    <select class="sort-select automatic-color-ral" aria-label="RAL-Farbe"><option value="">— RAL-Farbe —</option>${automaticColorRalOptionsHtml}</select>
     <label class="automatic-color-always" title="Diese Zeichnungsnummer wird auch bei SAP-Kurztext vzk angewendet.">
       <input class="automatic-color-always-input" type="checkbox"${mapping.always === true ? ' checked' : ''}>
       <span>Immer</span>
     </label>
     <button type="button" class="btn btn-ghost automatic-color-remove" title="Zuordnung löschen" aria-label="Zuordnung löschen">×</button>`
-  rows.append(row)
+  row.querySelector('.automatic-color-ral').value = ral
+  ;(groupRows || $('#automaticColorMappingsRows')).append(row)
 }
 
 function renderAutomaticColorMappings(mappings) {
   const rows = $('#automaticColorMappingsRows')
   if (!rows) return
+  const collapsedRals = new Set([...rows.querySelectorAll('.automatic-color-group')]
+    .filter((group) => group.dataset.collapsed === 'true')
+    .map((group) => group.dataset.ral))
   rows.replaceChildren()
-  for (const mapping of Array.isArray(mappings) ? mappings : []) addAutomaticColorMappingRow(mapping)
+  const fragment = document.createDocumentFragment()
+  const groups = new Map()
+  for (const mapping of Array.isArray(mappings) ? mappings : []) {
+    const ral = String(mapping.ral || '')
+    let group = groups.get(ral)
+    if (!group) {
+      group = createAutomaticColorMappingGroup(fragment, ral, collapsedRals.has(ral))
+      groups.set(ral, group)
+    }
+    addAutomaticColorMappingRow(mapping, group.querySelector('.automatic-color-group-rows'))
+  }
+  groups.forEach(updateAutomaticColorGroupSummary)
+  rows.append(fragment)
 }
 
-function collectAutomaticColorMappings() {
-  return [...document.querySelectorAll('.automatic-category-mapping-row')].filter((row) => row.querySelector('.automatic-color-drawing-number')).map((row) => ({
+function readAutomaticColorMappingRows() {
+  return [...document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row')].map((row) => ({
     drawingNumber: row.querySelector('.automatic-color-drawing-number')?.value.trim() || '',
     ral: row.querySelector('.automatic-color-ral')?.value.trim() || '',
     always: row.querySelector('.automatic-color-always-input')?.checked === true,
-  })).filter((row) => row.drawingNumber && row.ral)
+  }))
+}
+
+function collectAutomaticColorMappings() {
+  return readAutomaticColorMappingRows().filter((row) => row.drawingNumber && row.ral)
+}
+
+function focusExistingAutomaticColorMapping(drawingNumber) {
+  const rows = [...document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row')]
+  const row = rows.find((candidate) => candidate.querySelector('.automatic-color-drawing-number')?.value.trim() === drawingNumber)
+  const group = row?.closest('.automatic-color-group')
+  if (!row || !group) return
+  group.hidden = false
+  setAutomaticColorGroupCollapsed(group, false)
+  row.hidden = false
+  row.scrollIntoView({ block: 'nearest' })
+  row.querySelector('.automatic-color-drawing-number')?.focus()
+}
+
+function validateAutomaticColorDrawingNumber(input) {
+  const row = input.closest('.automatic-color-mapping-row')
+  const drawingNumber = input.value.trim()
+  if (!drawingNumber) return true
+  const duplicate = [...document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row')]
+    .find((candidate) => candidate !== row && candidate.querySelector('.automatic-color-drawing-number')?.value.trim() === drawingNumber)
+  if (duplicate) {
+    input.value = row.dataset.originalDrawingNumber || ''
+    toast(`Zeichnungsnummer ${drawingNumber} ist bereits zugeordnet. Bitte die bestehende Zeile bearbeiten.`, 'info')
+    filterAutomaticColorMappingRows()
+    focusExistingAutomaticColorMapping(drawingNumber)
+    return false
+  }
+  row.dataset.originalDrawingNumber = drawingNumber
+  return true
+}
+
+function validateAutomaticColorMappings() {
+  for (const row of document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row')) {
+    if (!validateAutomaticColorDrawingNumber(row.querySelector('.automatic-color-drawing-number'))) return false
+  }
+  return true
 }
 
 function applyAutomaticCategoryAssignmentsToUi(assignments) {
@@ -1112,6 +1263,7 @@ async function saveFileManagerSettings() {
 }
 
 async function saveAutomaticColorMappings() {
+  if (!validateAutomaticColorMappings()) return
   const saveButton = $('#automaticColorMappingsSave')
   saveButton.disabled = true
   try {
@@ -1322,11 +1474,43 @@ function bindEvents() {
     event.target.closest('.automatic-category-remove')?.closest('.automatic-category-mapping-row')?.remove()
   })
   $('#automaticColorMappingAdd')?.addEventListener('click', () => {
-    addAutomaticColorMappingRow()
+    const rows = $('#automaticColorMappingsRows')
+    let group = rows.querySelector('.automatic-color-group[data-ral=""]')
+    if (!group) group = createAutomaticColorMappingGroup(rows, '')
+    addAutomaticColorMappingRow({}, group.querySelector('.automatic-color-group-rows'))
+    updateAutomaticColorGroupSummary(group)
+    $('#automaticColorMappingsSearch').value = ''
     filterAutomaticColorMappingRows()
   })
   $('#automaticColorMappingsRows')?.addEventListener('click', (event) => {
-    event.target.closest('.automatic-color-remove')?.closest('.automatic-category-mapping-row')?.remove()
+    const toggle = event.target.closest('.automatic-color-group-toggle')
+    if (toggle) {
+      const group = toggle.closest('.automatic-color-group')
+      setAutomaticColorGroupCollapsed(group, group.dataset.collapsed !== 'true')
+      return
+    }
+    const remove = event.target.closest('.automatic-color-remove')
+    if (!remove) return
+    const row = remove.closest('.automatic-color-mapping-row')
+    const group = row.closest('.automatic-color-group')
+    row.remove()
+    updateAutomaticColorGroupSummary(group)
+  })
+  $('#automaticColorMappingsRows')?.addEventListener('change', (event) => {
+    if (event.target.matches('.automatic-color-ral')) {
+      const row = event.target.closest('.automatic-color-mapping-row')
+      const drawingNumber = row.querySelector('.automatic-color-drawing-number')?.value || ''
+      const list = $('#automaticColorMappingsList')
+      const scrollTop = list.scrollTop
+      renderAutomaticColorMappings(readAutomaticColorMappingRows())
+      list.scrollTop = scrollTop
+      filterAutomaticColorMappingRows()
+      const changedRow = [...document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row')]
+        .find((candidate) => candidate.querySelector('.automatic-color-drawing-number')?.value === drawingNumber)
+      changedRow?.querySelector('.automatic-color-ral')?.focus({ preventScroll: true })
+      return
+    }
+    if (event.target.matches('.automatic-color-drawing-number')) validateAutomaticColorDrawingNumber(event.target)
   })
   $('#automaticColorMappingsSearch')?.addEventListener('input', filterAutomaticColorMappingRows)
   $('#automaticColorMappingsBackdrop')?.addEventListener('click', closeAutomaticColorMappings)
@@ -1438,7 +1622,7 @@ function bindEvents() {
   })
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && selectedProductId) closeDetail()
+    if (e.key === 'Escape' && selectedProductId && !automaticColorMappingsModal?.classList.contains('open')) closeDetail()
     if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
       e.preventDefault()
       searchInput.focus()
@@ -3951,7 +4135,7 @@ async function openDetail(id) {
   seedDetailRotationFromProduct(p)
 
   detailContent.innerHTML = `
-    <div class="detail-preview-sticky">
+    <div class="detail-fixed-content">
       <div class="detail-preview" id="detailPreviewWrap">
       <div class="card-preview-placeholder">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;opacity:.3">
@@ -4007,6 +4191,7 @@ async function openDetail(id) {
     </div>
     ` : ''}
     </div>
+    <div class="detail-scroll-content">
     ${!isComposed && !p.glbFile ? `
     <div class="glb-upload-zone" id="detailGlbUpload">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -4246,6 +4431,7 @@ async function openDetail(id) {
     </div>` : ''}` : ''}
 
     ${renderReviewSection(p)}
+    </div>
   `
 
   // Review status buttons
@@ -4430,8 +4616,8 @@ async function openDetail(id) {
   detailContent.querySelector('#btnApplyAutomaticColor')?.addEventListener('click', (event) => {
     void applyAutomaticColorAssignment(p, event.currentTarget)
   })
-  detailContent.querySelector('#btnOpenAutomaticColorMappings')?.addEventListener('click', () => {
-    void openAutomaticColorMappings()
+  detailContent.querySelector('#btnOpenAutomaticColorMappings')?.addEventListener('click', (event) => {
+    void openAutomaticColorMappings(event.currentTarget)
   })
   bindDetailReductionRules()
   bindDetailVisibilityRules()

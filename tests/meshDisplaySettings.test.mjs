@@ -29,9 +29,16 @@ test('central mesh display setting defaults on and survives file reloads', async
     assert.equal((await create()('GET')).showViewCube, true)
     assert.equal((await create()('GET')).viewCubePosition, 'right')
     assert.deepEqual((await create()('GET')).automaticColorMappings, [])
-    const automaticColorMappings = [{ drawingNumber: '06-00763', ral: 'RAL 7035' }]
-    assert.deepEqual((await create()('PUT', { automaticColorMappings })).automaticColorMappings, automaticColorMappings)
-    assert.deepEqual((await create()('GET')).automaticColorMappings, automaticColorMappings)
+    const automaticColorMappings = [
+      { drawingNumber: '06-00763', ral: 'RAL 7035' },
+      { drawingNumber: '06-00894', ral: 'RAL 7035', always: true },
+    ]
+    const normalizedAutomaticColorMappings = [
+      { drawingNumber: '06-00763', ral: 'RAL 7035', always: false },
+      { drawingNumber: '06-00894', ral: 'RAL 7035', always: true },
+    ]
+    assert.deepEqual((await create()('PUT', { automaticColorMappings })).automaticColorMappings, normalizedAutomaticColorMappings)
+    assert.deepEqual((await create()('GET')).automaticColorMappings, normalizedAutomaticColorMappings)
     for (const viewCubePosition of ['left', 'center', 'right']) {
       await create()('PUT', { showViewCube: false, viewCubePosition })
       const saved = await create()('GET')

@@ -1,5 +1,28 @@
 # Changelog
 
+## MARA10.02.m - 2026-10-02
+
+- Der ESC-Handler des Farbzuordnungsdialogs wird jetzt in der Capture-Phase registriert und erst nach vollständiger Event-Propagation ausgewertet. Damit schließt ein normales `Esc` den Dialog zuverlässig, auch wenn ein fokussiertes Element die Bubble-Propagation stoppt.
+- Ruft ein Unterelement für `Esc` `preventDefault`, `stopPropagation` oder `stopImmediatePropagation` auf, bleibt der Hauptdialog zunächst geöffnet; ein zweiter Tastendruck schließt ihn. Das native RAL-Auswahlmenü bleibt ebenfalls zweistufig.
+- Cancel-Verhalten, Fokus-Rückgabe, gespeicherte Farbzuordnungen, Produktdetailansicht und Listenposition bleiben erhalten. Der Dialoghandler wird beim Schließen entfernt; die bestehende ESC-Funktion der Detail-Sidebar bleibt außerhalb des Dialogs unverändert.
+
+## MARA10.02.l - 2026-10-02
+
+- Der Dialog „Automatische Farb-Zuordnung“ kann mit `Esc` wie über „Abbrechen“ geschlossen werden. Ungespeicherte Änderungen werden nicht übernommen, und der Fokus kehrt ohne Scrollsprung zum auslösenden Sidebar-Button zurück.
+- Ein geöffnetes natives RAL-Auswahlmenü verarbeitet `Esc` zuerst; ein weiterer Druck schließt den Hauptdialog. Der Tastaturhandler existiert nur während der geöffneten Dialogansicht und wird beim Schließen entfernt.
+
+## MARA10.02.k - 2026-10-02
+
+- Farbzuordnungen werden in der Dialogliste nach RAL-Farbe gruppiert und können je Gruppe ein- und ausgeklappt werden. Die fachlichen Einträge bleiben einzelne Zeichnungsnummer-Zuordnungen.
+- RAL-Änderungen ordnen nur die bearbeitete Zeichnungsnummer neu zu. Die individuelle „Immer“-Option bleibt pro Zeile erhalten; Löschen entfernt nur den ausgewählten Eintrag und leere Gruppen verschwinden.
+- Die Suche findet Zeichnungsnummern auch in eingeklappten Gruppen, klappt Treffer vorübergehend auf und stellt nach dem Leeren den manuellen Auf-/Zu-Zustand wieder her. Doppelte Zeichnungsnummern werden verhindert und zur Bearbeitung des vorhandenen Eintrags zurückgeführt.
+
+## MARA10.02.j - 2026-10-02
+
+- Die rechte Produktdetail-Sidebar ist in einen festen oberen Bereich und einen eigenen vertikalen Detail-Scrollbereich ab „Stammdaten“ aufgeteilt. Navigation, Produktname, Kurztext, 3D-Vorschau, XYZ, Farbaktionen und „Einzelteile (Meshes)“ bleiben dauerhaft sichtbar.
+- Der untere Inhalt wird unterhalb dieses festen Bereichs geclippt und kann nicht mehr hinter Vorschau oder Aktionen sichtbar werden. Der Footer mit Produkt entfernen, Showroom, Neu konvertieren, Abbrechen und Übernehmen bleibt fest sichtbar.
+- Die linke Produktübersicht, Sidebar-Breite, Splitter, 3D-Viewer, Mesh-Logik, Farbregeln und Produktdaten bleiben unverändert.
+
 ## MARA10.02.i - 2026-10-02
 
 - Die Verwaltung „Automatische Farb-Zuordnung“ ist aus dem allgemeinen Einstellungsdialog in das eigene Fenster „Farb-Zuordnungen“ umgezogen. Der vorhandene Button in der Produktdetail-Sidebar öffnet dieses Fenster direkt.
