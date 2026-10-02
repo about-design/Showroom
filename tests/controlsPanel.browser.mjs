@@ -50,8 +50,20 @@ try {
     await page.addScriptTag({ content: splitter + '\ninitDetailSplitter()' })
   }
   await page.goto('http://dashboard.test/')
+  await page.evaluate(() => localStorage.removeItem('mara.detailSidebarWidthPercent'))
   await setup()
   await page.addScriptTag({ content: 'let showMeshRal = true; function updateDetailMeshRowClasses() {} function applyViewCubeSettings() {}\n' + displayCode })
+  await page.evaluate(() => {
+    document.getElementById('app').classList.add('detail-open')
+    document.getElementById('detailPanel').classList.add('open')
+    document.getElementById('detailPanel').style.transition = 'none'
+  })
+  assert.ok(Math.abs(await page.$eval('#detailPanel', el => el.getBoundingClientRect().width) - 560) < 1, 'First start uses the 35 % sidebar width')
+  assert.equal(await page.$eval('.detail-splitter', el => el.getAttribute('aria-valuenow')), '35')
+  await page.evaluate(() => {
+    document.getElementById('app').classList.remove('detail-open')
+    document.getElementById('detailPanel').classList.remove('open')
+  })
   for (const width of [25, 30, 34, 35, 45, 60]) {
     await page.evaluate(width => {
 
@@ -157,8 +169,8 @@ try {
   await page.$eval('#detailPanel', el => el.style.transition = 'none')
   const reset = await page.$eval('.detail-splitter', el => { const b = el.getBoundingClientRect(); return { x: b.x + 5, y: 400 } })
   await page.mouse.click(reset.x, reset.y, { clickCount: 2 })
-  assert.ok(Math.abs(await page.$eval('#detailPanel', el => el.getBoundingClientRect().width) - 720) < 1)
-  assert.equal(await page.evaluate(() => localStorage.getItem('mara.detailSidebarWidthPercent')), '45')
+  assert.ok(Math.abs(await page.$eval('#detailPanel', el => el.getBoundingClientRect().width) - 560) < 1)
+  assert.equal(await page.evaluate(() => localStorage.getItem('mara.detailSidebarWidthPercent')), '35')
   await page.setViewport({ width: 1000, height: 800 })
   await page.focus('.detail-splitter')
   for (let i = 0; i < 25; i++) await page.keyboard.press('ArrowRight')

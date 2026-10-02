@@ -2,7 +2,8 @@ export function initDetailSplitter() {
   const panel = document.getElementById('detailPanel')
   const handle = document.createElement('div')
   const storageKey = 'mara.detailSidebarWidthPercent'
-  let width = 45
+  const defaultWidth = 35
+  let width = defaultWidth
   let drag = null
   try {
     const saved = Number(localStorage.getItem(storageKey))
@@ -16,7 +17,7 @@ export function initDetailSplitter() {
   handle.setAttribute('aria-controls', 'detailPanel')
   handle.setAttribute('aria-valuemin', '25')
   handle.setAttribute('aria-valuemax', '60')
-  handle.title = 'Ziehen: Breite ändern · Doppelklick: 45 %'
+  handle.title = `Ziehen: Breite ändern · Doppelklick: ${defaultWidth} %`
   panel.prepend(handle)
   const apply = () => {
     document.documentElement.style.setProperty('--detail-panel-preferred-width', `${width}vw`)
@@ -56,14 +57,14 @@ export function initDetailSplitter() {
   handle.addEventListener('dblclick', event => {
     event.preventDefault()
     event.stopPropagation()
-    width = 45
+    width = defaultWidth
     apply()
     save()
   })
   handle.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return
     event.preventDefault()
-    width = event.key === 'Home' ? 45 : Math.max(25, Math.min(60, width + (event.key === 'ArrowLeft' ? 1 : -1)))
+    width = event.key === 'Home' ? defaultWidth : Math.max(25, Math.min(60, width + (event.key === 'ArrowLeft' ? 1 : -1)))
     apply()
     save()
   })

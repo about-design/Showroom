@@ -6,7 +6,7 @@
   "showViewCube": true,
   "showCoordinateSystem": true,
   "viewCubePosition": "right",
-  "detailSidebarPinned": true,
+  "detailSidebarPinned": false,
   "sidebarWidthPercent": 35,
   "maxParallelConversions": 3,
   "automaticCategoryMappings": [

@@ -389,7 +389,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         viewCubePosition: ['left', 'center', 'right'].includes(saved?.viewCubePosition) ? saved.viewCubePosition : 'right',
         detailSidebarPinned: saved?.detailSidebarPinned !== false,
         sidebarWidthPercent: [35, 40, 45, 50, 55].includes(Number(saved?.sidebarWidthPercent))
-          ? Number(saved.sidebarWidthPercent) : 45,
+          ? Number(saved.sidebarWidthPercent) : 35,
         maxParallelConversions: [1, 2, 3, 4, 5].includes(Number(saved?.maxParallelConversions))
           ? Number(saved.maxParallelConversions)
           : 3,
@@ -405,7 +405,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         showCoordinateSystem: false,
         viewCubePosition: 'right',
         detailSidebarPinned: true,
-        sidebarWidthPercent: 45,
+        sidebarWidthPercent: 35,
         maxParallelConversions: 3,
         automaticCategoryMappings: [],
       }

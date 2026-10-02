@@ -33,6 +33,7 @@ function makeAxis(start, end, color, name, radius) {
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 12, 1, false)
   const material = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: .95 })
   const axis = new THREE.Mesh(geometry, material)
+  axis.userData.isViewerHelper = true
   axis.position.copy(start).add(end).multiplyScalar(.5)
   axis.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize())
   axis.name = `coordinate-axis-${name}`
@@ -100,6 +101,7 @@ export class CoordinateSystemView {
       new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: .95 }),
     )
     origin.name = 'coordinate-system-origin-marker'
+    origin.userData.isViewerHelper = true
     root.add(origin)
 
     const labelOffset = this.axisSize * 1.12
@@ -111,8 +113,11 @@ export class CoordinateSystemView {
       const label = makeLabel(axis, AXIS_COLORS[axis.toLowerCase()])
       label.position.copy(position)
       label.scale.setScalar(this.axisSize * 0.32)
+      label.userData.isViewerHelper = true
       root.add(label)
     }
+
+    root.userData.isViewerHelper = true
 
     root.visible = this.visible
     target.add(root)

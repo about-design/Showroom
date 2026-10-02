@@ -48,12 +48,17 @@ export function getMetalnessRoughness(mat) {
   return { metalness: null, roughness: null, hasMRMap: false }
 }
 
-/** Alle Meshes in Traversier-Reihenfolge (gleiche Reihenfolge wie traverse). */
+/** Viewer-Hilfsobjekte gehören nicht zur Produktgeometrie. */
+export function isViewerHelper(object) {
+  return object?.userData?.isViewerHelper === true
+}
+
+/** Alle Produkt-Meshes in Traversier-Reihenfolge (gleiche Reihenfolge wie traverse). */
 export function collectMeshesFromGroup(group) {
   if (!group) return []
   const meshes = []
   group.traverse((obj) => {
-    if (obj.isMesh) meshes.push(obj)
+    if (obj.isMesh && !isViewerHelper(obj)) meshes.push(obj)
   })
   return meshes
 }

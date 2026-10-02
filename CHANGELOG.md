@@ -1,5 +1,28 @@
 # Changelog
 
+## MARA09.30.e - 2026-10-02
+
+- Die Produktdetail-Sidebar startet ohne gespeicherte Benutzerbreite mit 35 % statt 45 %. Splitter, Grenzen von 25 bis 60 %, lokale Breitenwiederherstellung und unabhängige Scrollbereiche von Produktbereich und Sidebar bleiben erhalten; Doppelklick und Home setzen auf die neue Standardbreite zurück.
+
+## MARA09.30.d - 2026-10-01
+
+- STEP→GLB: Baugruppen-Container werden über `SHAPE_REPRESENTATION_RELATIONSHIP` zwischen Shape-Repräsentationen erkannt und nicht als eigene Geometrie gezählt.
+- Die echte STEP-Datei `4026212124385_276032` wurde vollständig neu konvertiert: 23 STEP-Zuordnungen, 23 exportierte Meshes, kein globaler FreeCAD-Label-Fallback.
+- `31-01434` entsteht als `_1` und `_2`; `31-01436` als `_1` bis `_4`. Die Materialnamen verwenden dieselben korrigierten Mesh-Namen.
+- Assembly- und Referenzregressionen für lokale Fallbacks, Reihenfolge und getrennte Instanzzähler ergänzt.
+
+## MARA09.30.c - 2026-10-01
+
+- STEP→GLB: Die Formation-Auswertung erkennt `PRODUCT_DEFINITION_FORMATION...` jetzt robust auch bei einem oder mehreren Whitespaces vor der öffnenden Klammer.
+- Ursprüngliche Zeichnungsnummern werden wieder in STEP-Reihenfolge übernommen; Mehrfachvorkommen werden je Zeichnungsnummer separat als `_1`, `_2` usw. benannt.
+- Das Testprodukt `4026212286489_177599` wurde erfolgreich neu konvertiert: acht Meshes, korrekte Namen, unveränderte Mesh-Anzahl und weiterhin angewendete Farbregeln.
+- Der bestehende Fallback für nicht auswertbare STEP-Strukturen bleibt erhalten.
+
+## MARA09.30.b - 2026-09-30
+
+- Koordinatensystem-Hilfsobjekte werden aus Einzelteil-, Mesh-, Farbregel-, Statistik- und Exportauswertungen ausgeschlossen.
+- Sie entstehen ausschließlich zur Laufzeit im Viewer und beeinflussen Produktgeometrie sowie gespeicherte GLB-Dateien nicht.
+
 ## MARA09.30.a - 2026-09-30
 
 - Die XYZ-Achsen des Produkt-Koordinatensystems werden browserunabhängig als deutlich kräftigere 3D-Zylinder dargestellt.

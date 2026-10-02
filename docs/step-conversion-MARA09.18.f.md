@@ -1,5 +1,7 @@
 # STEP-Konvertierung – MARA09.18.f
 
+Die verbindliche Regel für die Übernahme ursprünglicher STEP-Zeichnungsnummern und die separate Instanznummerierung ist in [step-drawing-number-instance-rule.md](step-drawing-number-instance-rule.md) dokumentiert.
+
 Stand: 18.09.2026. FreeCAD 1.0.2, Blender 4.5, Windows.
 
 Die Datei `4026212455489_315868.step` (19.688.261 Bytes) wurde vollständig zu GLB konvertiert. Ihr SHA-256 entspricht dem Upload des fehlgeschlagenen Jobs `a09dc1b0-db26-4ee7-aa9e-db4de3f22fa6`: `6cffb88576868c7046123644b1a2fef3a5801ee2c32a945394c844816b3f2b55`.

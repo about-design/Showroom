@@ -26,7 +26,7 @@ import {
   resolveEffectiveDefaultColorOrFallback,
 } from '../lib/defaultColorMapping.js'
 import { createEmptyMaterial } from '../lib/mtlParser.js'
-import { collectMeshesFromGroup } from '../lib/materialUtils.js'
+import { collectMeshesFromGroup, isViewerHelper } from '../lib/materialUtils.js'
 import {
   ISSUE_CATALOG,
   STATUS_LABELS,
@@ -379,7 +379,7 @@ function lookupOverrideTargetHex(sourceHex, overrides) {
 function collectGlbMaterialRows(root) {
   const rows = []
   root.traverse((child) => {
-    if (!child.isMesh || !child.material) return
+    if (!child.isMesh || isViewerHelper(child) || !child.material) return
     const mats = Array.isArray(child.material) ? child.material : [child.material]
     mats.forEach((mat, mi) => {
       if (!mat) return

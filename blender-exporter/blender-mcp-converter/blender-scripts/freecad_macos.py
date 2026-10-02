@@ -360,7 +360,12 @@ def _extract_drawing_number(path_segments):
 
 
 def _read_step_component_drawing_numbers(step_file_path):
-    """Return component drawing numbers in their declared STEP assembly order."""
+    """Return geometric component drawing numbers in STEP assembly order.
+
+    ``NEXT_ASSEMBLY_USAGE_OCCURRENCE`` also contains assembly containers. Only
+    definitions connected through PRODUCT_DEFINITION_SHAPE and
+    SHAPE_DEFINITION_REPRESENTATION produce exportable FreeCAD geometry.
+    """
     try:
         with open(step_file_path, 'r', encoding='utf-8', errors='ignore') as step_file:
             content = step_file.read()
@@ -374,11 +379,55 @@ def _read_step_component_drawing_numbers(step_file_path):
     }
     formations = {
         int(match.group(1)): int(match.group(2))
-        for match in re.finditer(r"#(\d+)\s*=\s*PRODUCT_DEFINITION_FORMATION[^(]*\([^,]*,\s*'[^']*',\s*#(\d+)", content, re.DOTALL)
+        for match in re.finditer(r"#(\d+)\s*=\s*PRODUCT_DEFINITION_FORMATION\s*[^\(]*\(\s*\s*[^,]*,\s*'[^']*',\s*#(\d+)", content, re.DOTALL)
     }
     definitions = {
         int(match.group(1)): int(match.group(2))
         for match in re.finditer(r"#(\d+)\s*=\s*PRODUCT_DEFINITION\s*\([^,]*,\s*'[^']*',\s*#(\d+)", content, re.DOTALL)
+    }
+    shape_definition_ids = {
+        int(match.group(1)): int(references[-1])
+        for match in re.finditer(
+            r"#(\d+)\s*=\s*PRODUCT_DEFINITION_SHAPE\s*\([^;]*?;", content, re.DOTALL
+        )
+        if (references := re.findall(r"#(\d+)", match.group(0)))
+    }
+    shape_definition_representations = {
+        int(match.group(1)): int(match.group(2))
+        for match in re.finditer(
+            r"SHAPE_DEFINITION_REPRESENTATION\s*\(\s*#(\d+)\s*,\s*#(\d+)",
+            content,
+            re.DOTALL,
+        )
+    }
+    representation_types = {
+        int(match.group(1)): match.group(2)
+        for match in re.finditer(
+            r"#(\d+)\s*=\s*(SHAPE_REPRESENTATION|ADVANCED_BREP_SHAPE_REPRESENTATION)\s*\(",
+            content,
+        )
+    }
+    assembly_representation_ids = set()
+    for relationship in re.finditer(
+        r"#\d+\s*=\s*[^;]*SHAPE_REPRESENTATION_RELATIONSHIP[^;]*;",
+        content,
+        re.DOTALL,
+    ):
+        relationship_references = [
+            int(ref) for ref in re.findall(r"#(\d+)", relationship.group(0))
+        ][1:]
+        if len(relationship_references) >= 2:
+            parent_representation, child_representation = relationship_references[:2]
+            if (
+                representation_types.get(parent_representation) == 'SHAPE_REPRESENTATION'
+                and representation_types.get(child_representation) == 'SHAPE_REPRESENTATION'
+            ):
+                assembly_representation_ids.add(parent_representation)
+    geometric_definition_ids = {
+        shape_definition_ids[shape_definition_id]
+        for shape_definition_id, representation_id in shape_definition_representations.items()
+        if shape_definition_id in shape_definition_ids
+        and representation_id not in assembly_representation_ids
     }
 
     drawing_numbers = []
@@ -386,12 +435,36 @@ def _read_step_component_drawing_numbers(step_file_path):
         references = [int(ref) for ref in re.findall(r"#(\d+)", occurrence.group(0))]
         if not references:
             continue
-        product_name = products.get(formations.get(definitions.get(references[-1])))
-        drawing_number = _extract_drawing_number([product_name]) if product_name else None
-        if drawing_number:
-            drawing_numbers.append(drawing_number)
+        component_definition_id = references[-1]
+        if component_definition_id not in geometric_definition_ids:
+            continue
+        product_name = products.get(formations.get(definitions.get(component_definition_id)))
+        drawing_numbers.append(
+            _extract_drawing_number([product_name]) if product_name else None
+        )
 
     return drawing_numbers
+
+
+def _assign_step_drawing_numbers(shapes_to_process, step_drawing_numbers):
+    """Attach STEP drawing numbers without discarding known local matches."""
+    assigned_count = 0
+    for shape_info, drawing_number in zip(shapes_to_process, step_drawing_numbers):
+        if drawing_number:
+            shape_info['step_drawing_number'] = drawing_number
+            assigned_count += 1
+
+    if len(step_drawing_numbers) == len(shapes_to_process):
+        logger.info(
+            "Using %d drawing numbers from STEP component structure", assigned_count
+        )
+    elif step_drawing_numbers:
+        logger.warning(
+            "STEP geometric component count does not match export shape count "
+            "(%d != %d); retaining %d STEP mappings and using local FreeCAD "
+            "label fallbacks only for unmatched shapes",
+            len(step_drawing_numbers), len(shapes_to_process), assigned_count
+        )
 
 if color_export_mode in {'ply', 'color', 'true'}:
     try:
@@ -486,7 +559,7 @@ def parse_step_colors(step_file_path):
     
     # Parse PRODUCT hierarchy for name-to-color mapping
     product_pattern = re.compile(r"#(\d+)\s*=\s*PRODUCT\s*\(\s*'([^']*)'")
-    product_def_formation_pattern = re.compile(r"#(\d+)\s*=\s*PRODUCT_DEFINITION_FORMATION[^(]*\([^,]*,\s*'[^']*',\s*#(\d+)")
+    product_def_formation_pattern = re.compile(r"#(\d+)\s*=\s*PRODUCT_DEFINITION_FORMATION\s*[^\(]*\(\s*\s*[^,]*,\s*'[^']*',\s*#(\d+)")
     product_definition_pattern = re.compile(r"#(\d+)\s*=\s*PRODUCT_DEFINITION\s*\([^,]*,\s*'[^']*',\s*#(\d+)")
     product_def_shape_pattern = re.compile(r"#(\d+)\s*=\s*PRODUCT_DEFINITION_SHAPE\s*\([^,]*,\s*'[^']*',\s*#(\d+)\s*\)")
     shape_def_rep_pattern = re.compile(r"#(\d+)\s*=\s*SHAPE_DEFINITION_REPRESENTATION\s*\(\s*#(\d+)\s*,\s*#(\d+)\s*\)")
@@ -1349,15 +1422,7 @@ try:
     _record_stage("Formaufbereitung", stage_started)
     stage_started = time.perf_counter()
     step_component_drawing_numbers = _read_step_component_drawing_numbers(input_file)
-    if len(step_component_drawing_numbers) == len(shapes_to_process):
-        for shape_info, drawing_number in zip(shapes_to_process, step_component_drawing_numbers):
-            shape_info['step_drawing_number'] = drawing_number
-        logger.info(f"Using {len(step_component_drawing_numbers)} drawing numbers from STEP component structure")
-    elif step_component_drawing_numbers:
-        logger.warning(
-            "STEP component count does not match export shape count "
-            f"({len(step_component_drawing_numbers)} != {len(shapes_to_process)}); using FreeCAD labels as fallback"
-        )
+    _assign_step_drawing_numbers(shapes_to_process, step_component_drawing_numbers)
     
     _record_stage("STEP-Namenszuordnung", stage_started)
     stage_started = time.perf_counter()
