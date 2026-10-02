@@ -316,6 +316,34 @@
   </div>
 </div>
 
+<div class="name-rules-modal" id="automaticColorMappingsModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="automaticColorMappingsBackdrop"></div>
+  <div class="name-rules-modal-panel automatic-color-mappings-panel" role="dialog" aria-labelledby="automaticColorMappingsTitle" aria-modal="true">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="automaticColorMappingsTitle">Automatische Farb-Zuordnung</h2>
+      <p class="name-rules-modal-hint">Zeichnungsnummern werden beim Produkt auf die gewählte RAL-Farbe abgebildet.</p>
+    </div>
+    <div class="automatic-color-mappings-body">
+      <label class="automatic-color-search" for="automaticColorMappingsSearch">
+        <span>Zeichnungsnummer suchen</span>
+        <input class="detail-input" id="automaticColorMappingsSearch" type="search" placeholder="Zeichnungsnummer suchen …" autocomplete="off">
+      </label>
+      <div class="automatic-color-mappings-list" id="automaticColorMappingsList">
+        <div class="automatic-color-table-head" aria-hidden="true"><span>Zeichnungsnummer</span><span>RAL-Farbe</span><span>Immer</span><span>Löschen</span></div>
+        <div class="automatic-category-mappings" id="automaticColorMappingsRows"></div>
+      </div>
+      <div class="automatic-category-actions">
+        <button type="button" class="btn btn-ghost" id="automaticColorMappingAdd">Zuordnung hinzufügen</button>
+      </div>
+    </div>
+    <div class="name-rules-modal-actions">
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="automaticColorMappingsCancel">Abbrechen</button>
+      <button type="button" class="btn btn-primary" id="automaticColorMappingsSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════ Detail panel ═══════ -->
 <div class="detail-overlay" id="detailOverlay"></div>
 <aside class="detail-panel" id="detailPanel">

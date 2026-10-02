@@ -13,8 +13,11 @@ const functions = [
 const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   import { colorRulesAreConverted, colorRuleCoverageState, ruleMatchesMesh, colorRulesVersion, recordColorRuleConversion } from './src/lib/colorRuleConversion.js';
   const selectedProductId = 'fixture', productCache = new Map(), productGrid = document.getElementById('productGrid');
+  const AUTOMATIC_COLOR_RULE_SOURCE = 'automatic-color-assignment';
   let showMeshRal = true, detailMeshIsolateIndex = null;
   const detailMeshExcluded = new Set(), ColorService = { getRAL: () => ({hex:'#878581',name:'Test'}) };
+  function escapeNameRulePattern(name) { return String(name || '').replace(/[.*+?^\${}()|[\]\\]/g, '\\$&'); }
+  function exactMeshNameRulePattern(name) { return '^' + escapeNameRulePattern(name) + '$'; }
   function updateDetailMeshSelectionCount() {}
   function attachNameRuleSummaryListeners() {}
   function refreshNameRuleSummaries() {}
@@ -68,5 +71,23 @@ try {
   assert.equal(await page.$eval('.detail-mesh-ral', el => el.textContent), 'Verzinkt')
   await page.click('.detail-name-rule-row:last-child .name-rule-remove')
   assert.equal(await page.$eval('.detail-mesh-ral', el => el.textContent), 'RAL 7035')
+  const drawingRule = await page.evaluate(() => {
+    const rows = document.getElementById('detailNameRulesRows')
+    rows.innerHTML = ''
+    const row = document.createElement('div')
+    row.className = 'detail-name-rule-row'
+    row.dataset.technicalPattern = '(?:^|_)06-01071(?:_\\d+)?$'
+    row.dataset.displayPattern = '06-01071'
+    row.dataset.matchMode = 'drawing-number'
+    row.innerHTML = `<input class="name-rule-pattern" value="06-01071"><input class="name-rule-flags" value=""><select class="name-rule-target"><option value="mesh" selected>mesh</option></select><select class="name-rule-ral"><option value="RAL 7035" selected>RAL 7035</option></select><select class="name-rule-finish"><option value="pulver" selected>pulver</option></select>`
+    rows.append(row)
+    const before = test.rules()[0]
+    row.querySelector('.name-rule-pattern').value = '06-01072'
+    return { before, after: test.rules()[0] }
+  })
+  assert.equal(drawingRule.before.displayPattern, '06-01071')
+  assert.equal(drawingRule.before.pattern, '(?:^|_)06-01071(?:_\\d+)?$')
+  assert.equal(drawingRule.after.displayPattern, '06-01072')
+  assert.equal(drawingRule.after.pattern, '(?:^|_)06-01072(?:_\\d+)?$')
   console.log('Passed: X removes galvanized/RAL display immediately and restores neutral mesh row while card remains pending for conversion.')
 } finally { await browser.close() }

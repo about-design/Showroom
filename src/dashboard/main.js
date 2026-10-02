@@ -27,6 +27,7 @@ import {
 } from '../lib/defaultColorMapping.js'
 import { createEmptyMaterial } from '../lib/mtlParser.js'
 import { collectMeshesFromGroup, isViewerHelper } from '../lib/materialUtils.js'
+import { AUTOMATIC_COLOR_RULE_SOURCE, buildAutomaticColorRulePlan } from '../lib/automaticColorAssignment.js'
 import {
   ISSUE_CATALOG,
   STATUS_LABELS,
@@ -696,6 +697,7 @@ const sortSelect = $('#sortSelect')
 const mappingTargetSelect = $('#mappingTargetSelect')
 const categorySelect = $('#categorySelect')
 const fileManagerSettingsModal = $('#fileManagerSettingsModal')
+const automaticColorMappingsModal = $('#automaticColorMappingsModal')
 let showMeshRal = true
 
 function applyDetailSidebarPinnedSetting(settings) {
@@ -917,6 +919,36 @@ function syncFileManagerSettingsUi() {
   $('#freeCommanderPathRow').hidden = !freeCommander
 }
 
+function filterAutomaticColorMappingRows() {
+  const query = ($('#automaticColorMappingsSearch')?.value || '').trim().toLowerCase()
+  document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row').forEach((row) => {
+    const drawingNumber = row.querySelector('.automatic-color-drawing-number')?.value.trim().toLowerCase() || ''
+    row.hidden = !!query && !drawingNumber.includes(query)
+  })
+}
+
+async function openAutomaticColorMappings() {
+  if (!automaticColorMappingsModal) return
+  try {
+    const res = await fetch('/__api/file-manager-settings')
+    const settings = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(settings.error || `HTTP ${res.status}`)
+    renderAutomaticColorMappings(settings.automaticColorMappings)
+    $('#automaticColorMappingsSearch').value = ''
+    filterAutomaticColorMappingRows()
+    automaticColorMappingsModal.classList.add('open')
+    automaticColorMappingsModal.setAttribute('aria-hidden', 'false')
+    requestAnimationFrame(() => $('#automaticColorMappingsSearch')?.focus())
+  } catch (error) {
+    toast(error.message || 'Farb-Zuordnungen konnten nicht geladen werden.', 'error')
+  }
+}
+
+function closeAutomaticColorMappings() {
+  automaticColorMappingsModal?.classList.remove('open')
+  automaticColorMappingsModal?.setAttribute('aria-hidden', 'true')
+}
+
 function automaticCategoryOptions(selected = '') {
   const options = productCategoriesCache.map((category) =>
     `<option value="${esc(category)}"${category === selected ? ' selected' : ''}>${esc(category)}</option>`,
@@ -948,6 +980,42 @@ function collectAutomaticCategoryMappings() {
     prefix: row.querySelector('.automatic-category-prefix')?.value.trim() || '',
     category: row.querySelector('.automatic-category-value')?.value.trim() || '',
   })).filter((row) => row.prefix && row.category)
+}
+
+function addAutomaticColorMappingRow(mapping = {}) {
+  const rows = $('#automaticColorMappingsRows')
+  if (!rows) return
+  const drawingNumber = String(mapping.drawingNumber || '')
+  const ral = String(mapping.ral || '')
+  const options = ColorService.getAllColors().map((color) =>
+    `<option value="${esc(color.code)}"${ral === color.code ? ' selected' : ''}>${esc(color.code)} ${esc(color.name)}</option>`,
+  ).join('')
+  const row = document.createElement('div')
+  row.className = 'automatic-category-mapping-row automatic-color-mapping-row'
+  row.innerHTML = `
+    <input class="detail-input automatic-color-drawing-number" type="text" maxlength="8" value="${esc(drawingNumber)}" placeholder="z. B. 06-00763" aria-label="Zeichnungsnummer">
+    <select class="sort-select automatic-color-ral" aria-label="RAL-Farbe"><option value="">— RAL-Farbe —</option>${options}</select>
+    <label class="automatic-color-always" title="Diese Zeichnungsnummer wird auch bei SAP-Kurztext vzk angewendet.">
+      <input class="automatic-color-always-input" type="checkbox"${mapping.always === true ? ' checked' : ''}>
+      <span>Immer</span>
+    </label>
+    <button type="button" class="btn btn-ghost automatic-color-remove" title="Zuordnung löschen" aria-label="Zuordnung löschen">×</button>`
+  rows.append(row)
+}
+
+function renderAutomaticColorMappings(mappings) {
+  const rows = $('#automaticColorMappingsRows')
+  if (!rows) return
+  rows.replaceChildren()
+  for (const mapping of Array.isArray(mappings) ? mappings : []) addAutomaticColorMappingRow(mapping)
+}
+
+function collectAutomaticColorMappings() {
+  return [...document.querySelectorAll('.automatic-category-mapping-row')].filter((row) => row.querySelector('.automatic-color-drawing-number')).map((row) => ({
+    drawingNumber: row.querySelector('.automatic-color-drawing-number')?.value.trim() || '',
+    ral: row.querySelector('.automatic-color-ral')?.value.trim() || '',
+    always: row.querySelector('.automatic-color-always-input')?.checked === true,
+  })).filter((row) => row.drawingNumber && row.ral)
 }
 
 function applyAutomaticCategoryAssignmentsToUi(assignments) {
@@ -1040,6 +1108,29 @@ async function saveFileManagerSettings() {
     toast('Einstellungen gespeichert', 'success')
   } catch (error) {
     toast(error.message || 'Einstellungen konnten nicht gespeichert werden.', 'error')
+  }
+}
+
+async function saveAutomaticColorMappings() {
+  const saveButton = $('#automaticColorMappingsSave')
+  saveButton.disabled = true
+  try {
+    const settingsResponse = await fetch('/__api/file-manager-settings')
+    const settings = await parseJsonResponse(settingsResponse)
+    if (!settingsResponse.ok) throw new Error(settings.error || `HTTP ${settingsResponse.status}`)
+    const res = await fetch('/__api/file-manager-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...settings, automaticColorMappings: collectAutomaticColorMappings() }),
+    })
+    const data = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    closeAutomaticColorMappings()
+    toast('Farb-Zuordnungen gespeichert', 'success')
+  } catch (error) {
+    toast(error.message || 'Farb-Zuordnungen konnten nicht gespeichert werden.', 'error')
+  } finally {
+    saveButton.disabled = false
   }
 }
 
@@ -1230,6 +1321,17 @@ function bindEvents() {
   $('#automaticCategoryMappingsRows')?.addEventListener('click', (event) => {
     event.target.closest('.automatic-category-remove')?.closest('.automatic-category-mapping-row')?.remove()
   })
+  $('#automaticColorMappingAdd')?.addEventListener('click', () => {
+    addAutomaticColorMappingRow()
+    filterAutomaticColorMappingRows()
+  })
+  $('#automaticColorMappingsRows')?.addEventListener('click', (event) => {
+    event.target.closest('.automatic-color-remove')?.closest('.automatic-category-mapping-row')?.remove()
+  })
+  $('#automaticColorMappingsSearch')?.addEventListener('input', filterAutomaticColorMappingRows)
+  $('#automaticColorMappingsBackdrop')?.addEventListener('click', closeAutomaticColorMappings)
+  $('#automaticColorMappingsCancel')?.addEventListener('click', closeAutomaticColorMappings)
+  $('#automaticColorMappingsSave')?.addEventListener('click', saveAutomaticColorMappings)
   $('#automaticCategoryApply')?.addEventListener('click', checkAutomaticCategoryAssignments)
 
   const btnToggleUsdz = $('#btnToggleUsdz')
@@ -2679,7 +2781,16 @@ function attachVisibilityRuleSummaryListeners(container) {
 function renderNameRuleRowHtml(rule = {}) {
   const t = String(rule.target || 'material').trim()
   const target = ['material', 'node', 'mesh', 'nodePath', 'extras'].includes(t) ? t : 'material'
-  const pattern = esc(rule.pattern || '')
+  const technicalPattern = String(rule.pattern || '').trim()
+  const inferredDrawingNumber = rule.source === AUTOMATIC_COLOR_RULE_SOURCE && technicalPattern.startsWith('(?:^|_)')
+    ? technicalPattern.match(/\d{2}-\d{5}/)?.[0] || ''
+    : ''
+  const inferredExactText = rule.source === AUTOMATIC_COLOR_RULE_SOURCE && technicalPattern.startsWith('^') && technicalPattern.endsWith('$')
+    ? technicalPattern.slice(1, -1).replace(/\\(.)/g, '$1')
+    : ''
+  const displayPattern = String(rule.displayPattern || inferredDrawingNumber || inferredExactText || technicalPattern)
+  const matchMode = String(rule.matchMode || (inferredDrawingNumber ? 'drawing-number' : inferredExactText ? 'exact' : 'regex'))
+  const pattern = esc(displayPattern)
   const flags = esc(rule.flags || '')
   const ral = (rule.ral && String(rule.ral).trim()) || ''
   const fRaw = String(rule.finish || '').trim().toLowerCase()
@@ -2687,7 +2798,8 @@ function renderNameRuleRowHtml(rule = {}) {
   const ralOptions = ColorService.getAllColors()
     .map((c) => `<option value="${esc(c.code)}" ${ral === c.code ? 'selected' : ''}>${esc(c.code)} ${esc(c.name)}</option>`)
     .join('')
-  return `<article class="detail-name-rule-row rule-card rule-card--name">
+  const source = rule.source === AUTOMATIC_COLOR_RULE_SOURCE ? AUTOMATIC_COLOR_RULE_SOURCE : ''
+  return `<article class="detail-name-rule-row rule-card rule-card--name" data-technical-pattern="${esc(technicalPattern)}" data-display-pattern="${esc(displayPattern)}" data-match-mode="${esc(matchMode)}"${source ? ` data-rule-source="${source}"` : ''}>
   <header class="rule-card-head">
     <div class="rule-card-summary name-rule-card-summary" aria-live="polite"></div>
     <button type="button" class="name-rule-remove btn-icon" title="Zeile entfernen">×</button>
@@ -2706,8 +2818,8 @@ function renderNameRuleRowHtml(rule = {}) {
     </select>
       </div>
       <div class="rule-field-row">
-        <span class="rule-field-label">Regex</span>
-    <input type="text" class="field-value name-rule-pattern" placeholder="z. B. Pfad:.*/Rahmen/.* oder Extras:&quot;shapeId&quot;" value="${pattern}" title="JavaScript Regular Expression" spellcheck="false" autocomplete="off">
+        <span class="rule-field-label">Name / Zeichnungsnummer</span>
+      <input type="text" class="field-value name-rule-pattern" placeholder="z. B. 06-01071 oder Rahmen" value="${pattern}" title="Angezeigter Name beziehungsweise Zeichnungsnummer" spellcheck="false" autocomplete="off">
       </div>
       <div class="rule-field-row">
         <span class="rule-field-label">Flags</span>
@@ -2747,20 +2859,40 @@ function collectNameRulesFromContainer(containerEl) {
   containerEl.querySelectorAll('.detail-name-rule-row').forEach((row) => {
     const tv = (row.querySelector('.name-rule-target')?.value || 'material').trim()
     const target = ['material', 'node', 'mesh', 'nodePath', 'extras'].includes(tv) ? tv : 'material'
-    const pattern = (row.querySelector('.name-rule-pattern')?.value || '').trim()
+    const displayPattern = (row.querySelector('.name-rule-pattern')?.value || '').trim()
+    const originalDisplayPattern = String(row.dataset.displayPattern || '')
+    const technicalPattern = String(row.dataset.technicalPattern || '')
+    const matchMode = String(row.dataset.matchMode || 'regex')
+    let pattern = technicalPattern
+    if (!pattern || displayPattern !== originalDisplayPattern) {
+      if (matchMode === 'drawing-number' && /^\d{2}-\d{5}$/.test(displayPattern)) {
+        pattern = `(?:^|_)${escapeNameRulePattern(displayPattern)}(?:_\\d+)?$`
+      } else if (matchMode === 'ean' && /^\d{8,14}$/.test(displayPattern)) {
+        pattern = `(?:^|_)${escapeNameRulePattern(displayPattern)}(?=_|$)`
+      } else if (matchMode === 'all') {
+        pattern = '.*'
+      } else if (matchMode === 'exact') {
+        pattern = exactMeshNameRulePattern(displayPattern)
+      } else if (matchMode === 'text') {
+        pattern = escapeNameRulePattern(displayPattern)
+      } else {
+        pattern = displayPattern
+      }
+    }
     const flags = (row.querySelector('.name-rule-flags')?.value || '').trim()
     const ral = (row.querySelector('.name-rule-ral')?.value || '').trim()
     const finishRaw = (row.querySelector('.name-rule-finish')?.value || 'auto').trim().toLowerCase()
     const finish = finishRaw === 'verzinkt' || finishRaw === 'pulver' ? finishRaw : null
-    if (!pattern || !ral) return
+    if (!displayPattern || !pattern || !ral) return
     try {
       new RegExp(pattern, flags)
     } catch {
       return
     }
-    const o = { target, pattern, ral }
+    const o = { target, pattern, displayPattern, matchMode, ral }
     if (flags) o.flags = flags
     if (finish) o.finish = finish
+    if (row.dataset.ruleSource === AUTOMATIC_COLOR_RULE_SOURCE) o.source = AUTOMATIC_COLOR_RULE_SOURCE
     out.push(o)
   })
   return out
@@ -2831,7 +2963,11 @@ async function saveMeshNameRule(name, ral, selectedPattern = '') {
   const product = productId ? productCache.get(productId) : null
   if (!rows || !product || !ral) return
 
-  const pattern = selectedPattern || exactMeshNameRulePattern(name)
+  const displayPattern = selectedPattern || name
+  const matchMode = /^\d{2}-\d{5}$/.test(displayPattern) ? 'drawing-number' : selectedPattern ? 'text' : 'exact'
+  const pattern = matchMode === 'drawing-number'
+    ? `(?:^|_)${escapeNameRulePattern(displayPattern)}(?:_\\d+)?$`
+    : matchMode === 'text' ? escapeNameRulePattern(displayPattern) : exactMeshNameRulePattern(displayPattern)
   const finish = ral === 'RAL 9007' ? 'verzinkt' : 'pulver'
   const existingRow = findMeshNameRuleByPattern(pattern)?.row
   const row = existingRow || appendDetailNameRule(pattern)
@@ -2839,6 +2975,10 @@ async function saveMeshNameRule(name, ral, selectedPattern = '') {
   row.querySelector('.name-rule-pattern').value = pattern
   row.querySelector('.name-rule-ral').value = ral
   row.querySelector('.name-rule-finish').value = finish
+  row.dataset.technicalPattern = pattern
+  row.dataset.displayPattern = displayPattern
+  row.dataset.matchMode = matchMode
+  row.querySelector('.name-rule-pattern').value = displayPattern
   // Produktregeln werden in DOM-Reihenfolge gespeichert; die exakte Regel muss
   // für „letzter Treffer gewinnt“ hinter allgemeineren Regeln stehen.
   rows.append(row)
@@ -2855,6 +2995,54 @@ async function saveMeshNameRule(name, ral, selectedPattern = '') {
     toast(`Namens-Farbregel für „${name}" gespeichert.`, 'success')
   } catch (error) {
     toast(`Namens-Farbregel konnte nicht gespeichert werden: ${error.message}`, 'error')
+  }
+}
+
+async function applyAutomaticColorAssignment(product, button) {
+  if (!detailPreviewModelRoot) {
+    toast('3D-Vorschau wird noch geladen. Bitte danach erneut versuchen.', 'info')
+    return
+  }
+  button.disabled = true
+  try {
+    const settingsResponse = await fetch('/__api/file-manager-settings')
+    const settings = await parseJsonResponse(settingsResponse)
+    if (!settingsResponse.ok) throw new Error(settings.error || 'Farb-Zuordnungen konnten nicht geladen werden.')
+    const meshNames = collectMeshesFromGroup(detailPreviewModelRoot)
+      .filter((mesh) => !isViewerHelper(mesh))
+      .map((mesh) => mesh.name || '')
+    const plan = buildAutomaticColorRulePlan(meshNames, settings.automaticColorMappings, product.shortText, product.gtin || product.id)
+    if (!plan.assignments.length) {
+      toast('Keine echten Produkt-Meshes für die Farb-Zuordnung gefunden.', 'info')
+      return
+    }
+    const summary = plan.counts.map(({ ral, count }) => {
+      const color = ColorService.getRAL(ral)
+      const suffix = ral === 'RAL 9007'
+        ? plan.isVzkProduct ? ' Verzinkt (SAP-Kurztext: vzk)' : ' Verzinkt (Standard)'
+        : ''
+      return `${count} → ${ral}${color?.name ? ` ${color.name}` : ''}${suffix}`
+    })
+    const vzkNotice = plan.isVzkProduct
+      ? plan.alwaysMappingCount
+        ? '\nNormale Zeichnungsnummer-Farbzuordnungen werden nicht angewendet. „Immer“-Zuordnungen bleiben aktiv.'
+        : '\nZeichnungsnummer-Farbzuordnungen werden nicht angewendet'
+      : ''
+    if (!window.confirm(`${plan.assignments.length} Einzelteile erkannt\n${summary.join('\n')}${vzkNotice}\n\nAutomatische Farbregeln übernehmen?`)) return
+    const rows = document.getElementById('detailNameRulesRows')
+    const currentRules = rows ? collectNameRulesFromContainer(rows) : product.conversionPreset?.nameColorRules || []
+    const manualRules = currentRules.filter((rule) => rule.source !== AUTOMATIC_COLOR_RULE_SOURCE)
+    const conversionPreset = {
+      ...(product.conversionPreset && typeof product.conversionPreset === 'object' ? product.conversionPreset : {}),
+      nameColorRules: [...plan.rules, ...manualRules],
+    }
+    await patchProduct(product.id, { conversionPreset })
+    toast('Automatische Farb-Zuordnung gespeichert. Für die GLB bitte neu konvertieren.', 'success')
+    await openDetail(product.id)
+  } catch (error) {
+    toast(error.message || 'Automatische Farb-Zuordnung konnte nicht gespeichert werden.', 'error')
+  } finally {
+    button.disabled = false
   }
 }
 
@@ -3780,6 +3968,14 @@ async function openDetail(id) {
       </div>
       ${!isComposed && p.glbFile ? `
     <div class="detail-preview-toolbar">
+      <div class="detail-preview-toolbar-left">
+        <button type="button" class="btn btn-ghost btn-sm" id="btnApplyAutomaticColor" title="Erstellt Farbregeln aus den gespeicherten Zeichnungsnummern-Zuordnungen">
+          Automatische Farb-Zuordnung
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnOpenAutomaticColorMappings" title="Zeichnungsnummern und RAL-Farben in den Einstellungen pflegen">
+          Farb-Zuordnungen
+        </button>
+      </div>
       <button type="button" class="btn btn-ghost btn-sm" id="btnRegenerateThumbnail" title="PNG für die Karten-Vorschau aus der aktuellen 3D-Ansicht neu speichern">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:middle;margin-right:.25rem"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         Vorschaubild neu erzeugen
@@ -4231,6 +4427,12 @@ async function openDetail(id) {
   if (isComposed && p.parts?.length) mountPartShapePreviews(p)
   bindCollapsibleDetailHelp()
   bindDetailNameRules()
+  detailContent.querySelector('#btnApplyAutomaticColor')?.addEventListener('click', (event) => {
+    void applyAutomaticColorAssignment(p, event.currentTarget)
+  })
+  detailContent.querySelector('#btnOpenAutomaticColorMappings')?.addEventListener('click', () => {
+    void openAutomaticColorMappings()
+  })
   bindDetailReductionRules()
   bindDetailVisibilityRules()
 }

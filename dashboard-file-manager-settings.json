@@ -22,5 +22,32 @@
       "prefix": "KR",
       "category": "Kragarmregale"
     }
+  ],
+  "automaticColorMappings": [
+    {
+      "drawingNumber": "06-01071",
+      "ral": "RAL 5010",
+      "always": false
+    },
+    {
+      "drawingNumber": "06-00894",
+      "ral": "RAL 7035",
+      "always": true
+    },
+    {
+      "drawingNumber": "06-00763",
+      "ral": "RAL 7035",
+      "always": false
+    },
+    {
+      "drawingNumber": "31-01788",
+      "ral": "RAL 2001",
+      "always": false
+    },
+    {
+      "drawingNumber": "31-01789",
+      "ral": "RAL 2001",
+      "always": false
+    }
   ]
 }

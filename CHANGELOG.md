@@ -1,5 +1,46 @@
 # Changelog
 
+## MARA10.02.i - 2026-10-02
+
+- Die Verwaltung „Automatische Farb-Zuordnung“ ist aus dem allgemeinen Einstellungsdialog in das eigene Fenster „Farb-Zuordnungen“ umgezogen. Der vorhandene Button in der Produktdetail-Sidebar öffnet dieses Fenster direkt.
+- Das neue Fenster zeigt Zeichnungsnummer, RAL-Farbe, „Immer“ und Löschen in einer Liste mit Suchfeld, fixiertem Spaltenkopf und eigenem vertikalen Scrollbereich. „Zuordnung hinzufügen“, Abbrechen und Speichern bleiben vorhanden.
+- Gespeicherte Zuordnungen, EAN-Grundregel, `vzk`-Verhalten, „Immer“-Priorität sowie STEP→GLB- und Bake-Logik bleiben unverändert. Der allgemeine Einstellungsdialog sendet keine Farbzuordnungen mehr und bewahrt deren gespeicherten Stand deshalb unverändert.
+
+## MARA10.02.h - 2026-10-02
+
+- Zeichnungsnummer-RAL-Zuordnungen in „Automatische Farb-Zuordnung“ besitzen jetzt den deutlich sichtbaren Schalter „Immer“. Bestehende und neue Zuordnungen starten deaktiviert; der Zustand wird zusammen mit Zeichnungsnummer und RAL-Farbe gespeichert.
+- Eine aktivierte „Immer“-Zuordnung wird auch bei SAP-Kurztext `vzk` angewendet. Die EAN-Grundregel bleibt RAL 9007 Verzinkt; anschließend überschreibt eine einzelne Zeichnungsnummer-Regel alle Instanzen wie `06-01071_1` und `06-01071_2` mit der hinterlegten RAL-Farbe. Normale Zuordnungen werden bei `vzk` weiterhin ausgelassen.
+- Die Reihenfolge bleibt eindeutig: EAN-Grundfarbe, normale Zeichnungsnummer-Zuordnungen, „Immer“-Zuordnungen. STEP→GLB, Mesh-Gruppierung und die bestehende Bake-Pipeline bleiben unverändert.
+
+## MARA10.02.g - 2026-10-02
+
+- Die automatische Farb-Zuordnung erzeugt statt einer Regel je Mesh jetzt eine gemeinsame EAN-Grundregel für RAL 9007 Verzinkt. Nur Zeichnungsnummern mit einer gespeicherten abweichenden RAL-Farbe ergänzen weitere Regeln.
+- Die EAN-Grundregel steht bewusst vor den spezifischen Zeichnungsnummer-Regeln, sodass die bestehende Last-wins-Priorität die Sonderfarbe sicher übernimmt. Bei `vzk` entsteht genau eine EAN-Regel; gespeicherte Zeichnungsnummer-Zuordnungen bleiben dabei unberücksichtigt.
+
+## MARA10.02.f - 2026-10-02
+
+- Die automatische Farb-Zuordnung erkennt im SAP-Kurztext das eigenständige Kennzeichen `vzk` unabhängig von Groß-/Kleinschreibung. Bei `vzk` erhalten alle echten Produkt-Meshes mit höchster Priorität RAL 9007 Verzinkt; gespeicherte Zeichnungsnummer-Farbzuordnungen werden nicht angewendet und die Vorschau weist ausdrücklich darauf hin.
+- Ein RAL-Kürzel im Kurztext wie `R5010` löst dagegen keine globale Produktfarbe aus. Ohne `vzk` bleiben alle Meshes zunächst RAL 9007, und ausschließlich passende Zeichnungsnummern erhalten ihre gespeicherte Sonderfarbe.
+
+## MARA10.02.e - 2026-10-02
+
+- Das Feld für Namens-Farbregeln zeigt bei automatisch und aus Mesh-Auswahl erzeugten Regeln nur noch den verständlichen Namen beziehungsweise die Zeichnungsnummer, etwa `06-01071`. Der technische Regex bleibt intern gespeichert und fasst weiterhin alle Instanzen wie `_1`, `_2` und `_3` zusammen.
+- Beim Bearbeiten einer Zeichnungsnummer erzeugt die Regel automatisch den passenden internen Matcher erneut. Bereits vorhandene Regeln bleiben funktional unverändert; RAL, Oberfläche, Priorität und Neukonvertierung verwenden weiterhin den technischen Ausdruck.
+
+## MARA10.02.d - 2026-10-02
+
+- Die rechte Produktdetail-Sidebar besitzt auch bei deaktivierter Einstellung „fixiert anzeigen“ wieder einen eigenen, viewportbegrenzten vertikalen Scrollcontainer. Scrollen über Details verändert weder die linke Produktübersicht noch die Seitenscrollposition; Kopf und Aktionsleiste der Sidebar bleiben sichtbar.
+
+## MARA10.02.c - 2026-10-02
+
+- Unter dem SAP-Kurztext stehen „Automatische Farb-Zuordnung“ und „Farb-Zuordnungen“ nun direkt nebeneinander. „Farb-Zuordnungen“ öffnet die Einstellungen direkt an der gespeicherten Zeichnungsnummer-RAL-Liste; das Vorschaubild bleibt rechts. Auf schmalen Sidebars umbrechen die Aktionen ohne Überdeckung.
+
+## MARA10.02.b - 2026-10-02
+
+- Neue automatische Farb-Zuordnung in den Einstellungen: Zeichnungsnummern werden dauerhaft einer bestehenden RAL-Auswahl zugeordnet und können dort ergänzt oder gelöscht werden.
+- Der neue Button unter der Produktvorschau zeigt vor dem Übernehmen alle echten Produkt-Meshes nach Ziel-RAL. Er legt RAL 9007 Verzinkt als Grundfarbe an und überschreibt sie mit präzisen Zeichnungsnummer-Regeln; Instanzen wie `06-00763_1` und `06-00763_2` werden gemeinsam erkannt.
+- Die erzeugten Regeln bleiben im vorhandenen Namens-Farbregel-Editor sichtbar und bearbeitbar. Manuelle Regeln behalten ihre Priorität, Viewer-Hilfsobjekte werden ausgeschlossen und die GLB-Farbe wird weiterhin ausschließlich beim Neu-Konvertieren eingebrannt.
+
 ## MARA09.30.e - 2026-10-02
 
 - Die Produktdetail-Sidebar startet ohne gespeicherte Benutzerbreite mit 35 % statt 45 %. Splitter, Grenzen von 25 bis 60 %, lokale Breitenwiederherstellung und unabhängige Scrollbereiche von Produktbereich und Sidebar bleiben erhalten; Doppelklick und Home setzen auf die neue Standardbreite zurück.

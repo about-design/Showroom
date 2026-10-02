@@ -5,6 +5,7 @@ import { defineConfig } from 'vite'
 import { resolveProductSapRecord } from '../lib/sapShortText.mjs'
 import { compareShortText } from '../lib/shortTextSort.mjs'
 import { normalizeAutomaticCategoryMappings, planAutomaticCategoryAssignments, resolveAutomaticCategory } from '../lib/automaticCategoryAssignment.mjs'
+import { normalizeAutomaticColorMappings } from '../../src/lib/automaticColorAssignment.js'
 import { resolve, dirname, relative, isAbsolute, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
 import { buildColorOverridesFromMapping, normalizeMappingHex } from '../../src/lib/hexMapping.js'
@@ -394,6 +395,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           ? Number(saved.maxParallelConversions)
           : 3,
         automaticCategoryMappings: normalizeAutomaticCategoryMappings(saved?.automaticCategoryMappings),
+        automaticColorMappings: normalizeAutomaticColorMappings(saved?.automaticColorMappings),
       }
     } catch {
       return {
@@ -408,6 +410,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         sidebarWidthPercent: 35,
         maxParallelConversions: 3,
         automaticCategoryMappings: [],
+        automaticColorMappings: [],
       }
     }
   }
@@ -3020,6 +3023,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
             ? requestedParallelism
             : 3
           const automaticCategoryMappings = normalizeAutomaticCategoryMappings(body?.automaticCategoryMappings)
+          const automaticColorMappings = Array.isArray(body?.automaticColorMappings)
+            ? normalizeAutomaticColorMappings(body.automaticColorMappings)
+            : previousSettings.automaticColorMappings
           await writeFile(FILE_MANAGER_SETTINGS_PATH, JSON.stringify({
             fileManager,
             freeCommanderPath,
@@ -3032,6 +3038,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             sidebarWidthPercent,
             maxParallelConversions,
             automaticCategoryMappings,
+            automaticColorMappings,
           }, null, 2) + '\n', 'utf-8')
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({
@@ -3047,6 +3054,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             sidebarWidthPercent,
             maxParallelConversions,
             automaticCategoryMappings,
+            automaticColorMappings,
           }))
         } catch (error) {
           res.statusCode = 400

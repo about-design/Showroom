@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile, mkdtemp, unlink, rmdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { normalizeAutomaticCategoryMappings } from '../scripts/lib/automaticCategoryAssignment.mjs'
+import { normalizeAutomaticColorMappings } from '../src/lib/automaticColorAssignment.js'
 
 test('central mesh display setting defaults on and survives file reloads', async () => {
   const source = await readFile(new URL('../scripts/vite-plugin/dashboardApi.mjs', import.meta.url), 'utf8')
@@ -14,8 +16,8 @@ test('central mesh display setting defaults on and survives file reloads', async
   const path = join(dir, 'settings.json')
   const create = () => {
     let handler
-    new Function('readFile', 'writeFile', 'FILE_MANAGER_SETTINGS_PATH', 'middlewares', 'readBody',
-      getter + route)(readFile, writeFile, path, { use: (_url, fn) => { handler = fn } }, async req => Buffer.from(JSON.stringify(req.body)))
+    new Function('readFile', 'writeFile', 'FILE_MANAGER_SETTINGS_PATH', 'middlewares', 'readBody', 'normalizeAutomaticCategoryMappings', 'normalizeAutomaticColorMappings',
+      getter + route)(readFile, writeFile, path, { use: (_url, fn) => { handler = fn } }, async req => Buffer.from(JSON.stringify(req.body)), normalizeAutomaticCategoryMappings, normalizeAutomaticColorMappings)
     return async (method, body) => {
       let result
       await handler({ method, body }, { setHeader() {}, end(value) { result = JSON.parse(value) } })
@@ -26,6 +28,10 @@ test('central mesh display setting defaults on and survives file reloads', async
     assert.equal((await create()('GET')).showMeshRal, true)
     assert.equal((await create()('GET')).showViewCube, true)
     assert.equal((await create()('GET')).viewCubePosition, 'right')
+    assert.deepEqual((await create()('GET')).automaticColorMappings, [])
+    const automaticColorMappings = [{ drawingNumber: '06-00763', ral: 'RAL 7035' }]
+    assert.deepEqual((await create()('PUT', { automaticColorMappings })).automaticColorMappings, automaticColorMappings)
+    assert.deepEqual((await create()('GET')).automaticColorMappings, automaticColorMappings)
     for (const viewCubePosition of ['left', 'center', 'right']) {
       await create()('PUT', { showViewCube: false, viewCubePosition })
       const saved = await create()('GET')

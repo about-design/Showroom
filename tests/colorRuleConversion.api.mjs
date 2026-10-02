@@ -9,6 +9,7 @@ import { Document, NodeIO } from '@gltf-transform/core'
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import draco from 'draco3dgltf'
 import { colorRulesAreConverted } from '../src/lib/colorRuleConversion.js'
+import { buildAutomaticColorRulePlan } from '../src/lib/automaticColorAssignment.js'
 
 const root = await mkdtemp(join(tmpdir(), 'mara-color-conversion-'))
 process.env.LOG_DIR = join(root, 'logs')
@@ -32,8 +33,9 @@ try {
   const doc = new Document(), buffer = doc.createBuffer()
   const positions = doc.createAccessor().setType('VEC3').setArray(new Float32Array([0,0,0, 1,0,0, 0,1,0])).setBuffer(buffer)
   const material = doc.createMaterial('original').setBaseColorFactor([1,0,0,1])
-  const mesh = doc.createMesh('Teil').addPrimitive(doc.createPrimitive().setAttribute('POSITION', positions).setMaterial(material))
-  doc.createScene().addChild(doc.createNode('Teil').setMesh(mesh))
+  const meshName = 'fixture_06-00763_1'
+  const mesh = doc.createMesh(meshName).addPrimitive(doc.createPrimitive().setAttribute('POSITION', positions).setMaterial(material))
+  doc.createScene().addChild(doc.createNode(meshName).setMesh(mesh))
   const glb = join(root, 'public/models/output/fixture.glb')
   await io.write(glb, doc)
   const routes = new Map()
@@ -45,25 +47,25 @@ try {
     Promise.resolve(routes.get(path)(req, res)).catch(reject)
   })
   const load = async () => JSON.parse(await readFile(productsPath, 'utf8')).products[0]
-  const rule = { target: 'mesh', pattern: 'Teil', ral: 'RAL 7035', finish: 'pulver' }
+  const rules = buildAutomaticColorRulePlan([meshName], [{ drawingNumber: '06-00763', ral: 'RAL 7035' }]).rules
   const patch = rules => call('/__api/products', 'PATCH', { conversionPreset: { nameColorRules: rules } }, '/fixture')
   const register = rules => call('/__api/register-converted', 'POST', { productId: 'fixture', outputPaths: [glb], conversionPreset: { nameColorRules: rules }, conversionStatus: 'completed' })
-  await patch([rule])
-  assert.equal(colorRulesAreConverted(await load(), [rule]), false)
-  const success = await register([rule])
+  await patch(rules)
+  assert.equal(colorRulesAreConverted(await load(), rules), false)
+  const success = await register(rules)
   assert.equal(success.status, 200, JSON.stringify(success.data))
-  assert.equal(colorRulesAreConverted(await load(), [rule]), true)
+  assert.equal(colorRulesAreConverted(await load(), rules), true)
   const baked = await io.read(glb)
   assert.notDeepEqual(baked.getRoot().listMaterials()[0].getBaseColorFactor(), [1,0,0,1], 'Real bake must update GLB color')
-  const changed = { ...rule, ral: 'RAL 9007', finish: 'verzinkt' }
-  await patch([changed])
-  assert.equal(colorRulesAreConverted(await load(), [changed]), false)
+  const changed = buildAutomaticColorRulePlan([meshName], [{ drawingNumber: '06-00763', ral: 'RAL 9007' }]).rules
+  await patch(changed)
+  assert.equal(colorRulesAreConverted(await load(), changed), false)
   // Simulate an old running conversion completing after a newer edit was saved.
-  await register([rule])
-  assert.deepEqual((await load()).conversionPreset.nameColorRules, [changed])
-  assert.equal(colorRulesAreConverted(await load(), [changed]), false)
+  await register(rules)
+  assert.deepEqual((await load()).conversionPreset.nameColorRules, changed)
+  assert.equal(colorRulesAreConverted(await load(), changed), false)
   await writeFile(bakeWrapper, 'process.exit(1)')
-  const failure = await register([changed])
+  const failure = await register(changed)
   assert.ok(failure.data.warnings.some(w => w.reason === 'color-rule-bake-failed'))
   assert.equal(colorRulesAreConverted(await load(), [changed]), false)
   await patch([])
