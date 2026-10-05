@@ -24,6 +24,7 @@ try {
       { code: 'RAL 7035', name: 'Lichtgrau', hex: '#D7D7D7' },
       { code: 'RAL 9007', name: 'Verzinkt', hex: '#878581' },
     ]
+    const AUTOMATIC_COLOR_RULE_SOURCE = 'automatic-color-assignment'
     const ColorService = { getAllColors: () => colors, getRAL: ral => colors.find(c => c.code === ral) }
     let showMeshRal = true
     const applyViewCubeSettings = () => {}
@@ -73,7 +74,7 @@ try {
     check(!ralBadge.hidden && ralBadge.textContent === 'RAL 7035', 'Re-enabled badge missing')
     check(savedRules.length === 2, 'Exact override rule was not added')
     check(savedRules[0].pattern === initial.pattern && savedRules[0].ral === 'RAL 2001', 'General rule was altered')
-    check(savedRules[1].pattern === '35-00036' && savedRules[1].target === 'mesh', 'Selected text was not adopted verbatim')
+    check(savedRules[1].pattern === '(?:^|_)35-00036(?:_\\d+)?$' && savedRules[1].target === 'mesh', 'Selected drawing number was not converted to its technical pattern')
     check(savedRules[1].finish === 'pulver', 'Wrong powder finish')
     check(show().selectedOptions[0].textContent === 'RAL 7035 Lichtgrau', 'Updated RAL not selected')
     await change('RAL 9007', '35-00036')

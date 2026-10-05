@@ -346,6 +346,16 @@
 
 <!-- ═══════ Detail panel ═══════ -->
 <div class="detail-overlay" id="detailOverlay"></div>
+<aside class="detail-secondary-panel" id="detailSecondaryPanel" aria-hidden="true" aria-labelledby="detailSecondaryTitle">
+  <header class="detail-secondary-header">
+    <div class="detail-secondary-heading">
+      <span class="detail-secondary-label">Produktdetails</span>
+      <span class="detail-secondary-title" id="detailSecondaryTitle">Produktdetails</span>
+    </div>
+    <button type="button" class="detail-secondary-toggle" id="detailSecondaryClose" aria-label="Produktdetails einklappen" title="Produktdetails einklappen">›</button>
+  </header>
+  <div class="detail-secondary-content" id="detailSecondaryContent"></div>
+</aside>
 <aside class="detail-panel" id="detailPanel">
   <div class="detail-header">
     <div class="detail-header-left">
@@ -361,6 +371,7 @@
       </div>
       <span class="detail-position" id="detailPosition"></span>
     </div>
+    <button type="button" class="detail-secondary-toggle detail-secondary-toggle-primary" id="detailSecondaryToggle" aria-controls="detailSecondaryPanel" aria-expanded="false" aria-label="Produktdetails ausklappen" title="Produktdetails ausklappen">‹</button>
     <button class="detail-close" id="detailClose">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>

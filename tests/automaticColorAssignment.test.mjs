@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AUTOMATIC_COLOR_RULE_SOURCE, buildAutomaticColorRulePlan, drawingNumberFromMeshName, eanFromMeshNames, hasVzkShortTextMarker, normalizeAutomaticColorMappings } from '../src/lib/automaticColorAssignment.js'
+import { AUTOMATIC_COLOR_RULE_SOURCE, buildAutomaticColorRulePlan, drawingNumberFromMeshName, eanFromMeshNames, hasVzkShortTextMarker, normalizeAutomaticColorMappings, ralCodeFromShortText } from '../src/lib/automaticColorAssignment.js'
 
 test('automatic color assignment groups drawing-number instances and preserves unmatched meshes as galvanized', () => {
   const mappings = normalizeAutomaticColorMappings([
@@ -64,4 +64,20 @@ test('vzk in SAP short text overrides normal mappings but preserves always mappi
   assert.deepEqual(ralPlan.counts, [{ ral: 'RAL 5010', count: 2 }, { ral: 'RAL 9007', count: 1 }])
   assert.equal(ralPlan.rules.length, 2)
   assert.equal(ralPlan.rules.some((rule) => rule.displayPattern === '06-01071' && rule.ral === 'RAL 5010'), true)
+})
+
+test('matching SAP RAL activates only the matching non-always drawing mapping', () => {
+  assert.equal(ralCodeFromShortText('MP DSS H 1825 LA100 R2001/vzk kpl'), 'RAL 2001')
+  assert.equal(ralCodeFromShortText('R20012'), null)
+  assert.equal(ralCodeFromShortText('RAL 2001, vzk'), 'RAL 2001')
+  const names = ['product_31-01789_1', 'product_31-01789_2', 'product_31-01434_1']
+  const plan = buildAutomaticColorRulePlan(names, [
+    { drawingNumber: '31-01789', ral: 'RAL 2001' },
+    { drawingNumber: '31-01434', ral: 'RAL 5010' },
+  ], 'MP DSS H 1825 LA100 R2001/vzk kpl')
+  assert.equal(plan.shortTextRal, 'RAL 2001')
+  assert.equal(plan.shortTextRalMappingCount, 1)
+  assert.deepEqual(plan.counts, [{ ral: 'RAL 2001', count: 2 }, { ral: 'RAL 9007', count: 1 }])
+  assert.equal(plan.rules.some((rule) => rule.displayPattern === '31-01789' && rule.ral === 'RAL 2001'), true)
+  assert.equal(plan.rules.some((rule) => rule.displayPattern === '31-01434'), false)
 })

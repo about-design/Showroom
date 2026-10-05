@@ -28,6 +28,11 @@ export function hasVzkShortTextMarker(shortText) {
   return /(?:^|[^A-Za-z0-9])vzk(?=$|[^A-Za-z0-9])/i.test(String(shortText || ''))
 }
 
+export function ralCodeFromShortText(shortText) {
+  const match = String(shortText || '').match(/(?:^|[^A-Za-z0-9])R(?:AL)?\s*(\d{4})(?=$|[^A-Za-z0-9])/i)
+  return match ? `RAL ${match[1]}` : null
+}
+
 export function eanFromMeshNames(meshNames, productIdentifier = '') {
   const names = (Array.isArray(meshNames) ? meshNames : []).map((name) => String(name || '').trim()).filter(Boolean)
   const candidates = [
@@ -44,7 +49,11 @@ export function buildAutomaticColorRulePlan(meshNames, mappings, shortText = '',
   const normalizedMappings = normalizeAutomaticColorMappings(mappings)
   const normalMappings = normalizedMappings.filter((mapping) => !mapping.always)
   const alwaysMappings = normalizedMappings.filter((mapping) => mapping.always)
-  const applicableMappings = isVzkProduct ? alwaysMappings : [...normalMappings, ...alwaysMappings]
+  const shortTextRal = ralCodeFromShortText(shortText)
+  const shortTextMappings = normalMappings.filter((mapping) => mapping.ral === shortTextRal)
+  const applicableMappings = isVzkProduct
+    ? [...shortTextMappings, ...alwaysMappings]
+    : [...normalMappings, ...alwaysMappings]
   const byDrawingNumber = new Map(applicableMappings.map((mapping) => [mapping.drawingNumber, mapping.ral]))
   const assignments = names.map((name) => ({
     name,
@@ -76,6 +85,8 @@ export function buildAutomaticColorRulePlan(meshNames, mappings, shortText = '',
     counts: [...counts.entries()].map(([ral, count]) => ({ ral, count })),
     rules,
     isVzkProduct,
+    shortTextRal,
+    shortTextRalMappingCount: shortTextMappings.length,
     ean,
     alwaysMappingCount: alwaysMappings.length,
   }

@@ -1,5 +1,43 @@
 # Changelog
 
+## MARA10.05.b - 2026-10-05
+
+- History und Versionsstand für die SAP-Kurztext-RAL-Zuordnung fortgeführt.
+- Die passende Zeichnungsnummern-Farbe bei erkanntem RAL-Code sowie die Priorität von „Immer“ bleiben dokumentiert.
+
+## MARA10.05.a - 2026-10-05
+
+- SAP-Kurztext-RAL-Codes wie `R2001` aktivieren nun die passende gespeicherte Zeichnungsnummern-Farbzuordnung auch ohne „Immer“.
+- Nicht passende Zuordnungen bleiben bei `vzk` inaktiv; „Immer“ und die gemeinsame Einfärbung aller Instanzen derselben Zeichnungsnummer bleiben unverändert.
+
+## MARA10.02.r - 2026-10-02
+
+- Eine gespeicherte Zeichnungsnummern-Farbzuordnung ohne „Immer“ wird bei einem passenden RAL-Code im SAP-Kurztext aktiviert, auch wenn der Kurztext zusätzlich `vzk` enthält.
+- Nicht passende Zuordnungen bleiben unverändert; Mehrfachinstanzen derselben ursprünglichen Zeichnungsnummer werden gemeinsam eingefärbt.
+
+## MARA10.02.q - 2026-10-02
+
+- Die scrollbare Liste unter „Einzelteile (Meshes)“ nutzt im festen Produktdetailbereich jetzt den tatsächlich verbleibenden vertikalen Platz, statt bei 280 px stehenzubleiben. Große Fenster zeigen dadurch mehr Mesh-Zeilen gleichzeitig.
+- Bei geringerer Fensterhöhe bleibt ausschließlich die Mesh-Liste intern scrollbar. Vorschau, Hinweisbereich, Auswahl, Checkboxen, Kameraaktionen, zweite Sidebar und die feste Aktionsleiste mit Produkt entfernen, Neu konvertieren, Abbrechen und Übernehmen bleiben getrennt und bedienbar.
+
+## MARA10.02.p - 2026-10-02
+
+- „Gehe zu Namens-Farbregel“ im Mesh-Kontextmenü schließt das Menü und öffnet die zweite Sidebar zuverlässig. Sie verwendet die bestehende Last-wins-Auswertung, hebt deren Regel hervor und zeigt ohne Treffer einen eindeutigen Hinweis; Regelwerte werden dabei nicht gespeichert oder verändert.
+- Unter „Einzelteile (Meshes)“ bleibt eine kompakte einzeilige Erklärung sichtbar. Der vollständige Hilfetext ist über einen tastaturbedienbaren Pfeil mit `aria-expanded` separat ein- und ausklappbar; Mesh-Liste und ihr Scrollstand bleiben unverändert.
+- Eine erneute RAL-Auswahl für eine vorhandene Zeichnungsnummer aktualisiert nun deren technische Regel statt eine Duplikatregel anzulegen. Der Browser-Test stellt den benötigten Regelquellenwert bereit und prüft die technische Speicherung.
+
+## MARA10.02.o - 2026-10-02
+
+- „Einzelteile (Meshes)“ bleibt dauerhaft geöffnet; der bisherige Auf-/Zuklapp-Schalter entfällt. Auch bei langen Listen bleibt der vorhandene Scrollbereich der Mesh-Übersicht unabhängig von Produktdetail und zweiter Sidebar nutzbar.
+- Die Auswahl einer Mesh-Zeile öffnet die zweite Sidebar und zeigt dort die mit der vorhandenen Last-wins-Logik ermittelte Namens-Farbregel. Die zugehörige Regelkarte wird sichtbar positioniert und hervorgehoben, ohne Inhalt, Priorität oder gespeicherte Daten zu verändern.
+- Für Meshes ohne passende Namens-Farbregel erscheint ein klarer Hinweis ohne falschen Treffer. Checkboxen für den GLB-Einschluss sowie die Kameraaktion bleiben getrennte, unveränderte Aktionen.
+
+## MARA10.02.n - 2026-10-02
+
+- Der zuvor unterhalb der festen Produktvorschau liegende Detail-Scrollbereich ist jetzt eine zweite, separat ein- und ausklappbare Sidebar. Die Felder werden nicht kopiert, sondern als derselbe vorhandene DOM-Bereich verschoben; bestehende Editoren und Aktionen bleiben dadurch funktional.
+- Der neue Pfeil in der primären Produkt-Sidebar öffnet oder schließt die Zusatz-Sidebar. Wird ein Mesh ausgewählt, öffnet sie automatisch und übernimmt den Mesh-Namen als Kontext; ein Produktwechsel oder das Schließen der Detailansicht klappt sie wieder ein.
+- Primäre Sidebar, Splitter, Produktübersicht und mobile Darstellung bleiben erhalten; auf schmalen Ansichten legt sich die Zusatz-Sidebar über die Produkt-Sidebar, ohne horizontale Seitenscrollbar.
+
 ## MARA10.02.m - 2026-10-02
 
 - Der ESC-Handler des Farbzuordnungsdialogs wird jetzt in der Capture-Phase registriert und erst nach vollständiger Event-Propagation ausgewertet. Damit schließt ein normales `Esc` den Dialog zuverlässig, auch wenn ein fokussiertes Element die Bubble-Propagation stoppt.

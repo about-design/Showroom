@@ -20,11 +20,15 @@ try {
   await page.addStyleTag({ content: css })
   await page.evaluate(() => {
     document.querySelector('#app').classList.add('detail-open')
+    document.querySelector('#app').classList.add('detail-secondary-open')
     document.querySelector('#detailPanel').classList.add('open')
+    document.querySelector('#detailSecondaryPanel').classList.add('open')
     document.querySelector('#detailPanel').style.transition = 'none'
+    document.querySelector('#detailSecondaryPanel').style.transition = 'none'
     document.querySelector('#productGrid').innerHTML = Array.from({ length: 48 }, (_, i) =>
       `<div class="product-card" style="height:180px">Produkt ${i}</div>`).join('')
-    document.querySelector('#detailContent').innerHTML = `<div style="height:180px;background:#ddd">3D-Vorschau</div>${
+    document.querySelector('#detailContent').innerHTML = '<div style="height:180px;background:#ddd">3D-Vorschau</div>'
+    document.querySelector('#detailSecondaryContent').innerHTML = `<div class="detail-scroll-content">${
       Array.from({ length: 35 }, (_, i) => `<section class="detail-section" style="height:90px">Detail ${i}</section>`).join('')}`
   })
   await page.addScriptTag({ content: controls + '\ninitControlsPanel()' })
@@ -35,35 +39,36 @@ try {
       const get = selector => document.querySelector(selector)
       const box = selector => { const r = get(selector).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }
       const rootScroll = document.scrollingElement
-      const active = [document.documentElement, document.body, ...document.querySelectorAll('#app, .main-content, #productScroll, #detailPanel, #detailContent')]
+      const active = [document.documentElement, document.body, ...document.querySelectorAll('#app, .main-content, #productScroll, #detailPanel, #detailContent, .detail-scroll-content')]
         .filter(el => el.scrollHeight > el.clientHeight + 1 && ['auto', 'scroll'].includes(getComputedStyle(el).overflowY))
         .map(el => el.id || el.className || el.tagName)
       return { active, rootHeight: rootScroll.scrollHeight, viewportHeight: innerHeight,
-        cards: box('#productScroll'), main: box('.main-content'), sidebar: box('#detailPanel'), details: box('#detailContent'),
+        cards: box('#productScroll'), main: box('.main-content'), sidebar: box('#detailPanel'), secondary: box('#detailSecondaryPanel'), details: box('.detail-scroll-content'),
         splitter: box('.detail-splitter') }
     })
     console.log(label, state)
-    assert.deepEqual(state.active, ['productScroll', 'detailContent'], `${label}: actual scroll elements`)
+    assert.deepEqual(state.active, ['productScroll', 'detail-scroll-content'], `${label}: actual scroll elements`)
     assert.ok(state.rootHeight <= state.viewportHeight + 1, `${label}: page must not scroll`)
     assert.ok(Math.abs(state.cards.right - state.main.right) < 1, `${label}: cards reach splitter`)
-    assert.ok(Math.abs(state.cards.right - state.sidebar.left) < 2, `${label}: cards and sidebar adjacent`)
-    assert.ok(Math.abs(state.details.right - 1440) < 1, `${label}: sidebar scrollbar at viewport edge`)
-    assert.ok(state.splitter.left >= state.cards.right - 1 && state.splitter.right <= state.sidebar.left + 11, `${label}: splitter geometry`)
+    assert.ok(Math.abs(state.cards.right - state.secondary.left) < 2, `${label}: cards and secondary sidebar adjacent`)
+    assert.ok(Math.abs(state.secondary.right - state.sidebar.left) < 2, `${label}: sidebars adjacent`)
+    assert.ok(Math.abs(state.details.right - state.sidebar.left) < 1, `${label}: detail scrollbar at primary sidebar edge`)
+    assert.ok(state.splitter.left >= state.secondary.right - 1 && state.splitter.right <= state.sidebar.left + 11, `${label}: splitter geometry`)
   }
 
   await check('initial')
   const cards = await page.$('#productScroll')
-  const details = await page.$('#detailContent')
   await cards.hover()
   await page.mouse.wheel({ deltaY: 440 })
   await new Promise(resolve => setTimeout(resolve, 150))
   let positions = await page.evaluate(() => [document.querySelector('#productScroll').scrollTop, document.querySelector('#detailContent').scrollTop])
   assert.ok(positions[0] > 0 && positions[1] === 0, 'wheel over cards scrolls only cards')
   const cardPosition = positions[0]
+  const details = await page.$('.detail-scroll-content')
   await details.hover()
   await page.mouse.wheel({ deltaY: 440 })
   await new Promise(resolve => setTimeout(resolve, 150))
-  positions = await page.evaluate(() => [document.querySelector('#productScroll').scrollTop, document.querySelector('#detailContent').scrollTop])
+  positions = await page.evaluate(() => [document.querySelector('#productScroll').scrollTop, document.querySelector('.detail-scroll-content').scrollTop])
   assert.ok(positions[0] === cardPosition && positions[1] > 0, 'wheel over sidebar scrolls only sidebar')
   await page.evaluate(() => document.querySelector('#dashboardControlsToggle').click())
   await new Promise(resolve => setTimeout(resolve, 220))

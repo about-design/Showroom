@@ -226,7 +226,7 @@ function updateDimensionsUi(product) {
   const specs = product?.specs || {}
   if (selectedProductId === product?.id && detailContent) {
     for (const k of ['width', 'height', 'depth', 'load']) {
-      const input = detailContent.querySelector(`[data-field="specs.${k}"]`)
+      const input = document.querySelector(`[data-field="specs.${k}"]`)
       if (input) input.value = specs[k] || ''
     }
   }
@@ -668,13 +668,43 @@ const appShell = $('#app')
 initControlsPanel()
 const detailOverlay = $('#detailOverlay')
 const detailPanel = $('#detailPanel')
+const detailSecondaryPanel = $('#detailSecondaryPanel')
+const detailSecondaryContent = $('#detailSecondaryContent')
+const detailSecondaryTitle = $('#detailSecondaryTitle')
 initDetailSplitter()
 const detailTitle = $('#detailTitle')
 const detailContent = $('#detailContent')
+function setDetailSecondaryPanelOpen(open) {
+  detailSecondaryPanel?.classList.toggle('open', open)
+  detailSecondaryPanel?.setAttribute('aria-hidden', String(!open))
+  appShell.classList.toggle('detail-secondary-open', open)
+  const toggle = document.getElementById('detailSecondaryToggle')
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', String(open))
+    toggle.setAttribute('aria-label', open ? 'Produktdetails einklappen' : 'Produktdetails ausklappen')
+    toggle.title = toggle.getAttribute('aria-label')
+    toggle.textContent = open ? '›' : '‹'
+  }
+}
+function showDetailSecondaryPanelForMeshName(name) {
+  if (detailSecondaryTitle) detailSecondaryTitle.textContent = name || 'Produktdetails'
+  setDetailSecondaryPanelOpen(true)
+}
+function showDetailSecondaryPanelForMesh(index) {
+  const mesh = detailPreviewModelRoot ? collectMeshesFromGroup(detailPreviewModelRoot)[index] : null
+  showDetailSecondaryPanelForMeshName(mesh?.name || '')
+}
+function moveDetailScrollContentToSecondaryPanel() {
+  const scrollContent = detailContent.querySelector('.detail-scroll-content')
+  if (scrollContent && detailSecondaryContent) detailSecondaryContent.replaceChildren(scrollContent)
+}
 function showEmptyDetailPanel() {
   detailTitle.textContent = 'Produkt auswählen'
   document.getElementById('detailShortText').textContent = ''
   detailContent.innerHTML = '<div class="detail-empty-state">Produkt auswählen</div>'
+  detailSecondaryContent?.replaceChildren()
+  if (detailSecondaryTitle) detailSecondaryTitle.textContent = 'Produktdetails'
+  setDetailSecondaryPanelOpen(false)
   detailPanel.classList.add('open')
   appShell.classList.add('detail-open')
 }
@@ -1434,6 +1464,8 @@ function bindEvents() {
 
   detailOverlay.addEventListener('click', (event) => event.preventDefault())
   $('#detailClose').addEventListener('click', closeDetail)
+  $('#detailSecondaryToggle')?.addEventListener('click', () => setDetailSecondaryPanelOpen(!detailSecondaryPanel?.classList.contains('open')))
+  $('#detailSecondaryClose')?.addEventListener('click', () => setDetailSecondaryPanelOpen(false))
   $('#btnCancelDetail').addEventListener('click', closeDetail)
   $('#detailPrev').addEventListener('click', () => navigateDetail(-1))
   $('#detailNext').addEventListener('click', () => navigateDetail(1))
@@ -3136,7 +3168,7 @@ function findMeshNameRuleByPattern(pattern) {
   if (!rows) return null
   const row = [...rows.querySelectorAll('.detail-name-rule-row')].find(candidate =>
     candidate.querySelector('.name-rule-target')?.value === 'mesh' &&
-    candidate.querySelector('.name-rule-pattern')?.value.trim() === pattern,
+    (candidate.dataset.technicalPattern || candidate.querySelector('.name-rule-pattern')?.value.trim()) === pattern,
   )
   return row ? { row, pattern } : null
 }
@@ -3209,8 +3241,12 @@ async function applyAutomaticColorAssignment(product, button) {
     })
     const vzkNotice = plan.isVzkProduct
       ? plan.alwaysMappingCount
-        ? '\nNormale Zeichnungsnummer-Farbzuordnungen werden nicht angewendet. „Immer“-Zuordnungen bleiben aktiv.'
-        : '\nZeichnungsnummer-Farbzuordnungen werden nicht angewendet'
+        ? plan.shortTextRalMappingCount
+          ? `\n„Immer“-Zuordnungen und passende ${plan.shortTextRal}-Zuordnungen bleiben aktiv.`
+          : '\nNormale Zeichnungsnummer-Farbzuordnungen werden nicht angewendet. „Immer“-Zuordnungen bleiben aktiv.'
+        : plan.shortTextRalMappingCount
+          ? `\nDie passende ${plan.shortTextRal}-Zeichnungsnummern-Zuordnung bleibt aktiv.`
+          : '\nZeichnungsnummer-Farbzuordnungen werden nicht angewendet'
       : ''
     if (!window.confirm(`${plan.assignments.length} Einzelteile erkannt\n${summary.join('\n')}${vzkNotice}\n\nAutomatische Farbregeln übernehmen?`)) return
     const rows = document.getElementById('detailNameRulesRows')
@@ -3249,10 +3285,6 @@ function getSelectedMeshNameText(label) {
 
 function closeDetailMeshDrawer() {
   closeMeshNameExpansion()
-  const drawerToggle = document.getElementById('detailMeshDrawerToggle')
-  const drawerContent = document.getElementById('detailMeshDrawerContent')
-  if (drawerToggle) drawerToggle.setAttribute('aria-expanded', 'false')
-  if (drawerContent) drawerContent.hidden = true
 }
 
 function focusDetailNameRule(row) {
@@ -3295,19 +3327,16 @@ function openMeshNameMenu(event, name, matchingRules = [], fullMeshName = name, 
   ralSelect.value = matchingRule?.row.querySelector('.name-rule-ral')?.value || ''
   ralLabel.append(ralSelect)
   menu.append(ralLabel)
-  matchingRules.forEach((rule) => {
-    const goToRule = document.createElement('button')
-    goToRule.type = 'button'
-    goToRule.setAttribute('role', 'menuitem')
-    goToRule.textContent = matchingRules.length === 1
-      ? 'Gehe zu Namens-Farbregel'
-      : `Gehe zu Regel: ${rule.pattern}`
-    goToRule.addEventListener('click', () => {
-      closeMeshNameMenu()
-      focusDetailNameRule(rule.row)
-    })
-    menu.append(goToRule)
+  const goToRule = document.createElement('button')
+  goToRule.type = 'button'
+  goToRule.setAttribute('role', 'menuitem')
+  goToRule.textContent = 'Gehe zu Namens-Farbregel'
+  goToRule.addEventListener('click', () => {
+    closeMeshNameMenu()
+    showDetailSecondaryPanelForMeshName(fullMeshName)
+    showMatchingNameRuleForMeshName(fullMeshName)
   })
+  menu.append(goToRule)
   document.body.append(menu)
   menu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - menu.offsetWidth))}px`
   menu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - menu.offsetHeight))}px`
@@ -3773,7 +3802,7 @@ let detailCoordinateSystem = null
 const DETAIL_COORDINATE_SYSTEM_KEY = 'mara.dashboard.detailCoordinateSystem'
 let detailCoordinateSystemVisible = localStorage.getItem(DETAIL_COORDINATE_SYSTEM_KEY) === 'true'
 let detailCameraAxes = null
-let detailRenderer = null, detailPreviewScene = null, detailControls = null, detailAnimId = null, detailResizeObs = null
+let detailRenderer = null, detailPreviewScene = null, detailControls = null, detailAnimId = null, detailResizeObs = null, detailViewerHeightObs = null
 /** Detail-GLB: Kamera/Root für Einzelteil-Isolation (Meshes) */
 let detailPreviewCamera = null
 let detailPreviewModelRoot = null
@@ -4003,7 +4032,7 @@ const COLLAPSIBLE_DETAIL_HELP = new Map([
 ])
 
 function bindCollapsibleDetailHelp() {
-  detailContent.querySelectorAll('.detail-section').forEach((section) => {
+  document.querySelectorAll('#detailContent .detail-section, #detailSecondaryContent .detail-section').forEach((section) => {
     const title = section.querySelector('.detail-section-title')?.textContent.trim()
     const summary = COLLAPSIBLE_DETAIL_HELP.get(title)
     const helpText = section.querySelector(':scope > p.cc-muted')
@@ -4108,6 +4137,8 @@ async function openDetail(id) {
   if (p.type === 'composed' && p.parts?.length) {
     await Promise.all(p.parts.map((pt) => fetchProductById(pt.productId)))
   }
+  setDetailSecondaryPanelOpen(false)
+  if (detailSecondaryTitle) detailSecondaryTitle.textContent = 'Produktdetails'
   selectedProductId = id
   productGrid.querySelectorAll('.product-card').forEach(c => c.classList.toggle('selected', c.dataset.id === id))
   // Jede Auswahl wird am oberen Rand des Kartenbereichs ausgerichtet. Dadurch
@@ -4135,7 +4166,7 @@ async function openDetail(id) {
   seedDetailRotationFromProduct(p)
 
   detailContent.innerHTML = `
-    <div class="detail-fixed-content">
+    <div class="detail-fixed-content${!isComposed && p.glbFile ? ' detail-fixed-content-with-meshes' : ''}">
       <div class="detail-preview" id="detailPreviewWrap">
       <div class="card-preview-placeholder">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;opacity:.3">
@@ -4168,17 +4199,22 @@ async function openDetail(id) {
       ` : ''}
     ${!isComposed && p.glbFile ? `
     <div class="detail-section detail-mesh-parts" id="detailMeshPartsSection" hidden>
-      <button type="button" class="detail-mesh-drawer-toggle" id="detailMeshDrawerToggle" aria-expanded="false">
+      <div class="detail-mesh-drawer-heading">
         <span class="detail-section-title">Einzelteile (Meshes)</span>
         <span class="detail-mesh-drawer-count" id="detailMeshDrawerCount"></span>
-        <span class="detail-mesh-drawer-arrow" aria-hidden="true">▼</span>
-      </button>
-      <div class="detail-mesh-drawer-content" id="detailMeshDrawerContent" hidden>
-        <p class="cc-muted" style="font-size:.72rem;margin:0 0 .5rem;line-height:1.4">
+      </div>
+      <div class="detail-mesh-drawer-content" id="detailMeshDrawerContent">
+        <div class="detail-mesh-help">
+          <div class="detail-mesh-help-summary">
+            <span>Häkchen = im nächsten GLB enthalten · Zeile = nur dieses Teil anzeigen</span>
+            <button type="button" class="detail-mesh-help-toggle" id="detailMeshHelpToggle" aria-expanded="false" aria-controls="detailMeshHelpContent" aria-label="Mesh-Hilfe ausklappen" title="Mesh-Hilfe ausklappen">▼</button>
+          </div>
+          <p class="cc-muted" id="detailMeshHelpContent" hidden>
           <strong>Häkchen</strong> = Teil kommt beim nächsten <strong>Neu konvertieren</strong> ins GLB. Häkchen entfernen = Teil wird aus dem Export entfernt
           (schneller Weg für die <em>Sichtbarkeit beim Export</em> unten – erzeugt beim Speichern automatisch die passenden Regeln).<br>
           Zeile anklicken: nur dieses Teil anzeigen · Kamera-Symbol: Ansicht · erneut: alle Teile.
-        </p>
+          </p>
+        </div>
         <div class="detail-mesh-toolbar">
           <span class="detail-mesh-sel-count" id="detailMeshSelCount"></span>
           <span class="detail-mesh-toolbar-spacer"></span>
@@ -4599,13 +4635,15 @@ async function openDetail(id) {
     })
   }
 
-  const meshDrawerToggle = detailContent.querySelector('#detailMeshDrawerToggle')
-  const meshDrawerContent = detailContent.querySelector('#detailMeshDrawerContent')
-  if (meshDrawerToggle && meshDrawerContent) {
-    meshDrawerToggle.addEventListener('click', () => {
-      const expanded = meshDrawerToggle.getAttribute('aria-expanded') === 'true'
-      meshDrawerToggle.setAttribute('aria-expanded', String(!expanded))
-      meshDrawerContent.hidden = expanded
+  const meshHelpToggle = detailContent.querySelector('#detailMeshHelpToggle')
+  const meshHelpContent = detailContent.querySelector('#detailMeshHelpContent')
+  if (meshHelpToggle && meshHelpContent) {
+    meshHelpToggle.addEventListener('click', () => {
+      const expanded = meshHelpToggle.getAttribute('aria-expanded') === 'true'
+      meshHelpToggle.setAttribute('aria-expanded', String(!expanded))
+      meshHelpToggle.setAttribute('aria-label', expanded ? 'Mesh-Hilfe ausklappen' : 'Mesh-Hilfe einklappen')
+      meshHelpToggle.title = meshHelpToggle.getAttribute('aria-label')
+      meshHelpContent.hidden = expanded
     })
   }
 
@@ -4621,6 +4659,7 @@ async function openDetail(id) {
   })
   bindDetailReductionRules()
   bindDetailVisibilityRules()
+  moveDetailScrollContentToSecondaryPanel()
 }
 
 /* ═══════════════════════════════════════════════
@@ -5506,6 +5545,42 @@ function toggleDetailMeshIsolate(index) {
   else detailMeshIsolateIndex = index
   applyDetailMeshVisibility()
   updateDetailMeshRowClasses()
+  showDetailSecondaryPanelForMesh(index)
+  showMatchingNameRuleForMesh(index)
+}
+
+function showMatchingNameRuleForMesh(index) {
+  const meshes = detailPreviewModelRoot ? collectMeshesFromGroup(detailPreviewModelRoot) : []
+  const mesh = meshes[index]
+  showMatchingNameRuleForMeshName(mesh?.name || '')
+}
+
+function showMatchingNameRuleForMeshName(name) {
+  const rows = document.getElementById('detailNameRulesRows')
+  const section = rows?.closest('.detail-section')
+  if (!rows || !section) return
+
+  section.querySelectorAll('.detail-name-rule-row.is-mesh-selected-rule').forEach((row) => {
+    row.classList.remove('is-mesh-selected-rule')
+  })
+  let notice = section.querySelector('.detail-mesh-rule-match-notice')
+  if (!notice) {
+    notice = document.createElement('p')
+    notice.className = 'detail-mesh-rule-match-notice'
+    section.querySelector('.detail-section-title')?.after(notice)
+  }
+
+  const meshName = name || '(ohne Namen)'
+  const rule = getMatchingMeshColorRule(getCurrentMatchingNameRules(name))
+  if (rule) {
+    rule.row.classList.add('is-mesh-selected-rule')
+    notice.textContent = `Passende Namens-Farbregel für „${meshName}“: ${rule.pattern}`
+    requestAnimationFrame(() => rule.row.scrollIntoView({ block: 'center' }))
+    return
+  }
+
+  notice.textContent = `Für „${meshName}“ ist keine Namens-Farbregel vorhanden.`
+  requestAnimationFrame(() => notice.scrollIntoView({ block: 'center' }))
 }
 
 function focusDetailMeshPart(index) {
@@ -5837,6 +5912,17 @@ function loadDetailPreview(product) {
       camera.updateProjectionMatrix()
     }
 
+    const selectedCardPreview = document.querySelector(`.product-card[data-id="${cssEscapeId(product.id)}"] .card-preview`)
+    const syncViewerHeight = () => {
+      if (!selectedCardPreview) return
+      const height = Math.max(1, Math.round(selectedCardPreview.getBoundingClientRect().height))
+      wrap.style.setProperty('--product-viewer-height', `${height}px`)
+      resizeDetailPreview()
+    }
+    syncViewerHeight()
+    detailViewerHeightObs = selectedCardPreview ? new ResizeObserver(syncViewerHeight) : null
+    detailViewerHeightObs?.observe(selectedCardPreview)
+
     detailResizeObs = new ResizeObserver(() => {
       resizeDetailPreview()
     })
@@ -5882,6 +5968,8 @@ function loadDetailPreview(product) {
 }
 
 function disposeDetailPreview() {
+  detailViewerHeightObs?.disconnect()
+  detailViewerHeightObs = null
   detailCameraAxes?.dispose()
   detailCameraAxes = null
   detailViewCube?.dispose()
@@ -5956,6 +6044,7 @@ function closeDetail() {
   updateCardColorRuleStatuses(currentPageProducts)
   closeMeshNameExpansion()
   closeMeshNameMenu()
+  setDetailSecondaryPanelOpen(false)
   disposeDetailPreview()
   disposeDetailPartPreviews()
   detailColorCompareState = null
