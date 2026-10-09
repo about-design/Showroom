@@ -1,11 +1,11 @@
 import { validThumbnailQuaternion } from '../../src/lib/thumbnailCamera.js'
 import { isStepFile, replaceStep } from '../lib/replaceStep.mjs'
-import { recordColorRuleConversion, colorRulesVersion, removedColorRules } from '../../src/lib/colorRuleConversion.js'
+import { recordColorRuleConversion, colorRulesVersion, removedColorRules, ruleMatchesMesh, colorRulesAreConverted } from '../../src/lib/colorRuleConversion.js'
 import { defineConfig } from 'vite'
 import { resolveProductSapRecord } from '../lib/sapShortText.mjs'
 import { compareShortText } from '../lib/shortTextSort.mjs'
 import { normalizeAutomaticCategoryMappings, planAutomaticCategoryAssignments, resolveAutomaticCategory } from '../lib/automaticCategoryAssignment.mjs'
-import { normalizeAutomaticColorMappings } from '../../src/lib/automaticColorAssignment.js'
+import { normalizeAutomaticColorMappings, drawingNumberFromMeshName } from '../../src/lib/automaticColorAssignment.js'
 import { resolve, dirname, relative, isAbsolute, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
 import { buildColorOverridesFromMapping, normalizeMappingHex } from '../../src/lib/hexMapping.js'
@@ -124,6 +124,25 @@ function extractGlbMaterialRgbColors(glbBuffer) {
     colors.add(rgb.join(','))
   }
   return colors
+}
+
+/** Liefert technische Node-/Mesh-Namen aus dem GLB, ohne die GLB-Datei zu verändern. */
+function extractGlbMeshNames(glbBuffer) {
+  if (!glbBuffer || glbBuffer.length < 20 || glbBuffer.readUInt32LE(0) !== 0x46546c67) return []
+  const jsonLen = glbBuffer.readUInt32LE(12)
+  const jsonType = glbBuffer.readUInt32LE(16)
+  if (jsonType !== 0x4e4f534a || !Number.isFinite(jsonLen) || jsonLen <= 0) return []
+  const end = 20 + jsonLen
+  if (end > glbBuffer.length) return []
+  try {
+    const doc = JSON.parse(glbBuffer.subarray(20, end).toString('utf-8'))
+    const meshes = Array.isArray(doc?.meshes) ? doc.meshes : []
+    const meshNames = meshes.map((mesh) => mesh?.name).filter(Boolean)
+    const nodeNames = (Array.isArray(doc?.nodes) ? doc.nodes : []).map((node) => node?.name).filter(Boolean)
+    return [...new Set([...meshNames, ...nodeNames].map((name) => String(name).trim()).filter(Boolean))]
+  } catch {
+    return []
+  }
 }
 
 /**
@@ -387,6 +406,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
         showMeshRal: saved?.showMeshRal !== false,
         showViewCube: saved?.showViewCube !== false,
         showCoordinateSystem: saved?.showCoordinateSystem === true,
+        showCoordinateOrigin: saved?.showCoordinateOrigin !== false,
+        coordinateAxisSizePx: Math.min(100, Math.max(25, Number(saved?.coordinateAxisSizePx) || 50)),
         viewCubePosition: ['left', 'center', 'right'].includes(saved?.viewCubePosition) ? saved.viewCubePosition : 'right',
         detailSidebarPinned: saved?.detailSidebarPinned !== false,
         sidebarWidthPercent: [35, 40, 45, 50, 55].includes(Number(saved?.sidebarWidthPercent))
@@ -405,6 +426,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
         showMeshRal: true,
         showViewCube: true,
         showCoordinateSystem: false,
+        showCoordinateOrigin: true,
+        coordinateAxisSizePx: 50,
         viewCubePosition: 'right',
         detailSidebarPinned: true,
         sidebarWidthPercent: 35,
@@ -1579,6 +1602,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             }
           }
 
+          // Bauteilbezeichnungen werden als Produktmetadaten aus der technischen
+          // Zeichnungsnummer abgeleitet. Die GLB-Mesh-Namen selbst bleiben unverändert.
           let ralCode = null
           let ralSource = null
           {
@@ -1960,6 +1985,34 @@ export function registerDashboardApi(middlewares, opts = {}) {
               } catch (e) {
                                 log.scoped("register-converted").warn("color-parity-check:", e?.message || e)
               }
+            }
+          }
+
+          // Das GLB liegt erst nach dem Kopier-/Bake-Schritt zuverlässig am
+          // Zielpfad. Die Zuordnung erfolgt deshalb hier noch im selben
+          // Konvertierungslauf, aber erst nachdem das GLB fertig vorliegt.
+          const automaticColorMappings = (await getFileManagerSettings()).automaticColorMappings
+          const partDescriptionsByDrawingNumber = new Map(
+            normalizeAutomaticColorMappings(automaticColorMappings)
+              .filter((mapping) => mapping.partName)
+              .map((mapping) => [mapping.drawingNumber, mapping.partName]),
+          )
+          if (partDescriptionsByDrawingNumber.size) {
+            for (const row of glbRows) {
+              if (!row.p || row.p.conversionError) continue
+              let names = []
+              try {
+                names = extractGlbMeshNames(await readFile(row.localPath))
+              } catch (_) {}
+              const descriptions = { ...(row.p.partDescriptions || {}) }
+              for (const name of names) {
+                const drawingNumber = drawingNumberFromMeshName(name)
+                const partName = drawingNumber && partDescriptionsByDrawingNumber.get(drawingNumber)
+                if (drawingNumber && partName && !String(descriptions[drawingNumber] || '').trim()) {
+                  descriptions[drawingNumber] = partName
+                }
+              }
+              if (Object.keys(descriptions).length) row.p.partDescriptions = descriptions
             }
           }
 
@@ -2880,6 +2933,26 @@ export function registerDashboardApi(middlewares, opts = {}) {
               return enriched
             })
           )
+          let globalNameRules = []
+          try {
+            const mapping = JSON.parse(await readFile(resolve(ROOT, 'public', 'mtl-ral-color-mapping.json'), 'utf-8'))
+            globalNameRules = Array.isArray(mapping?.nameColorRules) ? mapping.nameColorRules : []
+          } catch {}
+          const incompleteByColorRules = new Map()
+          await Promise.all(allProducts.map(async (p) => {
+            if (p.type === 'composed' || !p.glbFile) return
+            try {
+              const glbPath = resolve(PUBLIC_ROOT, '.' + (String(p.glbFile).startsWith('/') ? p.glbFile : `/${p.glbFile}`))
+              if (!isSafePath(PUBLIC_ROOT, glbPath)) return
+              const names = extractGlbMeshNames(await readFile(glbPath))
+              const productRules = Array.isArray(p.conversionPreset?.nameColorRules) ? p.conversionPreset.nameColorRules : []
+              const rules = [...globalNameRules, ...productRules]
+              const assigned = names.filter((name) => rules.some((rule) => ruleMatchesMesh(name, rule))).length
+              const complete = names.length > 0 && assigned === names.length && colorRulesAreConverted(p, productRules, globalNameRules)
+              incompleteByColorRules.set(p.id, !complete)
+            } catch {}
+          }))
+          const isNotCompleted = (p) => incompleteByColorRules.get(p.id) === true
 
           let list = allProducts
           if (search) {
@@ -2932,6 +3005,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const noShopware = !p.shopwareProductId
             return noName || noSpecs || noShopware
           })
+          if (filter === 'not-completed') list = list.filter(isNotCompleted)
           if (filter === 'glb')        list = list.filter(p => p.glbFile)
           if (filter === 'missing')    list = list.filter(p => !p.glbFile)
           if (filter === 'cad')        list = list.filter(p => p.cadFiles?.length)
@@ -2952,7 +3026,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const pages = Math.max(1, Math.ceil(total / limit))
           const safePage = Math.min(page, pages)
           const items = list.slice((safePage - 1) * limit, safePage * limit)
-          const stats = { total: allProducts.length, withGlb: 0, withoutGlb: 0, withCad: 0, approved: 0, rejected: 0, inReview: 0, withIssues: 0 }
+          const stats = { total: allProducts.length, withGlb: 0, withoutGlb: 0, withCad: 0, approved: 0, rejected: 0, inReview: 0, withIssues: 0, notCompleted: 0 }
           for (const p of allProducts) {
             if (p.glbFile) stats.withGlb++
             else stats.withoutGlb++
@@ -2961,6 +3035,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             else if (p._review?.status === 'rejected') stats.rejected++
             else if (p._review?.status === 'review') stats.inReview++
             if (p._review?.issues?.length) stats.withIssues++
+            if (isNotCompleted(p)) stats.notCompleted++
           }
 
           res.setHeader('Content-Type', 'application/json')
@@ -3010,6 +3085,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const previousSettings = await getFileManagerSettings()
           const showViewCube = typeof body?.showViewCube === 'boolean' ? body.showViewCube : previousSettings.showViewCube
           const showCoordinateSystem = typeof body?.showCoordinateSystem === 'boolean' ? body.showCoordinateSystem : previousSettings.showCoordinateSystem
+          const showCoordinateOrigin = typeof body?.showCoordinateOrigin === 'boolean' ? body.showCoordinateOrigin : previousSettings.showCoordinateOrigin
+          const coordinateAxisSizePx = Math.min(100, Math.max(25, Number(body?.coordinateAxisSizePx) || previousSettings.coordinateAxisSizePx || 50))
           const viewCubePosition = ['left', 'center', 'right'].includes(body?.viewCubePosition) ? body.viewCubePosition : previousSettings.viewCubePosition
           const detailSidebarPinned = typeof body?.detailSidebarPinned === 'boolean' ? body.detailSidebarPinned : previousSettings.detailSidebarPinned
           const showMeshRal = typeof body?.showMeshRal === 'boolean'
@@ -3033,6 +3110,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             showMeshRal,
             showViewCube,
             showCoordinateSystem,
+            showCoordinateOrigin,
+            coordinateAxisSizePx,
             viewCubePosition,
             detailSidebarPinned,
             sidebarWidthPercent,
@@ -3049,6 +3128,8 @@ export function registerDashboardApi(middlewares, opts = {}) {
             showMeshRal,
             showViewCube,
             showCoordinateSystem,
+            showCoordinateOrigin,
+            coordinateAxisSizePx,
             viewCubePosition,
             detailSidebarPinned,
             sidebarWidthPercent,
@@ -3060,6 +3141,21 @@ export function registerDashboardApi(middlewares, opts = {}) {
           res.statusCode = 400
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ error: `Dateimanager-Einstellungen konnten nicht gespeichert werden: ${error.message || error}` }))
+        }
+      })
+
+      middlewares.use('/__api/migrate-part-descriptions', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        try {
+          const migration = resolve(ROOT, 'scripts/migrate-part-descriptions.mjs')
+          const result = spawnSync(process.execPath, [migration], { cwd: ROOT, encoding: 'utf-8' })
+          if (result.status !== 0) throw new Error(result.stderr || 'Migration fehlgeschlagen')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ ok: true, output: result.stdout.trim() }))
+        } catch (error) {
+          res.statusCode = 500
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: error.message || String(error) }))
         }
       })
 

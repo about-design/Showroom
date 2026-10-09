@@ -1,5 +1,42 @@
 # Changelog
 
+## MARA10.09.o - 2026-10-09
+
+- SAP-Kurztext und „Vorschaubild neu erzeugen“ stehen unter dem 3D-Viewer in zwei gleich breiten Spalten.
+
+## MARA10.09.n - 2026-10-09
+
+- SAP-Kurztext und der Button „Vorschaubild neu erzeugen“ wurden direkt unter dem 3D-Viewer in einer gemeinsamen Zeile angeordnet.
+
+## MARA10.09.m - 2026-10-09
+
+- Der Button „Vorschaubild neu erzeugen“ wurde direkt unter den 3D-Viewer verschoben.
+- Die Farb-Zuordnungs- und Anzeige-Schaltflächen bleiben in ihrer bisherigen Aktionszeile.
+
+## MARA10.09.l - 2026-10-09
+
+- Der Button „Vorschaubild neu erzeugen“ wurde in die Produktdetail-Aktionszeile neben Farb-Zuordnung und Anzeige-Umschaltung verschoben.
+
+## MARA10.08.d - 2026-10-08
+
+- Die automatische Produktansicht verwendet beim Produktwechsel immer dieselbe Showroom-Ausgangsperspektive.
+- Das GLB wird anhand der vollständigen Bounding-Box zentriert, vollständig eingepasst und mit ungefähr 90 Prozent sichtbarer Größe dargestellt.
+
+## MARA10.08.c - 2026-10-08
+
+- Entwicklungs- und lokale Preview-Dateien werden mit `Cache-Control: no-store` ausgeliefert.
+- Dadurch bleiben Vite-HMR und automatische Preview-Builds aktuell, ohne manuelles `Strg+F5`.
+
+## MARA10.08.b - 2026-10-08
+
+- Der Preview-Start erstellt vor dem Ausliefern automatisch einen aktuellen Production-Build.
+- Dadurch kann ein veralteter `dist`-Stand nach Änderungen in `src` nicht mehr unbemerkt verwendet werden.
+
+## MARA10.08.a - 2026-10-08
+
+- Wiederholte STEP-Drag-and-drop-Importe funktionieren auch nach abgeschlossenen Konvertierungsläufen wieder.
+- Neue Dateien werden unabhängig vom geöffneten Produktdetail als neue Produkte erfasst und in die bestehende Konvertierungswarteschlange eingereiht.
+
 ## MARA10.05.b - 2026-10-05
 
 - History und Versionsstand für die SAP-Kurztext-RAL-Zuordnung fortgeführt.
@@ -667,3 +704,119 @@
 - Startmenü-Verknüpfungen werden benutzerspezifisch angelegt.
 - Lokale Windows-Assets und der Produktkatalog für den aktualisierten Clone eingerichtet.
 - STEP/Blender-Konvertierungen dürfen bis zu 1500 Sekunden laufen.
+## MARA10.08.e
+
+- XYZ-Ursprungsmarker bleibt im groÃŸen Showroom und im kleinen Produkt-Viewer unabhÃ¤ngig von Zoom, ModellgrÃ¶ÃŸe, FenstergrÃ¶ÃŸe und Sidebar-Breite ungefÃ¤hr 12 CSS-Pixel groÃŸ.
+- Achsen, Ursprung, Produktgeometrie, Transformationen und Exportverhalten bleiben unverÃ¤ndert.
+
+## MARA10.08.f
+
+- Ursprungskugel wieder auf die ursprÃ¼ngliche Darstellung zurÃ¼ckgesetzt.
+- Konstante XYZ-Achsen- und Beschriftungsanzeige bleibt unverÃ¤ndert erhalten.
+
+## MARA10.08.g
+
+- Farb-Zuordnungen um das optionale Feld „Bauteilbezeichnung“ erweitert.
+- Bauteilbezeichnungen werden dauerhaft gespeichert und in der Suche berücksichtigt.
+- Bestehende RAL-, Immer-, Prioritäts- und automatische Farbzuordnungslogik bleibt unverändert.
+
+## MARA10.08.h
+
+- Bauteilbezeichnungen aus den gespeicherten Farb-Zuordnungen werden bei der Konvertierung anhand der ursprÃ¼nglichen Zeichnungsnummer als Produktmetadaten Ã¼bernommen.
+- Mehrfachinstanzen erhalten dieselbe Bezeichnung; technische Mesh-Namen, Farbregeln und GLB-Geometrie bleiben unverÃ¤ndert.
+- Vorhandene Bauteilbezeichnungen werden bei erneuter Konvertierung nicht Ã¼berschrieben.
+
+## MARA10.08.i
+
+- Bestehende Produktkarten mit GLB-Datei wurden nachträglich anhand der Zeichnungsnummern mit Bauteilbezeichnungen ergänzt.
+- Es wurden nur fehlende Angaben ergänzt; technische Mesh-Namen und vorhandene Bezeichnungen blieben unverändert.
+
+## MARA10.08.j
+
+- Einzelteile-Liste um den Umschalter „Anzeige: Bauteilname“ beziehungsweise „Anzeige: Zeichnungsnummer“ ergänzt.
+- Bauteilnamen werden aus den gespeicherten `partDescriptions` angezeigt; technische Namen bleiben für Farbregeln und Auswahl erhalten.
+- Anzeigezustand wird lokal gespeichert und ohne erneute Konvertierung umgeschaltet.
+
+## MARA10.08.k
+
+- Umschalter für die Mesh-Anzeige im Bereich „Einzelteile (Meshes)“ optisch hervorgehoben.
+- Standardmäßig werden vorhandene Bauteilnamen angezeigt; ohne Bezeichnung bleibt die technische Zeichnungsnummer sichtbar.
+
+## MARA10.08.l
+
+- Zeitpunkt der Bauteilnamen-Zuordnung im Konvertierungslauf korrigiert.
+- Bezeichnungen werden nach dem fertigen GLB-Schritt bereits bei der ersten Konvertierung gespeichert.
+
+## MARA10.08.m
+
+- Umschalter für „Anzeige: Bauteilname/Zeichnungsnummer“ direkt neben „Farb-Zuordnungen“ platziert.
+- Funktion und gespeicherter Anzeigezustand bleiben unverändert.
+
+## MARA10.08.n
+
+- Anzeige-Umschalter an die normale Button-Darstellung angepasst.
+- Eigene Umrandung und abweichende Sonderformatierung entfernt.
+
+## MARA10.08.o
+
+- Graue Ursprungskugel der XYZ-Anzeige verkleinert.
+- XYZ-Achsen, Beschriftungen und Position unverändert beibehalten.
+
+## MARA10.09.a
+
+- Graue Ursprungskugel der XYZ-Anzeige verkleinert.
+- Versionsdatum auf den 09.10.2026 korrigiert.
+
+## MARA10.09.b
+
+- Graue Ursprungskugel nochmals verkleinert.
+- XYZ-Achsen und Beschriftungen unverändert beibehalten.
+
+## MARA10.09.c
+
+- Separaten Schalter „Ursprungspunkt anzeigen“ unter „3D-Ansicht“ ergänzt.
+- Ursprungskugel kann unabhängig von XYZ-Achsen ein- und ausgeschaltet werden.
+- Einstellung wird gespeichert und in großem sowie kleinem Viewer berücksichtigt.
+
+## MARA10.09.d
+
+- Einstellbare XYZ-Achsengröße unter „3D-Ansicht“ ergänzt.
+- Bereich: 25–100 Pixel, Standard: 50 Pixel.
+- Einstellung gilt für großen und kleinen Viewer und wird gespeichert.
+
+## MARA10.09.e
+
+- Beim Speichern der Farb-Zuordnungsliste werden vorhandene Produktkarten automatisch mit fehlenden Bauteilbezeichnungen ergänzt.
+- Bestehende Bezeichnungen und technische Mesh-Namen bleiben unverändert.
+
+## MARA10.09.k
+
+- Die Statistik „Nicht abgeschlossen“ zählt jetzt auch vollständig zugeordnete, aber orange oder graue Farbregelstände.
+- Als abgeschlossen gilt ausschließlich die bestehende grüne Farbregel-Anzeige mit Häkchen: vollständige Abdeckung und erfolgreicher aktueller GLB-Regelabgleich.
+
+## MARA10.09.j
+
+- Die Statistik „Nicht abgeschlossen“ verwendet jetzt ausschließlich die Farbregel-Abdeckung der Einzelteile.
+- Produkte mit `X/Y` und `X = Y > 0` gelten als abgeschlossen; unvollständige Zuordnungen werden gezählt und gefiltert.
+
+## MARA10.09.i
+
+- Neue Statistik-Kachel „Nicht abgeschlossen“ in der Produktverwaltung.
+- Gezählt werden nur bereits erfolgreich konvertierte Produkte mit GLB, die nach der bestehenden Unvollständig-Logik noch nicht abgeschlossen sind.
+- Die Kachel ist anklickbar und verwendet einen eigenen Filter auf Basis derselben Unvollständig-Kriterien.
+
+## MARA10.09.h
+
+- Im kleinen Produkt-3D-Viewer setzt die F-Taste das gesamte Modell wieder passend und zentriert ins Bild.
+- Die Funktion greift nur bei aktivem/Ã¼berfahrenem Viewer und verÃ¤ndert die F-Suche sowie den groÃŸen Showroom nicht.
+
+## MARA10.09.g
+
+- Der kleine Produkt-3D-Viewer wÃ¤chst bei breiter Sidebar nicht mehr Ã¼ber 400 Pixel hinaus und bleibt zentriert.
+- Die initiale Produktansicht passt das Modell auf etwa 90 Prozent der ViewerhÃ¶he ein; manuelle ZoomÃ¤nderungen werden bei Resize nicht zurÃ¼ckgesetzt.
+
+## MARA10.09.f
+
+- Bestand nachträglich mit aktuellen Bauteilbezeichnungen abgeglichen.
+- 91 Zuordnungen in 31 Produktkarten ergänzt; bestehende Angaben unverändert.
+

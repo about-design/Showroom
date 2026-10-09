@@ -27,7 +27,7 @@ import {
 } from '../lib/defaultColorMapping.js'
 import { createEmptyMaterial } from '../lib/mtlParser.js'
 import { collectMeshesFromGroup, isViewerHelper } from '../lib/materialUtils.js'
-import { AUTOMATIC_COLOR_RULE_SOURCE, buildAutomaticColorRulePlan } from '../lib/automaticColorAssignment.js'
+import { AUTOMATIC_COLOR_RULE_SOURCE, buildAutomaticColorRulePlan, drawingNumberFromMeshName } from '../lib/automaticColorAssignment.js'
 import {
   ISSUE_CATALOG,
   STATUS_LABELS,
@@ -731,6 +731,8 @@ const automaticColorMappingsModal = $('#automaticColorMappingsModal')
 let automaticColorMappingsOpener = null
 let automaticColorMappingsKeydownHandler = null
 let showMeshRal = true
+let detailCoordinateOriginVisible = true
+let detailCoordinateAxisSizePx = 50
 
 function applyDetailSidebarPinnedSetting(settings) {
   document.documentElement.classList.toggle('detail-sidebar-unpinned', settings.detailSidebarPinned === false)
@@ -739,6 +741,10 @@ function applyDetailSidebarPinnedSetting(settings) {
 function applyMeshDisplaySettings(settings) {
   applyViewCubeSettings(settings)
   showMeshRal = settings.showMeshRal !== false
+  detailCoordinateOriginVisible = settings.showCoordinateOrigin !== false
+  detailCoordinateAxisSizePx = Number(settings.coordinateAxisSizePx) || 50
+  detailCoordinateSystem?.setOriginVisible(detailCoordinateOriginVisible)
+  detailCoordinateSystem?.setAxisDisplayLength(detailCoordinateAxisSizePx)
   applyDetailSidebarPinnedSetting(settings)
   updateDetailMeshRowClasses()
 }
@@ -929,6 +935,9 @@ async function openFileManagerSettings() {
     $('#showMeshRal').checked = settings.showMeshRal !== false
     $('#showViewCube').checked = settings.showViewCube !== false
     $('#showCoordinateSystem').checked = settings.showCoordinateSystem === true
+    $('#showCoordinateOrigin').checked = settings.showCoordinateOrigin !== false
+    $('#coordinateAxisSizePx').value = String(settings.coordinateAxisSizePx || 50)
+    $('#coordinateAxisSizeValue').value = `${settings.coordinateAxisSizePx || 50} px`
     $('#viewCubePosition').value = settings.viewCubePosition || 'right'
     $('#detailSidebarPinned').checked = settings.detailSidebarPinned !== false
     renderAutomaticCategoryMappings(settings.automaticCategoryMappings)
@@ -956,8 +965,9 @@ function filterAutomaticColorMappingRows() {
   document.querySelectorAll('#automaticColorMappingsRows .automatic-color-group').forEach((group) => {
     let matchingRows = 0
     group.querySelectorAll('.automatic-color-mapping-row').forEach((row) => {
-    const drawingNumber = row.querySelector('.automatic-color-drawing-number')?.value.trim().toLowerCase() || ''
-      row.hidden = !!query && !drawingNumber.includes(query)
+      const drawingNumber = row.querySelector('.automatic-color-drawing-number')?.value.trim().toLowerCase() || ''
+      const partName = row.querySelector('.automatic-color-part-name')?.value.trim().toLowerCase() || ''
+      row.hidden = !!query && !drawingNumber.includes(query) && !partName.includes(query)
       if (!row.hidden) matchingRows += 1
     })
     group.hidden = !!query && matchingRows === 0
@@ -1113,12 +1123,14 @@ const automaticColorRalOptionsHtml = ColorService.getAllColors().map((color) =>
 
 function addAutomaticColorMappingRow(mapping = {}, groupRows = null) {
   const drawingNumber = String(mapping.drawingNumber || '')
+  const partName = String(mapping.partName || '')
   const ral = String(mapping.ral || '')
   const row = document.createElement('div')
   row.className = 'automatic-category-mapping-row automatic-color-mapping-row'
   row.dataset.originalDrawingNumber = drawingNumber
   row.innerHTML = `
     <input class="detail-input automatic-color-drawing-number" type="text" maxlength="8" value="${esc(drawingNumber)}" placeholder="z. B. 06-00763" aria-label="Zeichnungsnummer">
+    <input class="detail-input automatic-color-part-name" type="text" maxlength="160" value="${esc(partName)}" placeholder="z. B. Ständerprofil" aria-label="Bauteilbezeichnung">
     <select class="sort-select automatic-color-ral" aria-label="RAL-Farbe"><option value="">— RAL-Farbe —</option>${automaticColorRalOptionsHtml}</select>
     <label class="automatic-color-always" title="Diese Zeichnungsnummer wird auch bei SAP-Kurztext vzk angewendet.">
       <input class="automatic-color-always-input" type="checkbox"${mapping.always === true ? ' checked' : ''}>
@@ -1154,6 +1166,7 @@ function renderAutomaticColorMappings(mappings) {
 function readAutomaticColorMappingRows() {
   return [...document.querySelectorAll('#automaticColorMappingsRows .automatic-color-mapping-row')].map((row) => ({
     drawingNumber: row.querySelector('.automatic-color-drawing-number')?.value.trim() || '',
+    partName: row.querySelector('.automatic-color-part-name')?.value.trim() || '',
     ral: row.querySelector('.automatic-color-ral')?.value.trim() || '',
     always: row.querySelector('.automatic-color-always-input')?.checked === true,
   }))
@@ -1268,6 +1281,8 @@ async function saveFileManagerSettings() {
         showMeshRal: $('#showMeshRal').checked,
         showViewCube: $('#showViewCube').checked,
         showCoordinateSystem: $('#showCoordinateSystem').checked,
+        showCoordinateOrigin: $('#showCoordinateOrigin').checked,
+        coordinateAxisSizePx: Number($('#coordinateAxisSizePx').value),
         viewCubePosition: $('#viewCubePosition').value,
         detailSidebarPinned: $('#detailSidebarPinned').checked,
         maxParallelConversions,
@@ -1307,6 +1322,11 @@ async function saveAutomaticColorMappings() {
     })
     const data = await parseJsonResponse(res)
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    const migrationRes = await fetch('/__api/migrate-part-descriptions', { method: 'POST' })
+    if (!migrationRes.ok) {
+      const migration = await parseJsonResponse(migrationRes)
+      throw new Error(migration.error || 'Bauteilbezeichnungen konnten nicht aktualisiert werden.')
+    }
     closeAutomaticColorMappings()
     toast('Farb-Zuordnungen gespeichert', 'success')
   } catch (error) {
@@ -1384,6 +1404,23 @@ function bindEvents() {
       c.classList.toggle('active', c.dataset.filter === currentFilter))
     try { localStorage.setItem('dash_filter', currentFilter) } catch (_) {}
     applyFilters()
+  })
+
+  statsStrip?.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-stat-filter]')
+    if (!card) return
+    currentFilter = card.dataset.statFilter || 'all'
+    currentPage = 1
+    syncToolbarUiFromState()
+    try { localStorage.setItem('dash_filter', currentFilter) } catch (_) {}
+    fetchPage()
+  })
+  statsStrip?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    const card = e.target.closest('[data-stat-filter]')
+    if (!card) return
+    e.preventDefault()
+    card.click()
   })
 
   statusFilterGroup.addEventListener('click', (e) => {
@@ -1501,6 +1538,11 @@ function bindEvents() {
   $('#fileManagerSettingsCancel')?.addEventListener('click', closeFileManagerSettings)
   $('#fileManagerSettingsSave')?.addEventListener('click', saveFileManagerSettings)
   $('#fileManagerChoice')?.addEventListener('change', syncFileManagerSettingsUi)
+  $('#coordinateAxisSizePx')?.addEventListener('input', (event) => {
+    const value = Number(event.target.value) || 50
+    const output = $('#coordinateAxisSizeValue')
+    if (output) output.value = `${value} px`
+  })
   $('#automaticCategoryMappingAdd')?.addEventListener('click', () => addAutomaticCategoryMappingRow())
   $('#automaticCategoryMappingsRows')?.addEventListener('click', (event) => {
     event.target.closest('.automatic-category-remove')?.closest('.automatic-category-mapping-row')?.remove()
@@ -1549,6 +1591,12 @@ function bindEvents() {
   $('#automaticColorMappingsCancel')?.addEventListener('click', closeAutomaticColorMappings)
   $('#automaticColorMappingsSave')?.addEventListener('click', saveAutomaticColorMappings)
   $('#automaticCategoryApply')?.addEventListener('click', checkAutomaticCategoryAssignments)
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#detailMeshNameModeToggle')) return
+    detailMeshNameMode = detailMeshNameMode === 'partName' ? 'drawingNumber' : 'partName'
+    localStorage.setItem(DETAIL_MESH_NAME_MODE_KEY, detailMeshNameMode)
+    buildDetailMeshPartsUI()
+  })
 
   const btnToggleUsdz = $('#btnToggleUsdz')
   if (btnToggleUsdz) btnToggleUsdz.addEventListener('click', toggleExportUsdz)
@@ -1632,6 +1680,15 @@ function bindEvents() {
     if (detailPanel.classList.contains('open')) return
     if (e.key === 'ArrowLeft') { e.preventDefault(); goToPage(currentPage - 1) }
     if (e.key === 'ArrowRight') { e.preventDefault(); goToPage(currentPage + 1) }
+  })
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'f' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+    if (e.target.matches?.('input, textarea, select, button, [contenteditable="true"]')) return
+    const viewer = document.getElementById('detailPreviewWrap')
+    if (!viewer || (!viewer.matches(':hover') && !viewer.contains(document.activeElement))) return
+    if (!fitDetailPreviewToModel()) return
+    e.preventDefault()
   })
 
   // Page-level drag & drop
@@ -1790,15 +1847,6 @@ async function handleDroppedFiles(fileList) {
   const glbFiles = files.filter((f) => f.name.toLowerCase().endsWith('.glb'))
   const cadFiles = files.filter((f) => isAllowedCadFile(f) && !f.name.toLowerCase().endsWith('.glb'))
 
-  if (detailPanel.classList.contains('open') && selectedProductId && cadFiles.length) {
-    const p = productCache.get(selectedProductId)
-    const listEl = document.getElementById('detailCadList')
-    if (p && listEl) {
-      for (const file of cadFiles) await doUploadCad(file, p, listEl)
-      if (!glbFiles.length) return
-    }
-  }
-
   if (glbFiles.length) {
     await processGlbUploads(glbFiles)
     return
@@ -1955,7 +2003,7 @@ function exportJSON() {
    ═══════════════════════════════════════════════ */
 function renderSkeletonStats() {
   if (!statsStrip) return
-  statsStrip.innerHTML = Array(6).fill(0).map(() =>
+  statsStrip.innerHTML = Array(7).fill(0).map(() =>
     `<div class="stat-card"><span class="stat-label skeleton-line" style="width:60px"></span><span class="stat-value skeleton-line" style="width:40px"></span><span class="stat-sub skeleton-line" style="width:100px"></span></div>`
   ).join('')
 }
@@ -1971,6 +2019,7 @@ function renderStats() {
   const withIssues = s.withIssues ?? 0
   const withGlb  = s.withGlb ?? 0
   const withCad  = s.withCad ?? 0
+  const notCompleted = s.notCompleted ?? 0
   const approvedPct = total ? Math.round(approved / total * 100) : 0
 
   statsStrip.innerHTML = `
@@ -1980,6 +2029,7 @@ function renderStats() {
     <div class="stat-card"><span class="stat-label">Abgelehnt</span><span class="stat-value" style="color:${rejected ? 'var(--danger)' : 'var(--success)'}">${rejected}</span><span class="stat-sub">${rejected ? 'brauchen Korrektur' : 'keine Ablehnungen'}</span></div>
     <div class="stat-card"><span class="stat-label">Offen</span><span class="stat-value">${open}</span><span class="stat-sub">noch nicht geprüft</span></div>
     <div class="stat-card"><span class="stat-label">Mit Problemen</span><span class="stat-value" style="color:${withIssues ? 'var(--warning)' : 'var(--success)'}">${withIssues}</span><span class="stat-sub">${withIssues ? 'Issues gemeldet' : 'keine Issues'}</span></div>
+    <div class="stat-card stat-card-action" data-stat-filter="not-completed" role="button" tabindex="0" title="Nicht abgeschlossene Produkte anzeigen"><span class="stat-label">Nicht abgeschlossen</span><span class="stat-value" style="color:${notCompleted ? 'var(--warning)' : 'var(--success)'}">${notCompleted}</span><span class="stat-sub">bereits als GLB vorhanden</span></div>
   `
 }
 
@@ -2883,12 +2933,20 @@ function updateNameRuleCardSummary(card) {
   const tv = (card.querySelector('.name-rule-target')?.value || 'material').trim()
   const target = RULE_SUMMARY_TARGET_LABEL[tv] || tv
   const pattern = (card.querySelector('.name-rule-pattern')?.value || '').trim()
+  const displayPattern = (card.dataset.displayPattern || '').trim()
   const flags = (card.querySelector('.name-rule-flags')?.value || '').trim()
   const ral = (card.querySelector('.name-rule-ral')?.value || '').trim()
   const finish = (card.querySelector('.name-rule-finish')?.value || 'auto').trim()
   const bits = [target]
-  if (pattern) bits.push(flags ? `/${pattern}/${flags}` : `/${pattern}/`)
-  if (ral) bits.push(ral)
+  const readablePattern = displayPattern || pattern
+  if (readablePattern) bits.push(flags ? `/${readablePattern}/${flags}` : readablePattern)
+  else bits.push('Muster fehlt/ungültig')
+  if (ral) {
+    const ralColor = ColorService.getRAL(ral)
+    bits.push(ralColor?.name ? `${ral} ${ralColor.name}` : ral)
+  } else {
+    bits.push('RAL fehlt')
+  }
   if (finish && finish !== 'auto') bits.push(finish === 'verzinkt' ? 'Verzinkt' : 'Pulver')
   el.textContent = bits.length > 1 || ral ? bits.join(' · ') : 'Ziel, Regex und RAL setzen …'
 }
@@ -3005,6 +3063,7 @@ function renderNameRuleRowHtml(rule = {}) {
     ? technicalPattern.slice(1, -1).replace(/\\(.)/g, '$1')
     : ''
   const displayPattern = String(rule.displayPattern || inferredDrawingNumber || inferredExactText || technicalPattern)
+  const partName = String(rule.partName || '').trim()
   const matchMode = String(rule.matchMode || (inferredDrawingNumber ? 'drawing-number' : inferredExactText ? 'exact' : 'regex'))
   const pattern = esc(displayPattern)
   const flags = esc(rule.flags || '')
@@ -3015,9 +3074,16 @@ function renderNameRuleRowHtml(rule = {}) {
     .map((c) => `<option value="${esc(c.code)}" ${ral === c.code ? 'selected' : ''}>${esc(c.code)} ${esc(c.name)}</option>`)
     .join('')
   const source = rule.source === AUTOMATIC_COLOR_RULE_SOURCE ? AUTOMATIC_COLOR_RULE_SOURCE : ''
+  const targetLabel = RULE_SUMMARY_TARGET_LABEL[target] || target
+  const ralColor = ral ? ColorService.getRAL(ral) : null
+  const summary = [
+    targetLabel,
+    displayPattern || 'Muster fehlt/ungültig',
+    ralColor?.name ? `${ral} ${ralColor.name}` : ral || 'RAL fehlt',
+  ].join(' · ')
   return `<article class="detail-name-rule-row rule-card rule-card--name" data-technical-pattern="${esc(technicalPattern)}" data-display-pattern="${esc(displayPattern)}" data-match-mode="${esc(matchMode)}"${source ? ` data-rule-source="${source}"` : ''}>
   <header class="rule-card-head">
-    <div class="rule-card-summary name-rule-card-summary" aria-live="polite"></div>
+    <div class="rule-card-summary name-rule-card-summary" aria-live="polite">${esc(summary)}</div>
     <button type="button" class="name-rule-remove btn-icon" title="Zeile entfernen">×</button>
   </header>
   <div class="rule-card-grid">
@@ -3038,8 +3104,8 @@ function renderNameRuleRowHtml(rule = {}) {
       <input type="text" class="field-value name-rule-pattern" placeholder="z. B. 06-01071 oder Rahmen" value="${pattern}" title="Angezeigter Name beziehungsweise Zeichnungsnummer" spellcheck="false" autocomplete="off">
       </div>
       <div class="rule-field-row">
-        <span class="rule-field-label">Flags</span>
-    <input type="text" class="field-value name-rule-flags" placeholder="i" value="${flags}" maxlength="8" title="Regex-Flags (z. B. i = ignorieren Groß/Klein)" spellcheck="false">
+        <span class="rule-field-label">Bauteilbezeichnung</span>
+      <input type="text" class="field-value name-rule-part-name" placeholder="z. B. Ständerprofil" value="${esc(partName)}" title="Bauteilbezeichnung zur Zeichnungsnummer" autocomplete="off">
       </div>
     </fieldset>
     <fieldset class="rule-group">
@@ -3058,6 +3124,10 @@ function renderNameRuleRowHtml(rule = {}) {
       <option value="verzinkt" ${finish === 'verzinkt' ? 'selected' : ''}>Verzinkt</option>
       <option value="pulver" ${finish === 'pulver' ? 'selected' : ''}>Pulver</option>
     </select>
+      </div>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Flags</span>
+    <input type="text" class="field-value name-rule-flags" placeholder="i" value="${flags}" maxlength="8" title="Regex-Flags" spellcheck="false">
       </div>
     </fieldset>
   </div>
@@ -3105,7 +3175,9 @@ function collectNameRulesFromContainer(containerEl) {
     } catch {
       return
     }
+    const partName = (row.querySelector('.name-rule-part-name')?.value || '').trim()
     const o = { target, pattern, displayPattern, matchMode, ral }
+    if (partName) o.partName = partName
     if (flags) o.flags = flags
     if (finish) o.finish = finish
     if (row.dataset.ruleSource === AUTOMATIC_COLOR_RULE_SOURCE) o.source = AUTOMATIC_COLOR_RULE_SOURCE
@@ -3114,17 +3186,48 @@ function collectNameRulesFromContainer(containerEl) {
   return out
 }
 
+function bindNameRuleRemoveButtons(container) {
+  container?.querySelectorAll('.name-rule-remove').forEach((button) => {
+    if (button.dataset.removeBound === '1') return
+    button.dataset.removeBound = '1'
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const row = button.closest('.detail-name-rule-row')
+      if (!row) return
+      row.remove()
+      updateDetailMeshRowClasses()
+    })
+    button.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const row = button.closest('.detail-name-rule-row')
+      if (!row) return
+      row.remove()
+      updateDetailMeshRowClasses()
+    })
+  })
+}
+
 function bindDetailNameRules() {
   const rows = document.getElementById('detailNameRulesRows')
+  if (!document.documentElement.dataset.nameRuleRemoveHandlerBound) {
+    document.documentElement.dataset.nameRuleRemoveHandlerBound = '1'
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest?.('.name-rule-remove')
+      if (!button) return
+      const row = button.closest('.detail-name-rule-row')
+      if (!row) return
+      event.preventDefault()
+      event.stopPropagation()
+      row.remove()
+      updateDetailMeshRowClasses()
+    }, true)
+  }
+  bindNameRuleRemoveButtons(rows)
   document.getElementById('detailNameRuleAdd')?.addEventListener('click', () => {
     if (!rows) return
     appendDetailNameRule()
-  })
-  rows?.addEventListener('click', (e) => {
-    const btn = e.target.closest('.name-rule-remove')
-    if (!btn) return
-    btn.closest('.detail-name-rule-row')?.remove()
-    updateDetailMeshRowClasses()
   })
   rows?.addEventListener('change', (e) => {
     const ralSelect = e.target.closest('.name-rule-ral')
@@ -3150,6 +3253,7 @@ function appendDetailNameRule(pattern = '') {
   const rows = document.getElementById('detailNameRulesRows')
   if (!rows) return
   rows.insertAdjacentHTML('beforeend', renderNameRuleRowHtml({ target: 'mesh', pattern }))
+  bindNameRuleRemoveButtons(rows)
   refreshNameRuleSummaries(rows)
   updateDetailMeshRowClasses()
   return rows.lastElementChild
@@ -3806,6 +3910,8 @@ let detailRenderer = null, detailPreviewScene = null, detailControls = null, det
 /** Detail-GLB: Kamera/Root für Einzelteil-Isolation (Meshes) */
 let detailPreviewCamera = null
 let detailPreviewModelRoot = null
+const DETAIL_MESH_NAME_MODE_KEY = 'mara.dashboard.meshNameMode'
+let detailMeshNameMode = localStorage.getItem(DETAIL_MESH_NAME_MODE_KEY) === 'drawingNumber' ? 'drawingNumber' : 'partName'
 let detailMeshIsolateIndex = null
 /**
  * Einzelteil-Auswahl (Meshes → GLB): Indizes der Meshes, die NICHT ins GLB
@@ -4177,9 +4283,19 @@ async function openDetail(id) {
       </div>
       <button type="button" class="detail-coordinate-toggle" id="detailCoordinateToggle" aria-pressed="false" title="Koordinatensystem anzeigen"><span class="coordinate-letter-x">X</span><span class="coordinate-letter-y">Y</span><span class="coordinate-letter-z">Z</span></button>
       </div>
+      <div class="detail-preview-meta-row">
       <div class="detail-preview-short-text">
         <span class="detail-preview-short-text-label">Kurztext (SAP):</span>
         <span>${esc(formatProductShortText(p))}</span>
+      </div>
+      ${!isComposed && p.glbFile ? `
+      <div class="detail-preview-thumbnail-action">
+        <button type="button" class="btn btn-ghost btn-sm" id="btnRegenerateThumbnail" title="PNG für die Karten-Vorschau aus der aktuellen 3D-Ansicht neu speichern">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:middle;margin-right:.25rem"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Vorschaubild neu erzeugen
+        </button>
+      </div>
+      ` : ''}
       </div>
       ${!isComposed && p.glbFile ? `
     <div class="detail-preview-toolbar">
@@ -4190,11 +4306,8 @@ async function openDetail(id) {
         <button type="button" class="btn btn-ghost btn-sm" id="btnOpenAutomaticColorMappings" title="Zeichnungsnummern und RAL-Farben in den Einstellungen pflegen">
           Farb-Zuordnungen
         </button>
+        <button type="button" class="btn btn-ghost btn-sm detail-mesh-name-mode-toggle" id="detailMeshNameModeToggle" title="Anzeige zwischen Zeichnungsnummer und Bauteilname umschalten"></button>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="btnRegenerateThumbnail" title="PNG für die Karten-Vorschau aus der aktuellen 3D-Ansicht neu speichern">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:middle;margin-right:.25rem"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        Vorschaubild neu erzeugen
-      </button>
       </div>
       ` : ''}
     ${!isComposed && p.glbFile ? `
@@ -4338,7 +4451,12 @@ async function openDetail(id) {
         Bei <strong>STEP</strong> sind Materialnamen oft generisch — prüfen Sie die Liste <strong>„Teile (Meshes)“</strong> unten; Begriffe wie <code>link</code> in der Hierarchie erfordern Ziel <strong>Mesh</strong> oder <strong>Hierarchiepfad</strong> plus erneute Konvertierung.
         <button type="button" class="btn-link-inline" id="linkOpenGlobalNameRules">Globale Regeln bearbeiten …</button>
       </p>
-      <div id="detailNameRulesRows" class="detail-name-rules-rows">${renderNameRuleRowsHtml(p.conversionPreset?.nameColorRules)}</div>
+      <div id="detailNameRulesRows" class="detail-name-rules-rows">${renderNameRuleRowsHtml((p.conversionPreset?.nameColorRules || []).map((rule) => {
+        if (rule.partName) return rule
+        const drawingNumber = String(rule.displayPattern || '').match(/^\d{2}-\d{5}$/)?.[0]
+        const partName = drawingNumber ? String(p.partDescriptions?.[drawingNumber] || '').trim() : ''
+        return partName ? { ...rule, partName } : rule
+      }))}</div>
       <button type="button" class="btn btn-ghost btn-sm" id="detailNameRuleAdd">+ Regel hinzufügen</button>
     </div>
 
@@ -5504,7 +5622,7 @@ function updateDetailMeshRowClasses() {
   const converted = colorRulesAreConverted(product, rules, colorRuleGlobals)
   list.querySelectorAll('.detail-mesh-row').forEach((row) => {
     const i = parseInt(row.dataset.meshIdx, 10)
-    const name = row.querySelector('.detail-mesh-name')?.textContent || ''
+    const name = row.dataset.technicalName || row.querySelector('.detail-mesh-name')?.textContent || ''
     const matchingRules = getCurrentMatchingNameRules(name)
     const hasMatchingRule = !!getMatchingMeshColorRule(matchingRules)
     updateMeshRalBadge(row, matchingRules)
@@ -5583,6 +5701,30 @@ function showMatchingNameRuleForMeshName(name) {
   requestAnimationFrame(() => notice.scrollIntoView({ block: 'center' }))
 }
 
+function fitDetailPreviewToModel() {
+  if (!detailPreviewModelRoot || !detailPreviewCamera || !detailControls) return false
+  detailPreviewModelRoot.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(detailPreviewModelRoot)
+  if (box.isEmpty()) return false
+  const center = box.getCenter(new THREE.Vector3())
+  const sphere = box.getBoundingSphere(new THREE.Sphere())
+  const cam = detailPreviewCamera
+  const aspect = cam.aspect || 1
+  const verticalFov = THREE.MathUtils.degToRad(cam.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect)
+  const fitDistance = Math.max(
+    sphere.radius / (Math.tan(verticalFov / 2) * 0.9),
+    sphere.radius / (Math.tan(horizontalFov / 2) * 0.9),
+    0.05,
+  )
+  const direction = new THREE.Vector3(1, 0.6, 1.2).normalize()
+  cam.position.copy(center).addScaledVector(direction, fitDistance)
+  detailControls.target.copy(center)
+  detailControls.autoRotate = false
+  detailControls.update()
+  return true
+}
+
 function focusDetailMeshPart(index) {
   detailViewCube?.cancel()
   if (!detailPreviewModelRoot || !detailPreviewCamera || !detailControls) return
@@ -5617,7 +5759,11 @@ function buildDetailMeshPartsUI() {
   const section = document.getElementById('detailMeshPartsSection')
   const listEl = document.getElementById('detailMeshPartsList')
   const clearBtn = document.getElementById('detailMeshClearBtn')
+  const nameModeToggle = document.getElementById('detailMeshNameModeToggle')
   if (!detailPreviewModelRoot || !listEl) return
+  if (nameModeToggle) nameModeToggle.textContent = detailMeshNameMode === 'partName'
+    ? 'Anzeige: Bauteilname'
+    : 'Anzeige: Zeichnungsnummer'
   detailMeshIsolateIndex = null
   detailMeshExcluded = new Set()
   detailMeshSelectionReady = false
@@ -5644,10 +5790,15 @@ function buildDetailMeshPartsUI() {
 
   listEl.innerHTML = meshes
     .map((mesh, i) => {
-      const name = mesh.name || '(ohne Namen)'
+      const technicalName = (mesh.name || '').trim()
+      const drawingNumber = drawingNumberFromMeshName(technicalName)
+      const partName = drawingNumber ? String(prod?.partDescriptions?.[drawingNumber] || '').trim() : ''
+      const name = detailMeshNameMode === 'partName' && partName
+        ? technicalName.replace(drawingNumber, partName)
+        : (mesh.name || '(ohne Namen)')
       const vc = mesh.geometry?.attributes?.position?.count ?? 0
       const checked = detailMeshExcluded.has(i) ? '' : 'checked'
-      return `<div class="detail-mesh-row${detailMeshExcluded.has(i) ? ' is-excluded' : ''}" data-mesh-idx="${i}">
+      return `<div class="detail-mesh-row${detailMeshExcluded.has(i) ? ' is-excluded' : ''}" data-mesh-idx="${i}" data-technical-name="${esc(technicalName)}">
         <label class="detail-mesh-inc" title="Ins GLB aufnehmen" data-mesh-inc-wrap>
           <input type="checkbox" class="detail-mesh-inc-cb" data-mesh-inc="${i}" ${checked}>
         </label>
@@ -5889,7 +6040,17 @@ function loadDetailPreview(product) {
     addShadowGround(scene, model)
 
     controls.target.copy(center)
-    camera.position.set(center.x + maxDim, center.y + maxDim * 0.6, center.z + maxDim * 1.2)
+    // Initial fit: approximately 90% of the available viewer height. The
+    // controls remain free afterwards, so manual zoom is not reset on resize.
+    const sphere = box.getBoundingSphere(new THREE.Sphere())
+    const direction = new THREE.Vector3(1, 0.6, 1.2).normalize()
+    const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+    const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * (camera.aspect || 1))
+    const fitDistance = Math.max(
+      sphere.radius / (Math.tan(verticalFov / 2) * 0.9),
+      sphere.radius / (Math.tan(horizontalFov / 2) * 0.9),
+    )
+    camera.position.copy(center).addScaledVector(direction, fitDistance)
     controls.update()
 
     applyDetailRotationLive()
@@ -5900,6 +6061,8 @@ function loadDetailPreview(product) {
     detailViewCube = createViewCube(wrap, camera, controls)
     detailCoordinateSystem = new CoordinateSystemView({ syncShowroomSettings: false })
     detailCoordinateSystem.setVisible(detailCoordinateSystemVisible)
+    detailCoordinateSystem.setOriginVisible(detailCoordinateOriginVisible)
+    detailCoordinateSystem.setAxisDisplayLength(detailCoordinateAxisSizePx)
     detailCoordinateSystem.updateTarget(model)
     detailCameraAxes = createLiveCameraAxes(wrap, camera)
     renderer.domElement.style.borderRadius = 'var(--radius-md)'
@@ -5932,6 +6095,7 @@ function loadDetailPreview(product) {
       detailAnimId = requestAnimationFrame(animate)
       controls.update()
       detailCoordinateSystem?.updateTarget(model)
+      detailCoordinateSystem?.updateAxisSize(camera, wrap.clientHeight)
       detailCameraAxes?.update()
       renderer.render(scene, camera)
     }

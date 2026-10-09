@@ -3,6 +3,7 @@ import ProductPlacement from './ProductPlacement.js'
 import { subscribeViewCubeSettings } from '../lib/viewCubeSettings.js'
 
 const AXIS_COLORS = { x: 0xe53935, y: 0x2eaf5d, z: 0x3478d4 }
+const DEFAULT_AXIS_DISPLAY_LENGTH_PX = 50
 
 function makeLabel(text, color) {
   const canvas = document.createElement('canvas')
@@ -45,15 +46,32 @@ export class CoordinateSystemView {
     this.visible = false
     this.root = null
     this.axisSize = 0
+    this.originMarker = null
+    this.axisVisuals = null
+    this.originVisible = true
+    this.axisDisplayLengthPx = DEFAULT_AXIS_DISPLAY_LENGTH_PX
     this.syncShowroomSettings = syncShowroomSettings
     if (syncShowroomSettings) {
-      subscribeViewCubeSettings((settings) => this.setVisible(settings.showCoordinateSystem))
+      subscribeViewCubeSettings((settings) => {
+        this.setVisible(settings.showCoordinateSystem)
+        this.setOriginVisible(settings.showCoordinateOrigin)
+        this.setAxisDisplayLength(settings.coordinateAxisSizePx)
+      })
     }
   }
 
   setVisible(visible) {
     this.visible = !!visible
     if (this.root) this.root.visible = this.visible
+  }
+
+  setOriginVisible(visible) {
+    this.originVisible = !!visible
+    if (this.originMarker) this.originMarker.visible = this.originVisible
+  }
+
+  setAxisDisplayLength(value) {
+    this.axisDisplayLengthPx = THREE.MathUtils.clamp(Number(value) || DEFAULT_AXIS_DISPLAY_LENGTH_PX, 25, 100)
   }
 
   clear() {
@@ -71,6 +89,8 @@ export class CoordinateSystemView {
       }
     })
     this.root = null
+    this.originMarker = null
+    this.axisVisuals = null
   }
 
   updateTarget(target) {
@@ -92,17 +112,22 @@ export class CoordinateSystemView {
     const root = new THREE.Group()
     root.name = 'coordinate-system-origin'
     root.renderOrder = 100
-    root.add(makeAxis(new THREE.Vector3(0, 0, 0), new THREE.Vector3(this.axisSize, 0, 0), AXIS_COLORS.x, 'X', axisRadius))
-    root.add(makeAxis(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, this.axisSize, 0), AXIS_COLORS.y, 'Y', axisRadius))
-    root.add(makeAxis(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, this.axisSize), AXIS_COLORS.z, 'Z', axisRadius))
+    const axisVisuals = new THREE.Group()
+    axisVisuals.name = 'coordinate-system-axes'
+    axisVisuals.add(makeAxis(new THREE.Vector3(0, 0, 0), new THREE.Vector3(this.axisSize, 0, 0), AXIS_COLORS.x, 'X', axisRadius))
+    axisVisuals.add(makeAxis(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, this.axisSize, 0), AXIS_COLORS.y, 'Y', axisRadius))
+    axisVisuals.add(makeAxis(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, this.axisSize), AXIS_COLORS.z, 'Z', axisRadius))
+    root.add(axisVisuals)
 
     const origin = new THREE.Mesh(
-      new THREE.SphereGeometry(this.axisSize * 0.11, 16, 10),
+      new THREE.SphereGeometry(this.axisSize * 0.025, 16, 10),
       new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: .95 }),
     )
     origin.name = 'coordinate-system-origin-marker'
     origin.userData.isViewerHelper = true
+    origin.visible = this.originVisible
     root.add(origin)
+    this.originMarker = origin
 
     const labelOffset = this.axisSize * 1.12
     for (const [axis, position] of [
@@ -114,7 +139,7 @@ export class CoordinateSystemView {
       label.position.copy(position)
       label.scale.setScalar(this.axisSize * 0.32)
       label.userData.isViewerHelper = true
-      root.add(label)
+      axisVisuals.add(label)
     }
 
     root.userData.isViewerHelper = true
@@ -122,6 +147,39 @@ export class CoordinateSystemView {
     root.visible = this.visible
     target.add(root)
     this.root = root
+    this.axisVisuals = axisVisuals
+  }
+
+  /** Keep the three axes and their labels at a constant screen length. */
+  updateAxisSize(camera, viewportHeight) {
+    if (!this.axisVisuals || !camera || !this.root || !this.visible) return
+    const height = Math.max(1, Number(viewportHeight) || 1)
+    // The marker is attached below the product root. Refresh both matrices
+    // before measuring; camera controls and placement updates happen before
+    // the next WebGL render and matrixWorld may still contain the old frame.
+    camera.updateMatrixWorld(true)
+    this.root.updateWorldMatrix(true, true)
+    const worldPosition = new THREE.Vector3()
+    this.root.getWorldPosition(worldPosition)
+    const rootWorldScale = new THREE.Vector3()
+    this.root.getWorldScale(rootWorldScale)
+    const modelScale = Math.max(rootWorldScale.x, rootWorldScale.y, rootWorldScale.z, 1e-6)
+
+    let pixelsPerWorldUnit
+    if (camera.isOrthographicCamera) {
+      pixelsPerWorldUnit = height * camera.zoom / Math.max(camera.top - camera.bottom, 1e-6)
+    } else {
+      const cameraPosition = new THREE.Vector3()
+      camera.getWorldPosition(cameraPosition)
+      const distance = Math.max(cameraPosition.distanceTo(worldPosition), 1e-6)
+      const fov = THREE.MathUtils.degToRad(camera.getEffectiveFOV())
+      pixelsPerWorldUnit = height / (2 * Math.tan(fov / 2) * distance)
+    }
+    const desiredWorldLength = this.axisDisplayLengthPx / Math.max(pixelsPerWorldUnit, 1e-6)
+    const desiredLocalScale = desiredWorldLength / Math.max(this.axisSize * modelScale, 1e-6)
+    if (Number.isFinite(desiredLocalScale) && desiredLocalScale > 0) {
+      this.axisVisuals.scale.setScalar(THREE.MathUtils.clamp(desiredLocalScale, 1e-5, 1e5))
+    }
   }
 
   update(zoneId) {

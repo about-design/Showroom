@@ -5,6 +5,8 @@
   "showMeshRal": true,
   "showViewCube": true,
   "showCoordinateSystem": true,
+  "showCoordinateOrigin": false,
+  "coordinateAxisSizePx": 75,
   "viewCubePosition": "right",
   "detailSidebarPinned": false,
   "sidebarWidthPercent": 35,
@@ -26,33 +28,81 @@
   "automaticColorMappings": [
     {
       "drawingNumber": "06-01071",
+      "partName": "Ständerprofil",
       "ral": "RAL 5010",
       "always": false
     },
     {
       "drawingNumber": "06-00894",
+      "partName": "Abdeckkappe ER",
       "ral": "RAL 7035",
       "always": true
     },
     {
       "drawingNumber": "06-00763",
+      "partName": "Clipprofil",
       "ral": "RAL 7035",
       "always": false
     },
     {
       "drawingNumber": "31-01788",
+      "partName": "DSS U-Profil",
       "ral": "RAL 2001",
       "always": false
     },
     {
       "drawingNumber": "31-01789",
+      "partName": "DSS Holm-Profil",
       "ral": "RAL 2001",
       "always": false
     },
     {
       "drawingNumber": "06-01710",
+      "partName": "",
       "ral": "RAL 2001",
       "always": true
+    },
+    {
+      "drawingNumber": "31-01434",
+      "partName": "Fussplatte",
+      "ral": "RAL 9007",
+      "always": false
+    },
+    {
+      "drawingNumber": "31-01436",
+      "partName": "DIa.-Hor.",
+      "ral": "RAL 9007",
+      "always": false
+    },
+    {
+      "drawingNumber": "06-01660",
+      "partName": "Distanzhülse",
+      "ral": "RAL 9007",
+      "always": false
+    },
+    {
+      "drawingNumber": "06-00434",
+      "partName": "Fussplatte",
+      "ral": "RAL 9007",
+      "always": false
+    },
+    {
+      "drawingNumber": "06-00770",
+      "partName": "Tiefenstecksteife",
+      "ral": "RAL 9007",
+      "always": false
+    },
+    {
+      "drawingNumber": "06-00435",
+      "partName": "Fussplatte",
+      "ral": "RAL 9007",
+      "always": false
+    },
+    {
+      "drawingNumber": "06-01609",
+      "partName": "DSS Halter",
+      "ral": "RAL 9007",
+      "always": false
     }
   ]
 }

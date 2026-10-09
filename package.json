@@ -12,6 +12,7 @@
     "migrate:logger": "node scripts/migrate-console-to-logger.mjs",
     "dev": "vite",
     "build": "node scripts/generate-public-products.mjs && vite build",
+    "prepreview": "npm run build",
     "preview": "vite preview",
     "deploy": "node scripts/deploy.mjs",
     "products:update": "node scripts/update-products-from-models.js",

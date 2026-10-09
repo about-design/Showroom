@@ -9,7 +9,12 @@ export function normalizeAutomaticColorMappings(mappings) {
     const drawingNumber = String(mapping?.drawingNumber || '').trim()
     const ralMatch = String(mapping?.ral || '').trim().match(/^(?:RAL\s*)?(\d{4})$/i)
     if (!DRAWING_NUMBER.test(drawingNumber) || !ralMatch) continue
-    seen.set(drawingNumber, { drawingNumber, ral: `RAL ${ralMatch[1]}`, always: mapping?.always === true })
+    seen.set(drawingNumber, {
+      drawingNumber,
+      partName: String(mapping?.partName || '').trim().slice(0, 160),
+      ral: `RAL ${ralMatch[1]}`,
+      always: mapping?.always === true,
+    })
   }
   for (const mapping of seen.values()) normalized.push(mapping)
   return normalized
@@ -54,13 +59,13 @@ export function buildAutomaticColorRulePlan(meshNames, mappings, shortText = '',
   const applicableMappings = isVzkProduct
     ? [...shortTextMappings, ...alwaysMappings]
     : [...normalMappings, ...alwaysMappings]
-  const byDrawingNumber = new Map(applicableMappings.map((mapping) => [mapping.drawingNumber, mapping.ral]))
+  const byDrawingNumber = new Map(applicableMappings.map((mapping) => [mapping.drawingNumber, mapping]))
   const assignments = names.map((name) => ({
     name,
     drawingNumber: drawingNumberFromMeshName(name),
   }))
   assignments.forEach((assignment) => {
-    assignment.ral = byDrawingNumber.get(assignment.drawingNumber) || 'RAL 9007'
+    assignment.ral = byDrawingNumber.get(assignment.drawingNumber)?.ral || 'RAL 9007'
   })
   const rules = [{
     target: 'mesh',
@@ -71,11 +76,11 @@ export function buildAutomaticColorRulePlan(meshNames, mappings, shortText = '',
     finish: 'verzinkt',
     source: AUTOMATIC_COLOR_RULE_SOURCE,
   }]
-  for (const [drawingNumber, ral] of byDrawingNumber) {
+  for (const [drawingNumber, mapping] of byDrawingNumber) {
     if (!assignments.some((assignment) => assignment.drawingNumber === drawingNumber)) continue
     rules.push({
-      target: 'mesh', pattern: `(?:^|_)${escapeRegex(drawingNumber)}(?:_\\d+)?$`, displayPattern: drawingNumber, matchMode: 'drawing-number', ral,
-      finish: ral === 'RAL 9007' ? 'verzinkt' : 'pulver', source: AUTOMATIC_COLOR_RULE_SOURCE,
+      target: 'mesh', pattern: `(?:^|_)${escapeRegex(drawingNumber)}(?:_\\d+)?$`, displayPattern: drawingNumber, matchMode: 'drawing-number', ral: mapping.ral,
+      partName: mapping.partName, finish: mapping.ral === 'RAL 9007' ? 'verzinkt' : 'pulver', source: AUTOMATIC_COLOR_RULE_SOURCE,
     })
   }
   const counts = new Map()

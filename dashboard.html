@@ -274,6 +274,14 @@
           <span>Koordinatensystem anzeigen</span>
           <input type="checkbox" id="showCoordinateSystem">
         </label>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Ursprungspunkt anzeigen</span>
+          <input type="checkbox" id="showCoordinateOrigin" checked>
+        </label>
+        <label class="file-manager-settings-field">
+          <span>XYZ-Achsengröße: <output id="coordinateAxisSizeValue">50 px</output></span>
+          <input id="coordinateAxisSizePx" type="range" min="25" max="100" step="1" value="50">
+        </label>
         <label class="file-manager-settings-field">Position
           <select class="sort-select" id="viewCubePosition">
             <option value="left">Links</option>
@@ -325,11 +333,11 @@
     </div>
     <div class="automatic-color-mappings-body">
       <label class="automatic-color-search" for="automaticColorMappingsSearch">
-        <span>Zeichnungsnummer suchen</span>
-        <input class="detail-input" id="automaticColorMappingsSearch" type="search" placeholder="Zeichnungsnummer suchen …" autocomplete="off">
+        <span>Zeichnungsnummer oder Bauteilbezeichnung suchen</span>
+        <input class="detail-input" id="automaticColorMappingsSearch" type="search" placeholder="Zeichnungsnummer oder Bauteilbezeichnung suchen …" autocomplete="off">
       </label>
       <div class="automatic-color-mappings-list" id="automaticColorMappingsList">
-        <div class="automatic-color-table-head" aria-hidden="true"><span>Zeichnungsnummer</span><span>RAL-Farbe</span><span>Immer</span><span>Löschen</span></div>
+        <div class="automatic-color-table-head" aria-hidden="true"><span>Zeichnungsnummer</span><span>Bauteilbezeichnung</span><span>RAL-Farbe</span><span>Immer</span><span>Löschen</span></div>
         <div class="automatic-category-mappings" id="automaticColorMappingsRows"></div>
       </div>
       <div class="automatic-category-actions">

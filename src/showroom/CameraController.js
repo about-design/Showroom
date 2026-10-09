@@ -137,20 +137,31 @@ class CameraController {
 
     const dir = new THREE.Vector3(0, 1.5, 3).normalize()
     let distance = dir.length()
+    let fittedPosition = null
     if (worldBox) {
-      const sphere = new THREE.Sphere()
-      worldBox.getBoundingSphere(sphere)
-      const aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight
-      const vFov = (cam.fov * Math.PI) / 180
-      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect)
-      const margin = 1.4
-      const minDistance = Math.max(sphere.radius / Math.tan(hFov / 2), sphere.radius / Math.tan(vFov / 2)) * margin
-      distance = THREE.MathUtils.clamp(minDistance, this.controls.minDistance, this.controls.maxDistance)
+      const width = this.domElement.clientWidth
+      const height = this.domElement.clientHeight
+      const aspect = width / height
+      // Produktwechsel immer aus derselben Showroom-Ausgangsperspektive fitten;
+      // eine zuvor per Orbit eingestellte Ansicht darf den nächsten Produktstart
+      // nicht dauerhaft übernehmen.
+      const savedCameraPosition = cam.position.clone()
+      const defaultDirection = this.startPosition.clone().sub(this.startTarget).normalize()
+      cam.position.copy(target).add(defaultDirection)
+      const fit = getFitView(worldBox, cam, target, aspect, 1.11)
+      cam.position.copy(savedCameraPosition)
+      if (fit) {
+        // 1.11 entspricht ungefähr 90 % sichtbarer Modellgröße und berücksichtigt
+        // die vollständige Bounding-Box statt nur einer umschließenden Kugel.
+        distance = THREE.MathUtils.clamp(fit.distance, this.controls.minDistance, this.controls.maxDistance)
+        target.copy(fit.target)
+        fittedPosition = target.clone().add(fit.position.clone().sub(fit.target).setLength(distance))
+      }
     } else {
       distance = new THREE.Vector3(0, 1.5, 3).length()
     }
 
-    const desiredPos = new THREE.Vector3().copy(target).add(dir.clone().multiplyScalar(distance))
+    const desiredPos = fittedPosition || new THREE.Vector3().copy(target).add(dir.clone().multiplyScalar(distance))
 
     gsap.to(cam.position, {
       x: desiredPos.x,

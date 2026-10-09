@@ -24,7 +24,9 @@ class SceneManager {
 
     const aspect = this.container.clientWidth / this.container.clientHeight
     this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 10000)
-    this.camera.position.set(0, 2, 6)
+    // Feste Showroom-Ausgangsperspektive: schräge Drei-Seiten-Ansicht
+    // wie in der Produktdarstellung, nicht die reine Vorderansicht.
+    this.camera.position.set(4, 2.5, 6)
     this.camera.lookAt(0, 1, 0)
 
     this.renderer = new THREE.WebGLRenderer({

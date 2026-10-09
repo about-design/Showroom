@@ -251,6 +251,7 @@ function showroomApp() {
         LightDebugView.updatePositions()
         PivotDebugView.updatePositions(PRIMARY_ZONE)
         CoordinateSystemView.update(PRIMARY_ZONE)
+        CoordinateSystemView.updateAxisSize(SceneManager.getCamera(), SceneManager.container?.clientHeight)
       }
       SceneManager.start()
       this.setLightIntensity()
