@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "textures": [
+    {
+      "id": "chipboard",
+      "label": "Spanplatte",
+      "maps": {
+        "baseColor": "chipboard/basecolor_1k.png"
+      },
+      "defaultRepeatMm": 600,
+      "defaultFinish": { "metallic": 0, "roughness": 0.85 }
+    },
+    {
+      "id": "warnstreifen",
+      "label": "Warnstreifen gelb-schwarz",
+      "maps": {
+        "baseColor": "warnstreifen/basecolor_1k.png"
+      },
+      "defaultRepeatMm": 600,
+      "defaultFinish": { "metallic": 0, "roughness": 0.55 }
+    }
+  ]
+}

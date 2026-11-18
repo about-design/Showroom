@@ -18,6 +18,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import ColorService from '../services/ColorService.js'
 import { buildColorOverridesFromMapping } from '../lib/hexMapping.js'
+import { splitTextureRules, TEXTURE_RULE_MESH_SELECT_SOURCE } from '../lib/textureRules.js'
 import {
   DEFAULT_COLOR_FROM_MAPPING,
   isDefaultColorMappingAuto,
@@ -1339,10 +1340,32 @@ async function saveAutomaticColorMappings() {
 /* ═══════════════════════════════════════════════
    Init
    ═══════════════════════════════════════════════ */
+/**
+ * Versions-Badge im Header (neben Logo/Breadcrumb).
+ * Werte kommen aus vite.config.js (define): package.json-Version, Git-Commit,
+ * Start-/Build-Zeitpunkt – so ist im Browser immer erkennbar, welcher Stand läuft.
+ */
+function renderAppVersionBadge() {
+  const el = document.getElementById('appBuildBadge')
+  if (!el) return
+  const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''
+  const commit = typeof __APP_COMMIT__ !== 'undefined' ? __APP_COMMIT__ : ''
+  const buildTime = typeof __APP_BUILD_TIME__ !== 'undefined' ? __APP_BUILD_TIME__ : ''
+  if (!version && !commit) return
+  el.textContent = `v${version}${commit ? ` · ${commit}` : ''}`
+  if (buildTime) {
+    const d = new Date(buildTime)
+    el.title = `Stand: ${d.toLocaleDateString('de-DE')} ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${commit ? ` · Commit ${commit}` : ''}`
+  }
+  el.hidden = false
+}
+
 async function init() {
+  renderAppVersionBadge()
   renderSkeletonStats()
   bindEvents()
   bindGlobalNameRulesModal()
+  bindGlobalTextureRulesModal()
   bindGlobalReductionRulesModal()
   await Promise.all([loadMappingTargetOptions(), loadCategoryOptions(), loadMeshDisplaySettings(), loadColorRuleGlobals()])
   await fetchPage()
@@ -1500,6 +1523,11 @@ function bindEvents() {
   productGrid.addEventListener('focusin', (event) => selectCardFromCategoryControl(event.target))
 
   detailOverlay.addEventListener('click', (event) => event.preventDefault())
+
+  document.getElementById('detailHeaderConvert')?.addEventListener('click', (e) => {
+    const id = e.currentTarget?.dataset?.productId || selectedProductId
+    if (id) startProductConversion(id)
+  })
   $('#detailClose').addEventListener('click', closeDetail)
   $('#detailSecondaryToggle')?.addEventListener('click', () => setDetailSecondaryPanelOpen(!detailSecondaryPanel?.classList.contains('open')))
   $('#detailSecondaryClose')?.addEventListener('click', () => setDetailSecondaryPanelOpen(false))
@@ -1668,6 +1696,8 @@ function bindEvents() {
     const propagateToDetail = () => {
       dashRotateDegrees.disabled = dashRotateAxis.value !== 'X' && dashRotateAxis.value !== 'Y' && dashRotateAxis.value !== 'Z'
       // Header und Detail teilen sich denselben State – Live-Preview ggf. mitziehen.
+      // Aktive Auswahl im Header = Anpassung → Drehungs-Vorschau sichtbar machen.
+      detailRotationPreviewOn = true
       setDetailRotationFromHeader(dashRotateAxis.value, dashRotateDegrees.value)
     }
     dashRotateAxis.addEventListener('change', propagateToDetail)
@@ -3542,6 +3572,288 @@ function bindGlobalNameRulesModal() {
   document.getElementById('globalNameRulesSave')?.addEventListener('click', () => saveGlobalNameRules())
 }
 
+/* ─── Textur-Regeln (Bibliothek/Upload → Teile) ───────────────────────────── */
+
+/** Cache der Textur-Auswahl (Bibliothek + Produkt-Uploads) für die Dropdowns. */
+let textureLibraryOptions = []
+
+/** Lädt Bibliothek + Produkt-Uploads; füllt textureLibraryOptions (id, label, defaultRepeatMm). */
+async function loadTextureLibrary(productId) {
+  try {
+    const res = await fetch(`/__api/texture-library?productId=${encodeURIComponent(productId || '')}`)
+    const data = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    textureLibraryOptions = [...(data.library || []), ...(data.uploads || [])]
+  } catch {
+    textureLibraryOptions = []
+  }
+  return textureLibraryOptions
+}
+
+function textureDefaultRepeatMm(textureId) {
+  const entry = textureLibraryOptions.find((t) => t.id === textureId)
+  return entry?.defaultRepeatMm > 0 ? entry.defaultRepeatMm : 600
+}
+
+/** Options-HTML für ein Textur-Select ("— keine —" + Bibliothek + Uploads). */
+function textureSelectOptionsHtml(selectedId) {
+  const sel = String(selectedId || '')
+  const known = textureLibraryOptions.some((t) => t.id === sel)
+  const extra = sel && !known
+    ? `<option value="${esc(sel)}" selected>${esc(sel)} (fehlt?)</option>`
+    : ''
+  return `<option value="">— keine —</option>${extra}${textureLibraryOptions
+    .map((t) => `<option value="${esc(t.id)}" ${sel === t.id ? 'selected' : ''}>${esc(t.label)}</option>`)
+    .join('')}`
+}
+
+
+/** Options-HTML für die Seiten-Auswahl einer Textur-Regel. */
+function textureSideOptionsHtml(selected) {
+  const sel = String(selected || 'all')
+  const opts = [
+    ['all', 'Alle Seiten'], ['outer', 'Nur außen'], ['inner', 'Nur innen'],
+    ['top', 'Nur oben'], ['bottom', 'Nur unten'],
+    ['left', 'Nur links'], ['right', 'Nur rechts'], ['front', 'Nur vorne'], ['back', 'Nur hinten'],
+  ]
+  return opts
+    .map(([v, l]) => `<option value="${v}" ${sel === v ? 'selected' : ''}>${l}</option>`)
+    .join('')
+}
+
+/** Options-HTML für den Mapping-Modus einer Textur-Regel. */
+function textureMappingOptionsHtml(selected) {
+  const sel = String(selected || 'tile')
+  return `<option value="tile" ${sel !== 'fit' && sel !== 'unfold' ? 'selected' : ''}>Kacheln (mm)</option>
+    <option value="fit" ${sel === 'fit' ? 'selected' : ''}>Einpassen (1×)</option>
+    <option value="unfold" ${sel === 'unfold' ? 'selected' : ''}>Abwicklung (1×)</option>`
+}
+
+/** Eine Zeile Textur-Regel (Ziel → Regex → Textur + Kachelgröße). */
+function renderTextureRuleRowHtml(rule = {}) {
+  const t = String(rule.target || 'mesh').trim()
+  const target = ['material', 'node', 'mesh', 'nodePath'].includes(t) ? t : 'mesh'
+  const pattern = esc(rule.pattern || '')
+  const flags = rule.flags === 'i' ? 'i' : ''
+  const repeatMm = Number(rule.repeatMm) > 0 ? Number(rule.repeatMm) : ''
+  return `<article class="detail-texture-rule-row rule-card rule-card--texture">
+  <header class="rule-card-head">
+    <div class="rule-card-summary texture-rule-card-summary" aria-live="polite"></div>
+    <button type="button" class="texture-rule-remove btn-icon" title="Zeile entfernen">×</button>
+  </header>
+  <div class="rule-card-grid">
+    <fieldset class="rule-group">
+      <legend>Match</legend>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Ziel</span>
+        <select class="field-value texture-rule-target" aria-label="Ziel">
+          <option value="mesh" ${target === 'mesh' ? 'selected' : ''}>Mesh (Geometrie)</option>
+          <option value="node" ${target === 'node' ? 'selected' : ''}>Knoten (Szene)</option>
+          <option value="material" ${target === 'material' ? 'selected' : ''}>Material</option>
+          <option value="nodePath" ${target === 'nodePath' ? 'selected' : ''}>Hierarchiepfad</option>
+        </select>
+      </div>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Regex</span>
+        <input type="text" class="field-value texture-rule-pattern" placeholder="z. B. Profil_SR85" value="${pattern}" title="Regulärer Ausdruck (gemeinsamer JS/Python-Subset)" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Flags</span>
+        <input type="text" class="field-value texture-rule-flags" placeholder="i" value="${flags}" maxlength="1" title="Nur i (Groß/Klein ignorieren) wird unterstützt" spellcheck="false">
+      </div>
+    </fieldset>
+    <fieldset class="rule-group">
+      <legend>Textur</legend>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Textur</span>
+        <select class="field-value field-select texture-rule-texture" aria-label="Textur">${textureSelectOptionsHtml(rule.textureId)}</select>
+      </div>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Kachel (mm)</span>
+        <input type="number" class="field-value texture-rule-repeat" min="1" step="1" placeholder="600" value="${repeatMm}" title="Physische Kachelgröße in mm (Default aus Bibliothek)">
+      </div>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Seite</span>
+        <select class="field-value field-select texture-rule-side" aria-label="Seite" title="Nur Flächen dieser Seite texturieren (bezogen auf das CAD-Koordinatensystem, Z = oben)">${textureSideOptionsHtml(rule.side)}</select>
+      </div>
+      <div class="rule-field-row">
+        <span class="rule-field-label">Mapping</span>
+        <select class="field-value field-select texture-rule-mapping" aria-label="Mapping" title="Kacheln: Textur wiederholt sich alle X mm (Welt-Anker). Einpassen: Textur wird genau einmal über das Teil gespannt (wie ein Aufkleber).">${textureMappingOptionsHtml(rule.mapping)}</select>
+      </div>
+    </fieldset>
+  </div>
+</article>`
+}
+
+function renderTextureRuleRowsHtml(rules) {
+  if (!Array.isArray(rules) || rules.length === 0) return ''
+  return rules.map((r) => renderTextureRuleRowHtml(r)).join('')
+}
+
+function collectTextureRulesFromContainer(containerEl) {
+  if (!containerEl) return []
+  const out = []
+  containerEl.querySelectorAll('.detail-texture-rule-row').forEach((row) => {
+    const tv = (row.querySelector('.texture-rule-target')?.value || 'mesh').trim()
+    const target = ['material', 'node', 'mesh', 'nodePath'].includes(tv) ? tv : 'mesh'
+    const pattern = (row.querySelector('.texture-rule-pattern')?.value || '').trim()
+    const flags = (row.querySelector('.texture-rule-flags')?.value || '').trim() === 'i' ? 'i' : ''
+    const textureId = (row.querySelector('.texture-rule-texture')?.value || '').trim()
+    const repeatRaw = Number(row.querySelector('.texture-rule-repeat')?.value)
+    if (!pattern) return
+    try {
+      new RegExp(pattern, flags)
+    } catch {
+      return
+    }
+    const o = { target, pattern, textureId: textureId || null }
+    if (flags) o.flags = flags
+    if (repeatRaw > 0) o.repeatMm = repeatRaw
+    const side = (row.querySelector('.texture-rule-side')?.value || 'all').trim()
+    if (side && side !== 'all') o.side = side
+    const mapping = (row.querySelector('.texture-rule-mapping')?.value || 'tile').trim()
+    if (mapping === 'fit' || mapping === 'unfold') o.mapping = mapping
+    out.push(o)
+  })
+  return out
+}
+
+function bindDetailTextureRules() {
+  const rows = document.getElementById('detailTextureRulesRows')
+  document.getElementById('detailTextureRuleAdd')?.addEventListener('click', () => {
+    if (!rows) return
+    rows.insertAdjacentHTML('beforeend', renderTextureRuleRowHtml({}))
+  })
+  rows?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.texture-rule-remove')
+    if (!btn) return
+    btn.closest('.detail-texture-rule-row')?.remove()
+  })
+  document.getElementById('linkOpenGlobalTextureRules')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    openGlobalTextureRulesModal()
+  })
+  // Produkt-Textur hochladen → danach Dropdowns auffrischen
+  const uploadInput = document.getElementById('detailTextureUploadInput')
+  document.getElementById('detailTextureUploadBtn')?.addEventListener('click', () => uploadInput?.click())
+  uploadInput?.addEventListener('change', async () => {
+    const file = uploadInput.files?.[0]
+    uploadInput.value = ''
+    if (!file || !selectedProductId) return
+    try {
+      const res = await fetch(`/__api/upload-product-texture?productId=${encodeURIComponent(selectedProductId)}`, {
+        method: 'POST',
+        headers: { 'x-filename': encodeURIComponent(file.name) },
+        body: file,
+      })
+      const data = await parseJsonResponse(res)
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      toast(`Textur hochgeladen: ${file.name}`, 'success')
+      await loadTextureLibrary(selectedProductId)
+      document.querySelectorAll('.texture-rule-texture, .detail-mesh-tex-select').forEach((sel) => {
+        const current = sel.value
+        sel.innerHTML = textureSelectOptionsHtml(current)
+      })
+    } catch (e) {
+      toast(`Textur-Upload fehlgeschlagen: ${e.message}`, 'error')
+    }
+  })
+}
+
+function openGlobalTextureRulesModal() {
+  const modal = document.getElementById('globalTextureRulesModal')
+  const rows = document.getElementById('globalTextureRulesRows')
+  if (!modal || !rows) return
+  const show = (list) => {
+    rows.innerHTML = list.length ? renderTextureRuleRowsHtml(list) : ''
+    modal.classList.add('open')
+    modal.setAttribute('aria-hidden', 'false')
+  }
+  Promise.all([
+    loadTextureLibrary(selectedProductId),
+    fetch('/mtl-ral-color-mapping.json').then((r) => r.json()).catch(() => ({})),
+  ])
+    .then(([, data]) => show(Array.isArray(data.textureRules) ? data.textureRules : []))
+    .catch(() => show([]))
+}
+
+function closeGlobalTextureRulesModal() {
+  const modal = document.getElementById('globalTextureRulesModal')
+  if (!modal) return
+  modal.classList.remove('open')
+  modal.setAttribute('aria-hidden', 'true')
+}
+
+async function saveGlobalTextureRules() {
+  const rows = document.getElementById('globalTextureRulesRows')
+  if (!rows) return
+  const textureRules = collectTextureRulesFromContainer(rows)
+  try {
+    const res = await fetch('/__api/save-texture-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textureRules }),
+    })
+    const data = await parseJsonResponse(res)
+    if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
+    toast('Globale Textur-Regeln gespeichert', 'success')
+    closeGlobalTextureRulesModal()
+  } catch (e) {
+    toast(`Speichern fehlgeschlagen: ${e.message}`, 'error')
+  }
+}
+
+function bindGlobalTextureRulesModal() {
+  document.getElementById('btnGlobalTextureRules')?.addEventListener('click', () => openGlobalTextureRulesModal())
+  document.getElementById('globalTextureRulesBackdrop')?.addEventListener('click', closeGlobalTextureRulesModal)
+  document.getElementById('globalTextureRulesClose')?.addEventListener('click', closeGlobalTextureRulesModal)
+  document.getElementById('globalTextureRuleAdd')?.addEventListener('click', () => {
+    document.getElementById('globalTextureRulesRows')?.insertAdjacentHTML('beforeend', renderTextureRuleRowHtml({}))
+  })
+  document.getElementById('globalTextureRulesRows')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.texture-rule-remove')
+    if (!btn) return
+    btn.closest('.detail-texture-rule-row')?.remove()
+  })
+  document.getElementById('globalTextureRulesSave')?.addEventListener('click', () => saveGlobalTextureRules())
+}
+
+/**
+ * Baut die Textur-Regeln aus den Einzelteile-Dropdowns (source: meshSelect).
+ * Ist die Vorschau nicht geladen, bleiben gespeicherte Regeln erhalten.
+ */
+function collectMeshSelectTextureRules() {
+  const prod = productCache.get(selectedProductId)
+  const existing = splitTextureRules(prod?.conversionPreset?.textureRules).meshSelect
+  if (!detailMeshSelectionReady || !detailPreviewModelRoot) return existing
+  const listEl = document.getElementById('detailMeshPartsList')
+  if (!listEl) return existing
+  const out = []
+  const seen = new Set()
+  listEl.querySelectorAll('.detail-mesh-tex-select').forEach((sel) => {
+    const name = (sel.dataset.meshName || '').trim()
+    const textureId = (sel.value || '').trim()
+    if (!name || !textureId || seen.has(name)) return
+    seen.add(name)
+    const sideSel = listEl.querySelector(`.detail-mesh-tex-side[data-mesh-name="${CSS.escape(name)}"]`)
+    const side = (sideSel?.value || 'all').trim()
+    const mappingSel = listEl.querySelector(`.detail-mesh-tex-mapping[data-mesh-name="${CSS.escape(name)}"]`)
+    const mapping = (mappingSel?.value || 'tile').trim()
+    const rule = {
+      target: 'mesh',
+      pattern: meshSelectPattern(name),
+      textureId,
+      repeatMm: textureDefaultRepeatMm(textureId),
+      source: TEXTURE_RULE_MESH_SELECT_SOURCE,
+      name,
+    }
+    if (side && side !== 'all') rule.side = side
+    if (mapping === 'fit' || mapping === 'unfold') rule.mapping = mapping
+    out.push(rule)
+  })
+  return out
+}
+
 /* ─── Vertex-Reduktion (analog zu Namens-Regeln) ───────────────────────────── */
 
 /**
@@ -3920,6 +4232,13 @@ let detailMeshIsolateIndex = null
  * nur schneller per Checkbox).
  */
 let detailMeshExcluded = new Set()
+/**
+ * Namen ausgeblendeter Meshes, die im aktuell geladenen GLB NICHT mehr existieren
+ * (weil ein früherer Bake sie bereits entfernt hat), die der User aber über die
+ * Phantom-Zeile wieder angehakt hat → Regel wird beim Speichern entfernt und das
+ * Teil kommt beim nächsten Konvertieren zurück.
+ */
+let detailMeshPhantomIncluded = new Set()
 /** true, sobald die Mesh-Checkbox-UI aus der geladenen Vorschau gebaut wurde. */
 let detailMeshSelectionReady = false
 
@@ -3960,6 +4279,9 @@ function collectMeshSelectVisibilityRules() {
   const existing = splitVisibilityRules(prod?.conversionPreset?.visibilityRules).meshSelect
   if (!detailMeshSelectionReady || !detailPreviewModelRoot) return existing
   const meshes = collectMeshesFromGroup(detailPreviewModelRoot)
+  const presentNames = new Set(
+    meshes.map((m) => (m.name || '').trim()).filter(Boolean),
+  )
   const seen = new Set()
   const out = []
   meshes.forEach((m, i) => {
@@ -3975,6 +4297,20 @@ function collectMeshSelectVisibilityRules() {
       name,
     })
   })
+  // WICHTIG: Regeln für Meshes, die im aktuell geladenen GLB fehlen, NICHT verwerfen —
+  // der Bake hat diese Teile bereits physisch entfernt, deshalb tauchen sie in der
+  // Checkbox-Liste nicht mehr auf. Ohne diesen Erhalt würde jedes Speichern die
+  // Ausblendung löschen und die Teile (z. B. Schrauben) kämen beim nächsten
+  // Konvertieren zurück. Entfernt wird eine solche Regel nur, wenn der User das
+  // fehlende Teil über seine Phantom-Zeile explizit wieder angehakt hat.
+  existing.forEach((r) => {
+    const name = typeof r?.name === 'string' ? r.name.trim() : ''
+    if (!name) { out.push(r); return } // Alt-Regel ohne Namen: unverändert behalten.
+    if (seen.has(name)) return // Bereits aus dem aktuellen Checkbox-State regeneriert.
+    if (presentNames.has(name)) return // Mesh existiert und ist angehakt → Regel entfällt.
+    if (detailMeshPhantomIncluded.has(name)) return // Fehlendes Teil wieder angehakt → Regel entfällt.
+    out.push(r)
+  })
   return out
 }
 /**
@@ -3984,6 +4320,13 @@ function collectMeshSelectVisibilityRules() {
  * `rotationOffset` persistiert, damit Showroom/Detail/Maße sie live anwenden.
  */
 let detailRotationOffsetDeg = { x: 0, y: 0, z: 0 }
+/**
+ * Schalter für die Drehungs-Vorschau im Detail: true = Offset wird live aufs Modell
+ * gelegt (so sieht es NACH dem nächsten Konvertieren aus), false = Vorschau zeigt den
+ * echten aktuellen Stand der GLB-Datei ohne Offset. Verhindert Verwirrung, wenn eine
+ * gespeicherte Drehung sonst "doppelt" wirkt (z. B. bereits eingebrannt, Offset aber noch da).
+ */
+let detailRotationPreviewOn = true
 /** Merkt sich die zuletzt vom User über Header oder Detail gewählte Bake-Achse. */
 let lastBakeAxis = ''
 
@@ -3995,6 +4338,9 @@ function normalizeDetailRotationDeg(n) {
 }
 
 function seedDetailRotationFromProduct(p) {
+  // Beim Öffnen eines Produkts standardmäßig mit Drehungs-Vorschau starten;
+  // der User kann sie im Detail per Toggle/Badge ausblenden.
+  detailRotationPreviewOn = true
   const ro = p?.rotationOffset
   const hasRotationOffset = ro && (
     Number(ro.x) !== 0 || Number(ro.y) !== 0 || Number(ro.z) !== 0
@@ -4033,14 +4379,62 @@ function updateDetailRotationLabels() {
 }
 
 function applyDetailRotationLive() {
+  updateDetailRotationPreviewUi()
   if (!detailPreviewModelRoot) return
   const toRad = Math.PI / 180
-  const r = detailRotationOffsetDeg
+  // Vorschau aus → echten GLB-Stand zeigen (keine Zusatz-Drehung aufs Modell legen).
+  const r = detailRotationPreviewOn ? detailRotationOffsetDeg : { x: 0, y: 0, z: 0 }
   detailPreviewModelRoot.rotation.set(
     (r.x ?? 0) * toRad,
     (r.y ?? 0) * toRad,
     (r.z ?? 0) * toRad,
   )
+}
+
+/** true, wenn aktuell ein (noch nicht eingebrannter) Drehungs-Offset gesetzt ist. */
+function hasDetailRotationOffset() {
+  const r = detailRotationOffsetDeg
+  return !!(r && (Number(r.x) || Number(r.y) || Number(r.z)))
+}
+
+/**
+ * Hält Toggle-Checkbox und Vorschau-Badge synchron zum State.
+ * Das Badge im 3D-Fenster macht jederzeit sichtbar, ob man gerade die GLB pur
+ * oder GLB + Vorschau-Drehung sieht (Klick aufs Badge schaltet um).
+ */
+function updateDetailRotationPreviewUi() {
+  const toggle = document.getElementById('rotPreviewToggle')
+  if (toggle) {
+    toggle.checked = detailRotationPreviewOn
+    toggle.disabled = !hasDetailRotationOffset()
+  }
+  const wrap = document.getElementById('detailPreviewWrap')
+  if (!wrap) return
+  let badge = document.getElementById('detailRotPreviewBadge')
+  if (!hasDetailRotationOffset() || !detailPreviewModelRoot) {
+    // Kein Offset (oder noch kein Modell geladen) → Vorschau entspricht exakt
+    // der GLB-Datei bzw. es gibt nichts zu kennzeichnen, Badge überflüssig.
+    if (badge) badge.remove()
+    return
+  }
+  if (!badge) {
+    badge = document.createElement('button')
+    badge.type = 'button'
+    badge.id = 'detailRotPreviewBadge'
+    badge.className = 'detail-rot-preview-badge'
+    badge.addEventListener('click', () => {
+      detailRotationPreviewOn = !detailRotationPreviewOn
+      applyDetailRotationLive()
+    })
+    wrap.appendChild(badge)
+  }
+  badge.classList.toggle('is-off', !detailRotationPreviewOn)
+  badge.textContent = detailRotationPreviewOn
+    ? 'Vorschau: mit Drehung (noch nicht eingebrannt)'
+    : 'Vorschau: Original-GLB (Drehung ausgeblendet)'
+  badge.title = detailRotationPreviewOn
+    ? 'Die Vorschau zeigt die GLB inkl. Drehungs-Offset – so sieht sie nach dem nächsten Konvertieren aus. Klicken, um den echten aktuellen GLB-Stand zu sehen.'
+    : 'Die Vorschau zeigt den echten aktuellen Stand der GLB-Datei ohne Drehungs-Offset. Klicken, um die Drehung wieder einzublenden.'
 }
 
 /**
@@ -4116,6 +4510,8 @@ function bindDetailRotationControls() {
         }
         // Achse merken, damit der Header bei Mehrfach-Drehung die richtige zeigt.
         if (detailRotationOffsetDeg[axis] !== 0) lastBakeAxis = axis.toUpperCase()
+        // Wer aktiv dreht, will das Ergebnis sehen → Vorschau automatisch einschalten.
+        detailRotationPreviewOn = true
         updateDetailRotationLabels()
         applyDetailRotationLive()
         syncRotationHeaderFromState()
@@ -4129,6 +4525,12 @@ function bindDetailRotationControls() {
     applyDetailRotationLive()
     syncRotationHeaderFromState()
   })
+  document.getElementById('rotPreviewToggle')?.addEventListener('change', (e) => {
+    detailRotationPreviewOn = !!e.target.checked
+    applyDetailRotationLive()
+  })
+  // Initialen Toggle-/Badge-Zustand fürs frisch gerenderte Detail-Panel setzen.
+  updateDetailRotationPreviewUi()
 }
 
 const COLLAPSIBLE_DETAIL_HELP = new Map([
@@ -4240,6 +4642,8 @@ async function openDetail(id) {
   if (previewRenderers.has(id)) disposeCardPreviewById(id)
   let p = await fetchProductById(id)
   if (!p) return
+  // Textur-Auswahl (Bibliothek + Uploads) für Regel-Editor und Einzelteile-Dropdowns vorladen.
+  await loadTextureLibrary(id)
   if (p.type === 'composed' && p.parts?.length) {
     await Promise.all(p.parts.map((pt) => fetchProductById(pt.productId)))
   }
@@ -4269,6 +4673,20 @@ async function openDetail(id) {
   }
 
   const isComposed = p.type === 'composed'
+
+  // Header-Button „Neu konvertieren" (neben Schließen): nur wenn CAD-Dateien da sind.
+  const headerConvertBtn = document.getElementById('detailHeaderConvert')
+  if (headerConvertBtn) {
+    const canConvert = !isComposed && !!p.cadFiles?.length
+    headerConvertBtn.hidden = !canConvert
+    // data-product-id sorgt dafür, dass startProductConversion den Button
+    // während der Konvertierung mit-deaktiviert.
+    headerConvertBtn.dataset.productId = p.id
+    headerConvertBtn.disabled = false
+    headerConvertBtn.style.opacity = ''
+    const lbl = document.getElementById('detailHeaderConvertLabel')
+    if (lbl) lbl.textContent = p.glbFile ? 'Neu konvertieren' : 'Jetzt konvertieren'
+  }
   seedDetailRotationFromProduct(p)
 
   detailContent.innerHTML = `
@@ -4402,7 +4820,13 @@ async function openDetail(id) {
           <button type="button" class="btn btn-ghost btn-sm" data-rot="180">180°</button>
           <button type="button" class="btn btn-ghost btn-sm" data-rot="reset">Reset</button>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" id="rotResetAll">Alle Achsen zurücksetzen</button>
+        <div class="rot-footer-row">
+          <button type="button" class="btn btn-ghost btn-sm" id="rotResetAll">Alle Achsen zurücksetzen</button>
+          <label class="rot-preview-toggle" title="An: Vorschau zeigt GLB + Drehungs-Offset (Stand nach dem nächsten Konvertieren). Aus: Vorschau zeigt den echten aktuellen Stand der GLB-Datei.">
+            <input type="checkbox" id="rotPreviewToggle" ${detailRotationPreviewOn ? 'checked' : ''}>
+            Drehung in Vorschau anzeigen
+          </label>
+        </div>
       </div>` : ''}
       ${!isComposed ? `
       <div class="field-row"><label class="field-label">GLB-Datei</label><input class="field-value" data-field="glbFile" value="${esc(p.glbFile || '')}"></div>
@@ -4458,6 +4882,25 @@ async function openDetail(id) {
         return partName ? { ...rule, partName } : rule
       }))}</div>
       <button type="button" class="btn btn-ghost btn-sm" id="detailNameRuleAdd">+ Regel hinzufügen</button>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">Textur-Regeln (dieses Produkt)</div>
+      <p class="cc-muted" style="font-size:.72rem;margin:0 0 .5rem;line-height:1.4">
+        Legt beim <strong>Neu konvertieren</strong> Texturen aus der Bibliothek oder eigenen Uploads
+        gezielt auf Teile (per <strong>Regex</strong> auf Mesh/Knoten/Material/Hierarchiepfad).
+        UVs werden automatisch per Box-Projektion in Weltkoordinaten erzeugt — <strong>Kachel (mm)</strong>
+        ist die physische Kachelgröße. Schneller Weg für einzelne Teile: Textur-Dropdown in der Liste
+        <strong>„Einzelteile (Meshes)"</strong> oben. Letzte passende Regel gewinnt; „— keine —" mit Regex
+        hebt eine globale Regel auf.
+        <button type="button" class="btn-link-inline" id="linkOpenGlobalTextureRules">Globale Textur-Regeln bearbeiten …</button>
+      </p>
+      <div id="detailTextureRulesRows" class="detail-texture-rules-rows">${renderTextureRuleRowsHtml(splitTextureRules(p.conversionPreset?.textureRules).manual)}</div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn btn-ghost btn-sm" id="detailTextureRuleAdd">+ Regel hinzufügen</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="detailTextureUploadBtn">Textur hochladen …</button>
+        <input type="file" id="detailTextureUploadInput" accept=".png,.jpg,.jpeg,.webp" style="display:none">
+      </div>
     </div>
 
     <div class="detail-section">
@@ -4775,6 +5218,7 @@ async function openDetail(id) {
   detailContent.querySelector('#btnOpenAutomaticColorMappings')?.addEventListener('click', (event) => {
     void openAutomaticColorMappings(event.currentTarget)
   })
+  bindDetailTextureRules()
   bindDetailReductionRules()
   bindDetailVisibilityRules()
   moveDetailScrollContentToSecondaryPanel()
@@ -5621,6 +6065,8 @@ function updateDetailMeshRowClasses() {
   const rules = editor ? collectNameRulesFromContainer(editor) : product?.conversionPreset?.nameColorRules || []
   const converted = colorRulesAreConverted(product, rules, colorRuleGlobals)
   list.querySelectorAll('.detail-mesh-row').forEach((row) => {
+    // Phantom-Zeilen (entfernte Teile) verwalten ihren is-excluded-Zustand selbst.
+    if (row.dataset.meshIdx == null) return
     const i = parseInt(row.dataset.meshIdx, 10)
     const name = row.dataset.technicalName || row.querySelector('.detail-mesh-name')?.textContent || ''
     const matchingRules = getCurrentMatchingNameRules(name)
@@ -5648,7 +6094,9 @@ function updateDetailMeshSelectionCount() {
   if (!detailPreviewModelRoot) return
   const total = collectMeshesFromGroup(detailPreviewModelRoot).length
   const included = total - detailMeshExcluded.size
-  if (el) el.textContent = `${included}/${total} im GLB`
+  const phantomTotal = document.querySelectorAll('#detailMeshPartsList [data-mesh-phantom]').length
+  const phantomStillExcluded = phantomTotal - detailMeshPhantomIncluded.size
+  if (el) el.textContent = `${included}/${total} im GLB${phantomStillExcluded > 0 ? ` · ${phantomStillExcluded} entfernt` : ''}`
   if (drawerCount) drawerCount.textContent = `${included}/${total}`
 }
 
@@ -5787,6 +6235,25 @@ function buildDetailMeshPartsUI() {
     const name = (mesh.name || '').trim()
     if (name && excludedNames.has(name)) detailMeshExcluded.add(i)
   })
+  // Ausgeblendete Teile, die der Bake bereits aus dem GLB entfernt hat: als
+  // Phantom-Zeilen listen, damit die Regel sichtbar bleibt und wieder aufhebbar ist.
+  detailMeshPhantomIncluded = new Set()
+  const presentMeshNames = new Set(meshes.map((m) => (m.name || '').trim()).filter(Boolean))
+  const phantomNames = [...excludedNames].filter((n) => !presentMeshNames.has(n))
+  // Zusätzlich: Teile, die der letzte Bake per manueller Regex-Regel entfernt hat
+  // (Server-Diff _bake.removedMeshes). Nur Info-Zeilen – wieder aufnehmen geht dort
+  // über die Sichtbarkeits-Regeln, nicht per Checkbox.
+  const phantomNameSet = new Set(phantomNames)
+  const ruleRemovedNames = (Array.isArray(prod?._bake?.removedMeshes) ? prod._bake.removedMeshes : [])
+    .map((n) => String(n || '').trim())
+    .filter((n) => n && !presentMeshNames.has(n) && !phantomNameSet.has(n))
+
+  // Vorbelegung Textur-Dropdowns aus gespeicherten meshSelect-Textur-Regeln.
+  const savedMeshTextureRule = new Map(
+    splitTextureRules(prod?.conversionPreset?.textureRules)
+      .meshSelect.filter((r) => typeof r?.name === 'string' && r.textureId)
+      .map((r) => [r.name.trim(), r]),
+  )
 
   listEl.innerHTML = meshes
     .map((mesh, i) => {
@@ -5798,6 +6265,10 @@ function buildDetailMeshPartsUI() {
         : (mesh.name || '(ohne Namen)')
       const vc = mesh.geometry?.attributes?.position?.count ?? 0
       const checked = detailMeshExcluded.has(i) ? '' : 'checked'
+      const savedTexRule = savedMeshTextureRule.get((mesh.name || '').trim())
+      const texSel = savedTexRule?.textureId || ''
+      const sideSel = savedTexRule?.side || 'all'
+      const mappingSel = savedTexRule?.mapping || 'tile'
       return `<div class="detail-mesh-row${detailMeshExcluded.has(i) ? ' is-excluded' : ''}" data-mesh-idx="${i}" data-technical-name="${esc(technicalName)}">
         <label class="detail-mesh-inc" title="Ins GLB aufnehmen" data-mesh-inc-wrap>
           <input type="checkbox" class="detail-mesh-inc-cb" data-mesh-inc="${i}" ${checked}>
@@ -5809,9 +6280,32 @@ function buildDetailMeshPartsUI() {
         <button type="button" class="detail-mesh-focus-btn" data-mesh-focus="${i}" title="Kamera auf dieses Teil">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2M3 17v2a2 2 0 0 0 2 2h2m10-16h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2"/></svg>
         </button>
+        <span class="detail-mesh-tex">
+          <select class="detail-mesh-tex-select" data-mesh-name="${esc((mesh.name || '').trim())}" title="Textur für dieses Teil (wirkt beim nächsten Neu konvertieren)">${textureSelectOptionsHtml(texSel)}</select>
+          <select class="detail-mesh-tex-side" data-mesh-name="${esc((mesh.name || '').trim())}" title="Nur diese Seite texturieren (Z = oben im CAD)">${textureSideOptionsHtml(sideSel)}</select>
+          <select class="detail-mesh-tex-mapping" data-mesh-name="${esc((mesh.name || '').trim())}" title="Kacheln: wiederholt alle X mm · Einpassen: genau 1× über das Teil gespannt">${textureMappingOptionsHtml(mappingSel)}</select>
+        </span>
       </div>`
     })
     .join('')
+    + phantomNames
+      .map((name) => `<div class="detail-mesh-row is-excluded is-phantom" data-mesh-phantom="${esc(name)}">
+        <label class="detail-mesh-inc" title="Anhaken = Teil kommt beim nächsten Neu konvertieren wieder ins GLB" data-mesh-inc-wrap>
+          <input type="checkbox" class="detail-mesh-inc-cb" data-mesh-phantom-cb="${esc(name)}">
+        </label>
+        <span class="detail-mesh-name" title="${esc(name)}">${esc(name)}</span>
+        <span class="detail-mesh-phantom-hint" title="Dieses Teil wurde beim letzten Konvertieren aus dem GLB entfernt. Die Ausblende-Regel bleibt gespeichert, bis Sie es wieder anhaken und speichern.">entfernt – nicht im aktuellen GLB</span>
+      </div>`)
+      .join('')
+    + ruleRemovedNames
+      .map((name) => `<div class="detail-mesh-row is-excluded is-phantom" data-mesh-phantom="${esc(name)}">
+        <label class="detail-mesh-inc" title="Per Sichtbarkeits-Regel (Regex) entfernt – zum Wiederaufnehmen die Regel unter „Sichtbarkeit beim Export" anpassen und neu konvertieren" data-mesh-inc-wrap>
+          <input type="checkbox" class="detail-mesh-inc-cb" disabled>
+        </label>
+        <span class="detail-mesh-name" title="${esc(name)}">${esc(name)}</span>
+        <span class="detail-mesh-phantom-hint" title="Beim letzten Konvertieren durch eine Sichtbarkeits-Regel (Regex) entfernt. Zum Wiederaufnehmen die passende Regel unter „Sichtbarkeit beim Export" ändern/löschen und neu konvertieren.">per Regel entfernt</span>
+      </div>`)
+      .join('')
   if (clearBtn) clearBtn.hidden = true
   detailMeshSelectionReady = true
   applyDetailMeshVisibility()
@@ -5831,10 +6325,14 @@ function buildDetailMeshPartsUI() {
       focusDetailMeshPart(parseInt(focusBtn.getAttribute('data-mesh-focus'), 10))
       return
     }
-    // Klicks auf die Checkbox nicht als Zeilen-Isolation behandeln.
+    // Klicks auf Checkbox/Textur-Dropdown nicht als Zeilen-Isolation behandeln.
     if (e.target.closest('[data-mesh-inc-wrap]')) return
+    if (e.target.closest('.detail-mesh-tex-select')) return
+    if (e.target.closest('.detail-mesh-tex-side')) return
+    if (e.target.closest('.detail-mesh-tex-mapping')) return
     const row = e.target.closest('.detail-mesh-row')
-    if (row) toggleDetailMeshIsolate(parseInt(row.dataset.meshIdx, 10))
+    // Phantom-Zeilen (entfernte Teile) haben kein Mesh im Modell → keine Isolation.
+    if (row && row.dataset.meshIdx != null) toggleDetailMeshIsolate(parseInt(row.dataset.meshIdx, 10))
   }
   listEl.oncontextmenu = (e) => {
     const label = e.target.closest('.detail-mesh-name')
@@ -5860,6 +6358,15 @@ function buildDetailMeshPartsUI() {
     }
   }
   listEl.onchange = (e) => {
+    const phantomCb = e.target.closest('[data-mesh-phantom-cb]')
+    if (phantomCb) {
+      const name = phantomCb.getAttribute('data-mesh-phantom-cb') || ''
+      if (phantomCb.checked) detailMeshPhantomIncluded.add(name)
+      else detailMeshPhantomIncluded.delete(name)
+      phantomCb.closest('.detail-mesh-row')?.classList.toggle('is-excluded', !phantomCb.checked)
+      updateDetailMeshSelectionCount()
+      return
+    }
     const cb = e.target.closest('.detail-mesh-inc-cb')
     if (!cb) return
     const i = parseInt(cb.getAttribute('data-mesh-inc'), 10)
@@ -5886,9 +6393,18 @@ function setAllDetailMeshIncluded(included) {
   if (!included) meshes.forEach((_, i) => detailMeshExcluded.add(i))
   const listEl = document.getElementById('detailMeshPartsList')
   if (listEl) {
-    listEl.querySelectorAll('.detail-mesh-inc-cb').forEach((cb) => {
+    listEl.querySelectorAll('.detail-mesh-inc-cb[data-mesh-inc]').forEach((cb) => {
       const i = parseInt(cb.getAttribute('data-mesh-inc'), 10)
       cb.checked = !detailMeshExcluded.has(i)
+    })
+    // Phantom-Zeilen (bereits entfernte Teile) mitschalten: "Alle" nimmt sie beim
+    // nächsten Konvertieren wieder auf, "Keine" behält ihre Ausblendung bei.
+    listEl.querySelectorAll('[data-mesh-phantom-cb]').forEach((cb) => {
+      const name = cb.getAttribute('data-mesh-phantom-cb') || ''
+      cb.checked = included
+      if (included) detailMeshPhantomIncluded.add(name)
+      else detailMeshPhantomIncluded.delete(name)
+      cb.closest('.detail-mesh-row')?.classList.toggle('is-excluded', !included)
     })
   }
   applyDetailMeshVisibility()
@@ -5998,6 +6514,13 @@ function loadDetailPreview(product) {
   disposeDetailPreview()
   const wrap = document.getElementById('detailPreviewWrap')
   if (!wrap) return
+  // Beim Reload (z. B. frische GLB nach Konvertierung) den Lade-Hinweis wieder einblenden.
+  const phReload = wrap.querySelector('.card-preview-placeholder')
+  if (phReload) {
+    phReload.style.display = ''
+    const phSpan = phReload.querySelector('span')
+    if (phSpan) phSpan.textContent = '3D-Vorschau lädt …'
+  }
   const w = wrap.clientWidth || 580
   const h = wrap.clientHeight || 280
 
@@ -6142,9 +6665,12 @@ function disposeDetailPreview() {
   detailCoordinateSystem = null
   detailMeshIsolateIndex = null
   detailMeshExcluded = new Set()
+  detailMeshPhantomIncluded = new Set()
   detailMeshSelectionReady = false
   detailPreviewModelRoot = null
   detailPreviewCamera = null
+  // Badge gehört zum entsorgten Modell – ohne Modell nichts kennzeichnen.
+  updateDetailRotationPreviewUi()
   if (detailPreviewScene) {
     disposeSceneGpuResources(detailPreviewScene)
     detailPreviewScene = null
@@ -6170,6 +6696,12 @@ function disposeDetailPreview() {
   if (detailControls) detailControls.dispose()
   detailControls = null
   if (detailRenderer) {
+    // Altes Canvas aus dem DOM nehmen – sonst stapeln sich beim Reload nach einer
+    // Konvertierung tote Canvases im Vorschau-Container (openDetail ersetzt zwar
+    // detailContent.innerHTML, der Konvertierungs-Reload aber nicht).
+    if (detailRenderer.domElement?.parentElement) {
+      try { detailRenderer.domElement.parentElement.removeChild(detailRenderer.domElement) } catch { /* ignore */ }
+    }
     detailRenderer.dispose()
     safeForceWebGLContextLoss(detailRenderer)
   }
@@ -6276,7 +6808,8 @@ async function saveDetail() {
   const nrContainer = document.getElementById('detailNameRulesRows')
   const vrContainer = document.getElementById('detailReductionRulesRows')
   const visContainer = document.getElementById('detailVisibilityRulesRows')
-  if (nrContainer || vrContainer || visContainer) {
+  const texContainer = document.getElementById('detailTextureRulesRows')
+  if (nrContainer || vrContainer || visContainer || texContainer) {
     const prev = p.conversionPreset && typeof p.conversionPreset === 'object' && !Array.isArray(p.conversionPreset)
       ? { ...p.conversionPreset }
       : {}
@@ -6293,6 +6826,18 @@ async function saveDetail() {
       const manualRules = collectVisibilityRulesFromContainer(visContainer)
       const meshSelectRules = collectMeshSelectVisibilityRules()
       next.visibilityRules = [...manualRules, ...meshSelectRules]
+    }
+    if (texContainer) {
+      const manualTexRules = collectTextureRulesFromContainer(texContainer)
+      const meshSelectTexRules = collectMeshSelectTextureRules()
+      const allTexRules = [...manualTexRules, ...meshSelectTexRules]
+      if (allTexRules.length) {
+        next.textureRules = allTexRules
+        // Showroom-Umfärben darf eingebrannte Texturen nicht strippen.
+        next.keepBaseColorTexture = true
+      } else {
+        delete next.textureRules
+      }
     }
     changes.conversionPreset = next
   }
@@ -7085,12 +7630,17 @@ async function pollConversionInBackground(jobId, productId, productName, convers
                 const pr = await fetch(`/__api/products/${encodeURIComponent(productId)}`)
                 if (pr.ok) {
                   const fresh = await parseJsonResponse(pr)
+                  // Cache aktualisieren, damit Teile-Liste/Regeln (inkl. _bake.removedMeshes)
+                  // nach der Konvertierung nicht aus veralteten Daten gebaut werden.
+                  if (fresh?.id) productCache.set(fresh.id, fresh)
                   if (fresh?.specs) updateDimensionsUi(fresh)
                   if (fresh) {
                     productCache.set(productId, fresh)
                     detailRotationOffsetDeg = { x: 0, y: 0, z: 0 }
+                    detailRotationPreviewOn = true
                     lastBakeAxis = ''
                     updateDetailRotationLabels()
+                    updateDetailRotationPreviewUi()
                     syncRotationHeaderFromState()
                     // Cache-Buster anhängen, damit der Browser die NEUE GLB lädt und nicht die alte
                     // aus dem Cache – sonst sieht es so aus, als hätte die Konvertierung nichts bewirkt.

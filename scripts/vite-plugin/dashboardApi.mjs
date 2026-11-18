@@ -13,6 +13,8 @@ import { mergeNameColorRuleEntries } from '../../src/lib/nameColorRules.js'
 import { mergeGeometryColorRuleEntries } from '../../src/lib/geometryColorRules.js'
 import { mergeVertexReductionRuleEntries } from '../../src/lib/vertexReductionRules.js'
 import { mergeVisibilityRuleEntries } from '../../src/lib/visibilityRules.js'
+import { mergeTextureRuleEntries, resolveTextureRuleAssets } from '../../src/lib/textureRules.js'
+import { buildUsdzFromGlb, usdzFailureHint } from '../lib/usdzFromGlb.mjs'
 import { resolveRalCodeFromGtinStamm, resolveHexForRalDigits } from '../../scripts/resolve-ral-from-gtin.mjs'
 import { resolveDefaultColorStringForPipeline, isDefaultColorMappingAuto } from '../../src/lib/defaultColorMapping.js'
 import ColorService from '../../src/services/ColorService.js'
@@ -23,6 +25,7 @@ const __dirname = typeof import.meta.dirname !== 'undefined'
   ? import.meta.dirname
   : dirname(fileURLToPath(import.meta.url))
 import { spawn, spawnSync } from 'child_process'
+import { existsSync } from 'fs'
 import { open, readdir, readFile, writeFile, mkdir, stat, copyFile, unlink, rename } from 'fs/promises'
 
 /** @param {string} abs */
@@ -32,6 +35,31 @@ async function pathExists(abs) {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Mesh-Namen aus dem JSON-Chunk einer GLB lesen (ohne gltf-transform).
+ * Für den Vorher/Nachher-Vergleich um den Bake: welche Meshes haben die
+ * Sichtbarkeits-Regeln physisch entfernt? Rückgabe null bei kaputter/keiner GLB.
+ * @param {string} file
+ * @returns {Promise<Set<string>|null>}
+ */
+async function readGlbMeshNames(file) {
+  try {
+    const buf = await readFile(file)
+    if (buf.length < 20 || buf.readUInt32LE(0) !== 0x46546c67) return null // Magic "glTF"
+    const jsonLen = buf.readUInt32LE(12)
+    if (jsonLen <= 0 || 20 + jsonLen > buf.length) return null
+    const json = JSON.parse(buf.subarray(20, 20 + jsonLen).toString('utf-8'))
+    const names = new Set()
+    for (const m of Array.isArray(json.meshes) ? json.meshes : []) {
+      const n = String(m?.name || '').trim()
+      if (n) names.add(n)
+    }
+    return names
+  } catch {
+    return null
   }
 }
 
@@ -1264,6 +1292,120 @@ export function registerDashboardApi(middlewares, opts = {}) {
         }
       })
 
+      // ── Textur-Regeln + Bibliothek ───────────────────────────────────────
+      const TEXTURE_LIB_DIR = resolve(ROOT, 'public', 'textures')
+      const TEXTURE_LIB_MANIFEST = resolve(TEXTURE_LIB_DIR, 'library.json')
+      const TEXTURE_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp'])
+
+      const readTextureLibraryManifest = async () => {
+        try {
+          const parsed = JSON.parse(await readFile(TEXTURE_LIB_MANIFEST, 'utf-8'))
+          return parsed && typeof parsed === 'object' ? parsed : { textures: [] }
+        } catch {
+          return { textures: [] }
+        }
+      }
+      const productTexturesDirFor = (productId) => {
+        const safeId = String(productId || '').replace(/[^a-zA-Z0-9_\-.]/g, '_')
+        return safeId ? resolve(ROOT, 'public', 'models', 'products', safeId, 'textures') : null
+      }
+
+      // POST /__api/save-texture-rules  Body: { textureRules: [...] } — merged in public/mtl-ral-color-mapping.json
+      middlewares.use('/__api/save-texture-rules', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        res.setHeader('Content-Type', 'application/json')
+        try {
+          const body = JSON.parse((await readBody(req, MAPPING_SAVE_MAX_BYTES)).toString('utf-8'))
+          if (!body || typeof body !== 'object' || !Array.isArray(body.textureRules)) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'textureRules[] erwartet' }))
+            return
+          }
+          let existing
+          try {
+            existing = JSON.parse(await readFile(MAPPING_FILE, 'utf-8'))
+          } catch (e) {
+            res.statusCode = 500
+            res.end(JSON.stringify({ error: `Mapping-Datei nicht lesbar: ${e.message}` }))
+            return
+          }
+          if (!existing || typeof existing !== 'object') existing = {}
+          existing.textureRules = body.textureRules
+          await writeFile(MAPPING_FILE, JSON.stringify(existing, null, 2) + '\n', 'utf-8')
+          res.statusCode = 200
+          res.end(JSON.stringify({ ok: true, path: '/mtl-ral-color-mapping.json' }))
+        } catch (e) {
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: e.message || 'Speichern fehlgeschlagen' }))
+        }
+      })
+
+      // GET /__api/texture-library?productId=…  → Bibliothek + Produkt-Uploads für die Dropdowns
+      middlewares.use('/__api/texture-library', async (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end(); return }
+        res.setHeader('Content-Type', 'application/json')
+        try {
+          const url = new URL(req.url, 'http://localhost')
+          const productId = url.searchParams.get('productId') || ''
+          const manifest = await readTextureLibraryManifest()
+          const library = (Array.isArray(manifest.textures) ? manifest.textures : []).map((e) => ({
+            id: String(e.id),
+            label: String(e.label || e.id),
+            defaultRepeatMm: Number(e.defaultRepeatMm) > 0 ? Number(e.defaultRepeatMm) : 600,
+          }))
+          const uploads = []
+          const upDir = productTexturesDirFor(productId)
+          if (upDir && existsSync(upDir)) {
+            for (const f of await readdir(upDir)) {
+              const ext = f.slice(f.lastIndexOf('.')).toLowerCase()
+              if (TEXTURE_UPLOAD_EXTS.has(ext)) {
+                uploads.push({ id: `upload:${f}`, label: f, defaultRepeatMm: 600 })
+              }
+            }
+          }
+          res.end(JSON.stringify({ library, uploads }))
+        } catch (e) {
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: e.message || 'Bibliothek nicht lesbar' }))
+        }
+      })
+
+      // POST /__api/upload-product-texture?productId=…  (Body = Datei, Header x-filename)
+      middlewares.use('/__api/upload-product-texture', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        res.setHeader('Content-Type', 'application/json')
+        try {
+          const url = new URL(req.url, 'http://localhost')
+          const productId = url.searchParams.get('productId') || ''
+          const upDir = productTexturesDirFor(productId)
+          if (!upDir) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'productId fehlt' }))
+            return
+          }
+          const rawName = decodeURIComponent(req.headers['x-filename'] || 'textur.png')
+          const safeName = rawName.split('/').pop().replace(/[^a-zA-Z0-9_\-. ]/g, '_')
+          const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase()
+          if (!TEXTURE_UPLOAD_EXTS.has(ext)) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'Nur PNG/JPG/JPEG/WebP erlaubt' }))
+            return
+          }
+          const targetFile = resolve(upDir, safeName)
+          if (!isSafePath(upDir, targetFile)) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'Ungültiger Dateipfad' }))
+            return
+          }
+          await mkdir(upDir, { recursive: true })
+          await writeFile(targetFile, await readBody(req))
+          res.end(JSON.stringify({ ok: true, textureId: `upload:${safeName}` }))
+        } catch (e) {
+          res.statusCode = e.message?.includes('zu groß') ? 413 : 500
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+
       // ── MTL lesen/schreiben (Dashboard-Editor) ───────────────────────────
       const MODELS_PUBLIC = resolve(ROOT, 'public', 'models')
       const MTL_API_MAX_BYTES = 1024 * 1024 // 1 MB
@@ -1526,25 +1668,17 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const id = safe.replace(/\.glb$/i, '').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-')
             const rawGlbUrl = `/models/output/${rawBasename}`
 
+            // USDZ wird NICHT vom Konverter übernommen: dessen Datei entsteht vor dem
+            // Bake und enthält damit Teile, die aus der GLB entfernt werden. Sie wird
+            // weiter unten aus der fertig gebackenen GLB neu erzeugt (buildUsdzFromGlb).
+            // Hier nur eine bereits vorhandene Ziel-USDZ als Übergangswert behalten,
+            // damit ein Fehlschlag der Neuerzeugung nicht die alte Referenz verliert.
             let usdzUrl = null
             const usdzSafePath = resolve(outputDir, safe.replace(/\.glb$/i, '.usdz'))
-            const usdzRawPath = resolve(outputDir, rawBasename.replace(/\.glb$/i, '.usdz'))
             try {
               await stat(usdzSafePath)
               usdzUrl = glbUrl.replace(/\.glb$/i, '.usdz')
-            } catch {
-              if (
-                rawBasename !== safe &&
-                isSafePath(outputDir, usdzRawPath)
-              ) {
-                try {
-                  await stat(usdzRawPath)
-                  await copyFile(usdzRawPath, usdzSafePath)
-                  usdzUrl = glbUrl.replace(/\.glb$/i, '.usdz')
-                                    log.info(`[register-converted] USDZ von Roh-Dateiname nach safe kopiert → ${safe.replace(/\.glb$/i, '.usdz')}`)
-                } catch (_) {}
-              }
-            }
+            } catch (_) {}
 
             let p = (productId && data.products.find((x) => x.id === productId))
               || data.products.find((x) => x.glbFile === glbUrl)
@@ -1652,6 +1786,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           let mergedGeometryColorRuleEntries = []
           let mergedVertexReductionRuleEntries = []
           let mergedVisibilityRuleEntries = []
+          let mergedTextureRuleEntries = []
           if (productForRal) {
             try {
               const mappingPath = resolve(ROOT, 'public', 'mtl-ral-color-mapping.json')
@@ -1662,6 +1797,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(mapping, bakePreset)
                 mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(mapping, bakePreset)
                 mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(mapping, bakePreset)
+                mergedTextureRuleEntries = mergeTextureRuleEntries(mapping, bakePreset)
                 const ralRaw = await readFile(resolve(ROOT, 'src/data/ralColors.json'), 'utf-8')
                 const ralPalette = JSON.parse(ralRaw)
                 const getRalHex = (ralKey) => {
@@ -1698,6 +1834,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, bakePreset)
                 mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, bakePreset)
                 mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, bakePreset)
+                mergedTextureRuleEntries = mergeTextureRuleEntries(null, bakePreset)
               }
             } catch (e) {
                             log.scoped("register-converted").warn("Mapping-Overrides für Bake:", e.message)
@@ -1706,6 +1843,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
               mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, bakePreset)
               mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, bakePreset)
               mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, bakePreset)
+              mergedTextureRuleEntries = mergeTextureRuleEntries(null, bakePreset)
             }
           }
           if (mergedNameColorRuleEntries.length) {
@@ -1778,7 +1916,20 @@ export function registerDashboardApi(middlewares, opts = {}) {
               continue
             }
             let needBake = false
-            try {
+            // Frisches Konverter-Ergebnis hat Vorrang: eine bereits vorhandene
+            // public-Kopie kann von einer früheren (ggf. fehlerhaften) Konvertierung
+            // stammen und darf die neue nicht blockieren.
+            if (typeof absPath === 'string' && isAbsolute(absPath) && absPath !== localPath) {
+              try {
+                const st = await stat(absPath)
+                if (st.isFile()) {
+                  await copyFile(absPath, localPath)
+                  log.info(`[register-converted] GLB von absolutem Pfad kopiert: ${absPath} → ${safe}`)
+                  needBake = true
+                }
+              } catch (_) {}
+            }
+            if (!needBake) try {
               await stat(localPath)
               needBake = true
             } catch {
@@ -1867,23 +2018,10 @@ export function registerDashboardApi(middlewares, opts = {}) {
             if (needBake) {
               if (p && p.conversionError) delete p.conversionError
               const usdzSafePath = resolve(outputDir, safe.replace(/\.glb$/i, '.usdz'))
-              const usdzRawPath = resolve(outputDir, rawBasename.replace(/\.glb$/i, '.usdz'))
-              try {
-                await stat(usdzSafePath)
-                p.usdzFile = glbUrl.replace(/\.glb$/i, '.usdz')
-              } catch {
-                if (
-                  rawBasename !== safe &&
-                  isSafePath(outputDir, usdzRawPath)
-                ) {
-                  try {
-                    await stat(usdzRawPath)
-                    await copyFile(usdzRawPath, usdzSafePath)
-                    p.usdzFile = glbUrl.replace(/\.glb$/i, '.usdz')
-                                        log.info(`[register-converted] USDZ nach GLB-Fetch kopiert → ${safe.replace(/\.glb$/i, '.usdz')}`)
-                  } catch (_) {}
-                }
-              }
+              // Ob überhaupt eine USDZ gewünscht ist, steht im Preset (Dashboard-Schalter).
+              // Fehlt der Wert, gilt der Konverter-Default: ja.
+              const exportUsdzWanted =
+                String(productForRal?.conversionPreset?.exportUsdz ?? 'true').toLowerCase() !== 'false'
 
               const sf = String(productForRal?.surfaceFinish || '').trim().toLowerCase()
               const surfaceArgs = sf === 'verzinkt' || sf === 'pulver' ? ['--surface', sf] : []
@@ -1916,8 +2054,13 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 await writeFile(nameRulesFile, JSON.stringify(rulesPayload), 'utf-8')
               }
               log.scoped('register-converted').info(
-                `Bake: ${localPath}${ralCode ? ` (RAL ${ralCode})` : ''}${surfaceArgs.length ? ` [Oberfläche: ${sf}]` : ''}${overridesFile ? ' [Hex-Mapping]' : ''}${nameRulesFile ? ' [name-rules]' : ''}${mergedVertexReductionRuleEntries.length ? ' [vertex-reduction]' : ''}${mergedVisibilityRuleEntries.length ? ' [visibility]' : ''}`,
+                `Bake: ${localPath}${ralCode ? ` (RAL ${ralCode})` : ''}${surfaceArgs.length ? ` [Oberfläche: ${sf}]` : ''}${overridesFile ? ' [Hex-Mapping]' : ''}${nameRulesFile ? ' [name-rules]' : ''}${mergedVertexReductionRuleEntries.length ? ' [vertex-reduction]' : ''}${mergedVisibilityRuleEntries.length ? ' [visibility]' : ''}${mergedTextureRuleEntries.length ? ' [texture-rules]' : ''}`,
               )
+              let textureRulesFile = null
+              if (mergedTextureRuleEntries.length > 0) {
+                textureRulesFile = `${localPath}.texture-rules.json`
+                await writeFile(textureRulesFile, JSON.stringify({ textureRules: mergedTextureRuleEntries }), 'utf-8')
+              }
               const mtlTexBakeArgs = await bakeSpawnArgsMtlTextures(productForRal, ROOT)
               if (mtlTexBakeArgs.length) {
                                 log.scoped("register-converted").info("MTL map_Kd → GLB-Texturen (bake-glb-yup)")
@@ -1930,15 +2073,24 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 ...mtlTexBakeArgs,
                 ...(overridesFile ? ['--color-overrides', overridesFile] : []),
                 ...(nameRulesFile ? ['--name-rules', nameRulesFile] : []),
+                ...(textureRulesFile ? ['--texture-rules', textureRulesFile] : []),
                 ...(ralCode ? ['--ral', ralCode] : []),
                 ...surfaceArgs,
               ]
+              // Mesh-Namen VOR dem Bake festhalten: Der Bake entfernt per Sichtbarkeits-
+              // Regel getroffene Teile physisch aus der GLB. Der Vorher/Nachher-Diff wird
+              // am Produkt gespeichert (_bake.removedMeshes), damit das Dashboard entfernte
+              // Teile (auch bei manuellen Regex-Regeln) in der Einzelteile-Liste zeigen kann.
+              const preBakeMeshNames = await readGlbMeshNames(localPath)
               const result = spawnSync(process.execPath, bakeArgs, { cwd: ROOT, stdio: 'pipe', encoding: 'utf-8' })
               if (overridesFile) {
                 await unlink(overridesFile).catch(() => {})
               }
               if (nameRulesFile) {
                 await unlink(nameRulesFile).catch(() => {})
+              }
+              if (textureRulesFile) {
+                await unlink(textureRulesFile).catch(() => {})
               }
               if (result.stdout) log.scoped("register-converted").info("STDOUT:", result.stdout)
               if (result.stderr) log.scoped("register-converted").warn("STDERR:", result.stderr)
@@ -1947,6 +2099,55 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 p.conversionError = { reason: 'color-rule-bake-failed', at: new Date().toISOString() }
                 warnings.push({ productId: p.id, reason: 'color-rule-bake-failed', expected: glbUrl })
                 continue
+              }
+
+              if (p && result.status === 0 && preBakeMeshNames) {
+                const postBakeMeshNames = await readGlbMeshNames(localPath)
+                if (postBakeMeshNames) {
+                  const removedMeshes = [...preBakeMeshNames].filter((n) => !postBakeMeshNames.has(n))
+                  p._bake = {
+                    ...(p._bake && typeof p._bake === 'object' ? p._bake : {}),
+                    removedMeshes,
+                    at: new Date().toISOString(),
+                  }
+                  if (removedMeshes.length) {
+                    log.scoped('register-converted').info(
+                      `Bake hat ${removedMeshes.length} Mesh(es) entfernt (Sichtbarkeits-Regeln): ${removedMeshes.slice(0, 6).join(', ')}${removedMeshes.length > 6 ? ', …' : ''}`,
+                    )
+                  }
+                }
+              }
+
+              // USDZ aus der FERTIGEN GLB neu aufbauen. Die Konverter-USDZ entsteht in
+              // Blender vor dem Bake und enthält deshalb noch alle Teile, unkomprimiert
+              // (regelmäßig ein Vielfaches der ausgelieferten GLB). Erst hier steht die
+              // GLB in ihrer endgültigen Form — Sichtbarkeits-Regeln angewandt, Farbe und
+              // Finish eingebrannt, verwaiste Ressourcen entfernt.
+              if (exportUsdzWanted && result.status === 0) {
+                const t0 = Date.now()
+                const usdzRes = buildUsdzFromGlb(localPath, usdzSafePath)
+                if (usdzRes.ok) {
+                  p.usdzFile = glbUrl.replace(/\.glb$/i, '.usdz')
+                  let sizeHint = ''
+                  try {
+                    const [g, u] = await Promise.all([stat(localPath), stat(usdzSafePath)])
+                    sizeHint = ` (GLB ${(g.size / 1024).toFixed(0)} KB → USDZ ${(u.size / 1024).toFixed(0)} KB)`
+                  } catch (_) {}
+                  log.scoped('register-converted').info(
+                    `USDZ aus gebackener GLB erzeugt in ${((Date.now() - t0) / 1000).toFixed(1)}s${sizeHint}`,
+                  )
+                } else {
+                  const hint = usdzFailureHint(usdzRes.reason)
+                  log.scoped('register-converted').warn(
+                    `USDZ konnte nicht aus der gebackenen GLB erzeugt werden: ${hint}${usdzRes.detail ? ` – ${usdzRes.detail}` : ''}`,
+                  )
+                  warnings.push({
+                    productId: p?.id || productId || '',
+                    reason: 'usdz-rebuild-failed',
+                    expected: glbUrl.replace(/\.glb$/i, '.usdz'),
+                    message: `USDZ nicht neu erzeugt (${hint}) – AR-Datei kann vom GLB abweichen.`,
+                  })
+                }
               }
 
               // Prozessschutz: Farb-Kollaps früh sichtbar machen (STEP mehrfarbig, GLB einfarbig).
@@ -2327,6 +2528,35 @@ export function registerDashboardApi(middlewares, opts = {}) {
               `visibilityRules: ${mergedVisibilityRuleEntries.length} Eintrag/Einträge (Preset; Bake bei Registrierung)`,
             )
           }
+
+          // Textur-Regeln: global + Preset mergen, IDs zu absoluten Map-Pfaden auflösen
+          // und als options.textureRules an den Konverter geben (Anwendung in Blender).
+          let resolvedTextureRulesPayload = null
+          try {
+            const mappingPathTex = resolve(ROOT, 'public', 'mtl-ral-color-mapping.json')
+            const mappingRawTex = await readFile(mappingPathTex, 'utf-8').catch(() => null)
+            const mapTex = mappingRawTex && mappingRawTex.length <= MAPPING_MAX_BYTES ? JSON.parse(mappingRawTex) : null
+            const mergedTextureRuleEntries = mergeTextureRuleEntries(mapTex, presetFull)
+            if (mergedTextureRuleEntries.length) {
+              const libManifest = await readTextureLibraryManifest()
+              const { resolved, warnings } = resolveTextureRuleAssets(mergedTextureRuleEntries, {
+                libraryManifest: libManifest,
+                libraryDir: TEXTURE_LIB_DIR,
+                productTexturesDir: productTexturesDirFor(productId),
+                pathResolve: resolve,
+                fileExists: existsSync,
+              })
+              warnings.forEach((w) => log.scoped('convert-product').warn(`[texture-rules] ${w}`))
+              if (resolved.length) {
+                resolvedTextureRulesPayload = { rules: resolved }
+                log.scoped('convert-product').info(
+                  `textureRules: ${resolved.length} Regel(n) aufgelöst (Anwendung in Blender)`,
+                )
+              }
+            }
+          } catch (e) {
+            log.scoped('convert-product').warn(`[texture-rules] Auflösung fehlgeschlagen: ${e.message}`)
+          }
           const presetRest = { ...presetFull }
           delete presetRest.autoUvObj
           // Rotations-Felder aus dem gespeicherten Preset entfernen: Die aktuelle Drehung
@@ -2456,6 +2686,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
           }
           if (effDefaultColorOverride && effDefaultColorHex) {
             merged.defaultColorHex = effDefaultColorHex
+          }
+          if (resolvedTextureRulesPayload) {
+            merged.textureRules = resolvedTextureRulesPayload
           }
           // Externe Konverter-API (FormData-Feldname): steht NICHT für products.json / gelöschte UI-Checkbox.
           // Ohne dieses Flag ignorieren manche Builds colorOverrides bzw. defaultColorHex.

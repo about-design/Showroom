@@ -85,6 +85,11 @@ class MaterialManager {
     }
   }
 
+  /** Textur-Regel-Material (Blender-extras → userData): Textur bleibt beim Umfärben erhalten. */
+  _isTextureRuleMaterial(m) {
+    return !!m?.userData?.textureRuleId
+  }
+
   /**
    * Einheitlich: Base-Map-Handling, dann Vollfarbe (THREE.Color oder Hex-String), dann Finish.
    * @param {THREE.Material} m
@@ -93,6 +98,9 @@ class MaterialManager {
    * @param {{ stripMaps: boolean }} opts
    */
   _recolorMaterial(m, fillColor, finish, opts) {
+    // Per Textur-Regel texturierte Teile werden nicht umgefärbt/gestrippt —
+    // die Textur ist bewusst in die GLB eingebrannt.
+    if (this._isTextureRuleMaterial(m)) return
     const stripMaps = !!opts?.stripMaps
     if (stripMaps) this._stripBaseColorMapForRecolor(m)
     if (!stripMaps && m.map) {

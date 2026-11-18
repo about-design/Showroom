@@ -484,6 +484,18 @@
       "pattern": "LA100",
       "ral": "RAL 9007",
       "finish": "verzinkt"
+    },
+    {
+      "target": "mesh",
+      "pattern": "bolt|nut|scheibe|35-00041",
+      "ral": "RAL 9007",
+      "finish": "verzinkt"
+    },
+    {
+      "target": "mesh",
+      "pattern": "06-01408|31-01785|31-01784|06-01407",
+      "ral": "RAL 1003",
+      "finish": "pulver"
     }
   ],
   "overrideExcludeHex": [
@@ -500,6 +512,15 @@
       "pattern": "M6|M8|M10|M12",
       "ratio": 0.5,
       "error": 0.001
+    }
+  ],
+  "textureRules": [
+    {
+      "target": "mesh",
+      "pattern": "31-01784|31-01785",
+      "textureId": "warnstreifen",
+      "side": "outer",
+      "mapping": "unfold"
     }
   ]
 }

@@ -46,6 +46,7 @@ import {
   effectiveRatioForRule,
 } from '../src/lib/vertexReductionRules.js'
 import { compileVisibilityRules } from '../src/lib/visibilityRules.js'
+import { compileTextureRules, matchTextureRule } from '../src/lib/textureRules.js'
 import { parseMtl } from '../src/lib/mtlParser.js'
 import { ralFromColorNameAlias } from '../src/lib/colorNameAliases.js'
 
@@ -126,6 +127,25 @@ if (nameRulesPathArg) {
     }
   } catch (e) {
         log.warn('  ⚠ name-rules konnte nicht geladen werden:', e.message)
+  }
+}
+
+/** Textur-Regeln ({textureRules:[...]} oder Array): dienen im Bake NUR dem Schutz —
+ *  Materialien, die in Blender per Textur-Regel texturiert wurden, dürfen von
+ *  Farb-/Strip-/Finish-Pässen nicht angefasst werden. */
+const textureRulesPathArg = flag('texture-rules')
+let textureRulesCompiled = null
+const textureProtectedMaterials = new WeakSet()
+if (textureRulesPathArg) {
+  const trPath = path.isAbsolute(textureRulesPathArg) ? textureRulesPathArg : path.resolve(ROOT, textureRulesPathArg)
+  try {
+    if (fs.existsSync(trPath)) {
+      const parsed = JSON.parse(fs.readFileSync(trPath, 'utf-8'))
+      const raw = Array.isArray(parsed) ? parsed : parsed?.textureRules
+      textureRulesCompiled = compileTextureRules(Array.isArray(raw) ? raw : [])
+    }
+  } catch (e) {
+    log.warn('  ⚠ texture-rules konnte nicht geladen werden:', e.message)
   }
 }
 
@@ -594,6 +614,12 @@ async function applyMtlDeclaredBaseTexturesFromMtl(document) {
     const glbMat = nameToGlbMat.get(mm.name)
     if (!glbMat) {
             log.warn(`    MTL map_Kd "${relFile}": kein Material "${mm.name}" in GLB`)
+      continue
+    }
+    // Textur-Regel-Material (Blender-extras-Marker) nicht mit MTL-Textur überschreiben
+    const glbMatExtras = glbMat.getExtras()
+    if (glbMatExtras && typeof glbMatExtras === 'object' && glbMatExtras.textureRuleId) {
+      log.info(`    MTL map_Kd "${relFile}": Material "${mm.name}" ist Textur-Regel-geschützt – übersprungen`)
       continue
     }
     stripNonBaseColorTextureSlots(glbMat)
@@ -1253,11 +1279,64 @@ function applyVertexReductionRules(doc, rules, simplifier) {
  * (5) Standardfarbe (--ral) — Basis für alle noch ungefärbten Materialien
  *     (explizit gesetzt; im Automatisch-Modus dominanter RAL als Fallback)
  */
+/**
+ * Materialien, die in Blender per Textur-Regel texturiert wurden, vor allen
+ * Farb-/Strip-/Finish-Pässen schützen. Erkennung: extras.textureRuleId
+ * (Blender export_extras) ODER Fallback-Match gegen die --texture-rules.
+ * Schutzmechanik: ins `locked`-WeakSet (alle Farb-Pässe überspringen es)
+ * und in finishLockedMaterials (Finish-Pässe überspringen es).
+ */
+function protectTextureRuledMaterials(doc, lockedWeakSet) {
+  let n = 0
+  const protect = (mat) => {
+    if (!mat || textureProtectedMaterials.has(mat)) return
+    lockedWeakSet.add(mat)
+    finishLockedMaterials.add(mat)
+    textureProtectedMaterials.add(mat)
+    n++
+  }
+  for (const mat of doc.getRoot().listMaterials()) {
+    const extras = mat.getExtras()
+    if (extras && typeof extras === 'object' && extras.textureRuleId) protect(mat)
+  }
+  // Extras-Marker sind maßgeblich (bei Seiten-Texturen ist nur das texturierte
+  // Material markiert — die übrigen Seiten sollen umfärbbar bleiben).
+  // Pattern-Fallback nur, wenn die GLB gar keine Marker trägt (ältere Exporte).
+  if (n === 0 && textureRulesCompiled && textureRulesCompiled.length) {
+    for (const mat of doc.getRoot().listMaterials()) {
+      if (textureProtectedMaterials.has(mat)) continue
+      const hit = matchTextureRule(textureRulesCompiled, { materialName: mat.getName() || '' })
+      if (hit && hit.textureId) protect(mat)
+    }
+    const visit = (node) => {
+      const mesh = node.getMesh()
+      if (mesh) {
+        const meshName = (mesh.getName() || '').trim() || (node.getName() || '').trim()
+        const hit = matchTextureRule(textureRulesCompiled, {
+          meshName,
+          nodeName: node.getName() || '',
+          nodePath: getNodePathString(node),
+        })
+        if (hit && hit.textureId) {
+          for (const prim of mesh.listPrimitives()) protect(prim.getMaterial())
+        }
+      }
+      for (const child of node.listChildren()) visit(child)
+    }
+    for (const scene of doc.getRoot().listScenes()) {
+      for (const rootChild of scene.listChildren()) visit(rootChild)
+    }
+  }
+  if (n) log.info(`    Textur-Regeln: ${n} Material(ien) geschützt (Farb-/Strip-/Finish-Pässe übersprungen)`)
+  return n
+}
+
 function applyMappingAndCliRalBaseColors(doc) {
   const locked = new WeakSet()
   const neutralized = removedNameColorRulesCompiled?.length
     ? resetRemovedNameColorRuleMatches(doc, removedNameColorRulesCompiled)
     : new Set()
+  protectTextureRuledMaterials(doc, locked)
   if (nameColorRulesCompiled && nameColorRulesCompiled.length > 0) {
     applyNameColorRules(doc, nameColorRulesCompiled, locked)
   }

@@ -23,6 +23,8 @@
     "mtl:slim-mapping": "node scripts/slim-mtl-mapping.mjs",
     "sync:colors": "node scripts/sync-colors-from-mtl.mjs",
     "mtl:matching": "npx open-cli tools/mtl-color-matching.html",
+    "usdz:rebuild": "node scripts/rebuild-usdz.mjs",
+    "usdz:rebuild:dry": "node scripts/rebuild-usdz.mjs --dry-run",
     "glb:bake-yup": "node scripts/bake-glb-yup.js",
     "glb:bake-yup:write": "node scripts/bake-glb-yup.js --write",
     "glb:check-orientations": "node scripts/check-glb-orientations.js",

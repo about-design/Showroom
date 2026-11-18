@@ -45,6 +45,7 @@
         <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.24.b</span></span>
       </div>
       <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
+      <span class="version-badge" id="appBuildBadge" hidden></span>
     </div>
     <div class="top-bar-right">
       <a href="/converter.html" class="btn btn-ghost" title="GLB Konvertierung">
@@ -54,6 +55,10 @@
       <button type="button" class="btn btn-ghost" id="btnGlobalNameRules" title="Globale Namens-Farbregeln (Regex → RAL) für alle Produkte">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         Namens-Regeln
+      </button>
+      <button type="button" class="btn btn-ghost" id="btnGlobalTextureRules" title="Globale Textur-Regeln (Regex → Textur aus Bibliothek) für alle Produkte">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+        Textur-Regeln
       </button>
       <button type="button" class="btn btn-ghost" id="btnGlobalReductionRules" title="Globale Vertex-Reduktion (Regex/Geometrie → Ratio) für alle Produkte – z. B. Schrauben verkleinern">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
@@ -380,6 +385,10 @@
       <span class="detail-position" id="detailPosition"></span>
     </div>
     <button type="button" class="detail-secondary-toggle detail-secondary-toggle-primary" id="detailSecondaryToggle" aria-controls="detailSecondaryPanel" aria-expanded="false" aria-label="Produktdetails ausklappen" title="Produktdetails ausklappen">‹</button>
+    <button class="btn btn-primary detail-header-convert" id="detailHeaderConvert" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      <span id="detailHeaderConvertLabel">Neu konvertieren</span>
+    </button>
     <button class="detail-close" id="detailClose">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
@@ -452,6 +461,29 @@
       <div class="name-rules-modal-actions-spacer"></div>
       <button type="button" class="btn btn-ghost" id="globalNameRulesClose">Schließen</button>
       <button type="button" class="btn btn-primary" id="globalNameRulesSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ Globale Textur-Regeln ═══════ -->
+<div class="name-rules-modal" id="globalTextureRulesModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="globalTextureRulesBackdrop"></div>
+  <div class="name-rules-modal-panel" role="dialog" aria-labelledby="globalTextureRulesTitle">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="globalTextureRulesTitle">Globale Textur-Regeln</h2>
+      <p class="cc-muted name-rules-modal-hint">
+        Legt beim <strong>Neu konvertieren</strong> Texturen aus der Bibliothek (<code>public/textures/library.json</code>)
+        per <strong>Regex</strong> auf Teile — Ziele: Mesh, Knoten, Material, Hierarchiepfad. UVs werden automatisch
+        per Box-Projektion erzeugt, <strong>Kachel (mm)</strong> ist die physische Kachelgröße.
+        Produktregeln im Detail haben Vorrang (letzte passende Regel gewinnt).
+      </p>
+    </div>
+    <div id="globalTextureRulesRows" class="detail-texture-rules-rows"></div>
+    <div class="name-rules-modal-actions">
+      <button type="button" class="btn btn-ghost btn-sm" id="globalTextureRuleAdd">+ Regel</button>
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="globalTextureRulesClose">Schließen</button>
+      <button type="button" class="btn btn-primary" id="globalTextureRulesSave">Speichern</button>
     </div>
   </div>
 </div>

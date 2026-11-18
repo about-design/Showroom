@@ -143,6 +143,21 @@ body {
   white-space: nowrap;
   line-height: 1.2;
 }
+
+/* Versions-Badge neben dem Logo: zeigt package.json-Version + Git-Commit (Tooltip: Stand). */
+.version-badge {
+  margin-left: .5rem;
+  padding: .15rem .45rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: .68rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
 .top-bar-right { display: flex; align-items: center; gap: .75rem; }
 .top-bar-right .btn-ghost { color: #f8fafc; }
 .top-bar-right .btn-ghost:hover,
@@ -1248,6 +1263,19 @@ textarea.review-notes:focus { border-color: var(--accent); }
   margin-right: auto;
   position: relative;
 }
+
+.detail-header-convert {
+  flex-shrink: 0;
+  margin-right: var(--space-3);
+  padding: .45rem .8rem;
+  font-size: .8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  white-space: nowrap;
+}
+.detail-header-convert svg { width: 14px; height: 14px; }
+.detail-header-convert:disabled { opacity: .5; cursor: default; }
 .detail-preview canvas { width: 100% !important; height: 100% !important; display: block; }
 .detail-coordinate-toggle {
   position: absolute;
@@ -1446,6 +1474,47 @@ textarea.review-notes:focus { border-color: var(--accent); }
   background: var(--bg-hover);
   border-color: var(--border-default);
 }
+/* Textur-Dropdown in der Einzelteile-Zeile (wirkt beim nächsten Neu konvertieren). */
+/* Textur-Auswahl (Textur · Seite · Mapping) als eigene Zeile unter dem Teilenamen –
+   unabhängig von den festen Spalten für RAL / Vertices / Fokus (breit, ohne RAL, schmal). */
+.detail-mesh-tex {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  min-width: 0;
+}
+.detail-mesh-tex > select { min-width: 0; }
+.detail-mesh-tex-select {
+  max-width: 130px;
+  font-size: .72rem;
+  padding: .2rem .3rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+.detail-mesh-tex-select:focus { border-color: var(--accent); outline: none; }
+.detail-mesh-tex-side {
+  max-width: 92px;
+  font-size: .72rem;
+  padding: .2rem .3rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+.detail-mesh-tex-side:focus { border-color: var(--accent); outline: none; }
+.detail-mesh-tex-mapping {
+  max-width: 104px;
+  font-size: .72rem;
+  padding: .2rem .3rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+.detail-mesh-tex-mapping:focus { border-color: var(--accent); outline: none; }
 .detail-mesh-row.is-active {
   border-color: #d92d20;
   background: #fff0ee;
@@ -1474,6 +1543,20 @@ textarea.review-notes:focus { border-color: var(--accent); }
 .detail-mesh-row.is-excluded .detail-mesh-name {
   text-decoration: line-through;
   color: var(--text-muted);
+}
+/* Phantom-Zeile: Teil ist per Regel ausgeblendet und wurde beim letzten Bake aus dem GLB entfernt. */
+.detail-mesh-row.is-phantom {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  cursor: default;
+}
+.detail-mesh-row.is-phantom:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+.detail-mesh-phantom-hint {
+  font-size: .68rem;
+  color: var(--warning);
+  white-space: nowrap;
 }
 .detail-mesh-inc {
   display: grid; place-items: center;
@@ -2715,6 +2798,50 @@ select.field-value { cursor: pointer; appearance: none; background-image: url("d
 #rotResetAll {
   margin-top: 0.5rem;
 }
+.detail-rotation-section .rot-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.rot-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.rot-preview-toggle input { accent-color: var(--accent); cursor: pointer; }
+.rot-preview-toggle input:disabled { cursor: default; }
+.rot-preview-toggle:has(input:disabled) { opacity: 0.5; cursor: default; }
+
+/* Badge im 3D-Fenster: zeigt, ob GLB pur oder GLB + (noch nicht eingebrannte) Drehung zu sehen ist. */
+.detail-rot-preview-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 5;
+  border: 1px solid var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.2;
+  opacity: 0.95;
+}
+.detail-rot-preview-badge.is-off {
+  border-color: var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+.detail-rot-preview-badge:hover { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
   *,

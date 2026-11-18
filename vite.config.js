@@ -2,11 +2,12 @@ import { defineConfig } from 'vite'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { execFileSync } from 'child_process'
-import { existsSync, rmSync } from 'fs'
+import { existsSync, rmSync, readFileSync } from 'fs'
 import { platform } from 'os'
 import tailwindcss from '@tailwindcss/vite'
 import { dashboardApi } from './scripts/vite-plugin/dashboardApi.mjs'
 import { onlinePublicAssetsPlugin } from './scripts/vite-plugin/onlinePublicAssets.mjs'
+import { localPublicAssetsPlugin } from './scripts/vite-plugin/localPublicAssets.mjs'
 import { createLogger } from './scripts/lib/logger.mjs'
 
 const log = createLogger('vite')
@@ -43,9 +44,39 @@ function forceCleanDistPlugin() {
 
 const isOnlineBuild = process.env.VITE_ONLINE_BUILD === '1'
 
+/** App-Version für die Anzeige im Header: package.json + Git-Commit + Start-/Build-Zeit. */
+function resolveAppVersionInfo() {
+  let pkgVersion = '0.0.0'
+  try {
+    pkgVersion = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')).version || pkgVersion
+  } catch {}
+  let commit = ''
+  try {
+    commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).toString().trim()
+  } catch {}
+  return { pkgVersion, commit, buildTime: new Date().toISOString() }
+}
+const appVersionInfo = resolveAppVersionInfo()
+
 export default defineConfig({
-  plugins: [forceCleanDistPlugin(), tailwindcss(), dashboardApi(), onlinePublicAssetsPlugin()],
-  // Online-Build: keine lokalen Modelle (CDN via VITE_ASSET_BASE_URL)
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersionInfo.pkgVersion),
+    __APP_COMMIT__: JSON.stringify(appVersionInfo.commit),
+    __APP_BUILD_TIME__: JSON.stringify(appVersionInfo.buildTime),
+  },
+  plugins: [
+    forceCleanDistPlugin(),
+    tailwindcss(),
+    dashboardApi(),
+    onlinePublicAssetsPlugin(),
+    localPublicAssetsPlugin(),
+  ],
+  // Online-Build: keine lokalen Modelle (CDN via VITE_ASSET_BASE_URL).
+  // Lokaler Build: localPublicAssetsPlugin schaltet publicDir für den Build ab und
+  // kopiert public/ gefiltert (ohne CAD-Quellen) — im Dev-Server bleibt es aktiv.
   publicDir: isOnlineBuild ? false : 'public',
   server: {
     port: 5050,
