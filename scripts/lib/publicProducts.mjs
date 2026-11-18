@@ -11,11 +11,12 @@ const log = createLogger('publicProducts')
  */
 const INTERNAL_ONLY_FIELDS = [
   '_review',
+  '_colorRuleConversion',
+  '_colorRulesDirty',
   '_mtlColors',
   '_detectedOrientation',
   'cadFiles',
   'shopwareProductId',
-  'previewImage',
   'previewImageGeneratedAt',
   'conversionPreset',
 ]

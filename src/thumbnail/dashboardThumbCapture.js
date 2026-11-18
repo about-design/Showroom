@@ -77,6 +77,7 @@ gltfLoader.setDRACOLoader(dracoLoader)
  * @returns {Promise<string|null>} data:image/png;base64,... oder null
  */
 window.renderDashboardThumbnail = async ({ glbUrl, productJson, width, height }) => {
+  window.__thumbnailCameraQuaternion = null
   const w = Math.max(64, Math.round(width || 640))
   const h = Math.max(64, Math.round(height || 400))
   let product
@@ -122,6 +123,7 @@ window.renderDashboardThumbnail = async ({ glbUrl, productJson, width, height })
           renderer.render(scene, camera)
 
           const dataUrl = renderer.domElement.toDataURL('image/png')
+          window.__thumbnailCameraQuaternion = camera.getWorldQuaternion(new THREE.Quaternion()).toArray()
           disposeSceneGpuResources(scene)
           renderer.dispose()
           safeForceWebGLContextLoss(renderer)

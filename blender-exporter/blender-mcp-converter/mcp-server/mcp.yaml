@@ -1,0 +1,93 @@
+name: "blender-mcp-converter"
+version: "1.0.1"
+description: "MCP Server for Blender model conversion to GLB format"
+
+tools:
+  blender-convert:
+    description: "Convert OBJ/MTL models to GLB format using Blender"
+    parameters:
+      type: object
+      properties:
+        jobId:
+          type: string
+          description: "Unique job identifier"
+        objFile:
+          type: string
+          description: "Path to the OBJ file"
+        mtlFile:
+          type: string
+          description: "Path to the MTL file (optional)"
+        textureFiles:
+          type: array
+          items:
+            type: string
+          description: "Array of texture file paths"
+        options:
+          type: object
+          properties:
+            embedTextures:
+              type: boolean
+              default: true
+              description: "Embed textures in GLB file"
+            useAI:
+              type: boolean
+              default: false
+              description: "Use AI material recognition"
+            outputFormat:
+              type: string
+              enum: ["glb", "gltf"]
+              default: "glb"
+              description: "Output format"
+      required:
+        - jobId
+        - objFile
+
+  blender-automation:
+    description: "Execute Blender automation recipes (camera/light/renders)"
+    parameters:
+      type: object
+      properties:
+        jobId:
+          type: string
+          description: "Unique job identifier"
+        blendFile:
+          type: string
+          description: "Path to the Blender .blend scene file"
+        recipe:
+          type: object
+          description: "Inline JSON recipe containing an actions array"
+        recipeFile:
+          type: string
+          description: "Optional path to an existing recipe JSON file"
+        options:
+          type: object
+          properties:
+            dryRun:
+              type: boolean
+              default: false
+              description: "Validate actions without rendering"
+            outputRoot:
+              type: string
+              description: "Override base directory for render outputs"
+      required:
+        - jobId
+        - blendFile
+
+server:
+  host: "localhost"
+  port: 8001
+  
+blender:
+  executable: "auto"  # Auto-detect: blender, /Applications/Blender.app/Contents/MacOS/Blender, /usr/local/bin/blender
+  script_path: "../blender-scripts/convert_to_glb.py"
+  headless: true
+  timeout: 1500  # 25 minutes
+
+automation:
+  script_path: "../blender-scripts/ki_automation.py"
+  timeout: 600  # 10 minutes default for render jobs
+  output_subdir: "renders"
+
+logging:
+  level: "INFO"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name} | {message}"

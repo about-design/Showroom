@@ -16,8 +16,15 @@ import { loadGtinConfig, bindGtinSection } from './modules/gtin.js'
 let selectedFiles = []
 let jobsCache = []
 let currentJobId = null
-let pollInterval = null
 let jobsFilterStatus = 'all'
+let conversionQueue = []
+let activeConversions = 0
+let conversionSettings = {
+  autoConvertOnDrop: false,
+  maxParallelConversions: 3,
+}
+let conversionSettingsChannel = null
+let conversionSettingsReady = Promise.resolve()
 
 /** Cache für Produktdaten (lazy geladen, vermeidet 500 bei großem products.json). */
 let _productsData = null
@@ -55,6 +62,32 @@ function setOption(id, value) {
   if (!el) return
   if (el.type === 'checkbox') el.checked = !!value
   else el.value = value
+}
+
+function applyConversionSettings(settings) {
+  conversionSettings = {
+    autoConvertOnDrop: settings?.autoConvertOnDrop === true,
+    maxParallelConversions: [1, 2, 3, 4, 5].includes(Number(settings?.maxParallelConversions))
+      ? Number(settings.maxParallelConversions)
+      : 3,
+  }
+}
+
+async function loadConversionSettings() {
+  try {
+    const res = await fetch('/__api/file-manager-settings')
+    const settings = await parseJsonResponse(res)
+    if (res.ok) applyConversionSettings(settings)
+  } catch (_) {}
+}
+
+function bindConversionSettingsUpdates() {
+  if (typeof BroadcastChannel === 'undefined') return
+  conversionSettingsChannel = new BroadcastChannel('showroom-conversion-settings')
+  conversionSettingsChannel.addEventListener('message', (event) => {
+    applyConversionSettings(event.data)
+    processConversionQueue()
+  })
 }
 
 /** Material-Slider: aus Preflight-Modal, sonst aus zuletzt angewendetem `conversionPreset` (productId). */
@@ -235,7 +268,7 @@ function acceptFile(file) {
   return false
 }
 
-function addFiles(files) {
+async function addFiles(files, { autoStart = false } = {}) {
   const added = Array.from(files).filter(acceptFile)
   selectedFiles = [...selectedFiles, ...added]
   renderFileList()
@@ -246,6 +279,13 @@ function addFiles(files) {
     if (selectedFiles.length > 0) drop.classList.add('has-files')
   }
   $('btnStartConvert').disabled = selectedFiles.length === 0
+  if (autoStart) {
+    await conversionSettingsReady
+  }
+  if (autoStart && conversionSettings.autoConvertOnDrop) {
+    const stepFiles = added.filter((file) => hasStepLikeInput([file]))
+    if (stepFiles.length > 1) enqueueConversions(stepFiles)
+  }
 }
 
 function clearFiles() {
@@ -290,10 +330,10 @@ function bindUpload() {
     drop.addEventListener('drop', (e) => {
       e.preventDefault()
       drop.classList.remove('drag-over')
-      addFiles(e.dataTransfer.files)
+      void addFiles(e.dataTransfer.files, { autoStart: true })
     })
   }
-  if (input) input.addEventListener('change', (e) => addFiles(e.target.files || []))
+  if (input) input.addEventListener('change', (e) => void addFiles(e.target.files || []))
   if (btnClear) btnClear.addEventListener('click', clearFiles)
   if (btnStart) btnStart.addEventListener('click', startConversion)
 }
@@ -447,6 +487,10 @@ let preflightData = null  // stores preflight result for confirm step
 
 async function startConversion() {
   if (selectedFiles.length === 0) return
+  if (selectedFiles.length > 1) {
+    enqueueConversions([...selectedFiles])
+    return
+  }
   const skipPreflight = getOption('optSkipPreflight')
   const usePreflight = !skipPreflight && selectedFiles.length <= 10  // skip for large batches or if option set
 
@@ -505,7 +549,54 @@ async function startConversion() {
   }
 }
 
-async function submitConversion(formOrJobId) {
+function enqueueConversions(files) {
+  if (!files.length) return
+  const queuedFiles = new Set(files)
+  conversionQueue.push(...files)
+  selectedFiles = selectedFiles.filter((file) => !queuedFiles.has(file))
+  renderFileList()
+  $('fileListWrap').hidden = selectedFiles.length === 0
+  $('uploadDrop').classList.toggle('has-files', selectedFiles.length > 0)
+  $('btnStartConvert').disabled = selectedFiles.length === 0
+  if (activeConversions === 0) showProgress(`${conversionQueue.length} Konvertierungen werden gestartet …`)
+  processConversionQueue()
+}
+
+function processConversionQueue() {
+  while (
+    activeConversions < conversionSettings.maxParallelConversions &&
+    conversionQueue.length > 0
+  ) {
+    const file = conversionQueue.shift()
+    activeConversions += 1
+    void submitQueuedConversion(file)
+  }
+
+  if (activeConversions === 0 && conversionQueue.length === 0) {
+    const startButton = $('btnStartConvert')
+    if (startButton) startButton.disabled = selectedFiles.length === 0
+  }
+}
+
+async function submitQueuedConversion(file) {
+  try {
+    const form = buildFormData([file])
+    form.set('enablePreflight', 'false')
+    await submitConversion(form, () => {
+      activeConversions -= 1
+      processConversionQueue()
+    })
+  } catch (error) {
+    log.scoped('Converter').error('Warteschlangenauftrag konnte nicht gestartet werden', {
+      fileName: file.name,
+      error: error.message || String(error),
+    })
+    activeConversions -= 1
+    processConversionQueue()
+  }
+}
+
+async function submitConversion(formOrJobId, onComplete) {
   lastSubmittedConversionPreset = buildConversionPresetForRegister()
   let jobId
   if (typeof formOrJobId === 'string') {
@@ -525,11 +616,12 @@ async function submitConversion(formOrJobId) {
     if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
     jobId = data.jobId
   }
+  if (!jobId) throw new Error('Die Konvertierungs-API hat keine Job-ID zurückgegeben')
   if (jobId) {
     currentJobId = jobId
     jobsCache.unshift({ jobId, status: 'queued' })
     renderJobs()
-    pollJobProgress(jobId)
+    pollJobProgress(jobId, onComplete)
     void ensureNotificationPermission()
     setConvIndicator('running')
   }
@@ -937,14 +1029,23 @@ async function ensureNotificationPermission() {
   }
 }
 
-function pollJobProgress(jobId) {
-  if (pollInterval) clearInterval(pollInterval)
+function pollJobProgress(jobId, onComplete) {
+  let pollInterval = null
+  let isComplete = false
   const progressFill = $('progressFill')
   const progressStatus = $('progressStatus')
   const progressLog = $('progressLog')
   const btnDownload = $('btnDownloadResult')
 
+  const finish = () => {
+    if (isComplete) return
+    isComplete = true
+    if (pollInterval) clearInterval(pollInterval)
+    onComplete?.()
+  }
+
   const poll = async () => {
+    if (isComplete) return
     try {
       const res = await fetch(`${API_BASE}/api/v1/status/${jobId}`)
       if (!res.ok) return
@@ -967,8 +1068,10 @@ function pollJobProgress(jobId) {
       renderJobs()
 
       if (data.status === 'completed' || data.status === 'partially_completed') {
-        clearInterval(pollInterval)
-        pollInterval = null
+        if (pollInterval) {
+          clearInterval(pollInterval)
+          pollInterval = null
+        }
         const outputs = Array.isArray(data.outputPaths) && data.outputPaths.length
           ? data.outputPaths
           : (data.outputPath ? [data.outputPath] : [])
@@ -1018,12 +1121,20 @@ function pollJobProgress(jobId) {
 
         // ── Automatisch in Produktverwaltung registrieren ──
         if (outputs.length) {
-          await registerConverted(outputs, jobId)
+          try {
+            await registerConverted(outputs, jobId)
+          } catch (error) {
+            log.scoped('Converter').error('Konvertierung konnte nicht registriert werden', {
+              jobId,
+              error: error.message || String(error),
+            })
+          }
         }
 
         const partial = data.status === 'partially_completed'
         setConvIndicator('completed', { partial })
         notifyConversionDone(jobId, partial ? 'partial' : 'completed', outputs)
+        finish()
       }
       if (data.status === 'failed') {
         const errMsg = data.error || data.message || 'Unbekannter Fehler'
@@ -1046,13 +1157,12 @@ function pollJobProgress(jobId) {
           '\n· BLENDER_PATH, BLENDER_OUTPUT_DIR, freier Speicher, Pfadlänge (externe Platte), STEP-Import in Blender.',
           prog ? `\n· Fortschritt zuletzt: ${prog}%.` : '',
         )
-        clearInterval(pollInterval)
-        pollInterval = null
         progressStatus.textContent = 'Fehlgeschlagen'
         if (errMsg) progressLog.textContent = (progressLog.textContent || '') + '\n' + errMsg
         renderJobs()
         setConvIndicator('failed')
         notifyConversionDone(jobId, 'failed', [], errMsg)
+        finish()
       }
     } catch (_) {}
   }
@@ -1329,6 +1439,8 @@ function bindOptions() {
 }
 
 function init() {
+  conversionSettingsReady = loadConversionSettings()
+  bindConversionSettingsUpdates()
   bindUpload()
   bindColorMapping()
   bindJobsFilters()

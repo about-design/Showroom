@@ -50,18 +50,30 @@ export default defineConfig({
   server: {
     port: 5050,
     strictPort: false,
+    // Entwicklungsdateien niemals aus dem Browsercache verwenden; Vite-HMR
+    // bleibt dadurch nach Änderungen in src der maßgebliche Aktualisierungspfad.
+    headers: {
+      'Cache-Control': 'no-store',
+    },
     // Nur lokal binden – die /__api/*-Endpoints sind unauthentifiziert und
     // dürfen nicht aus dem LAN erreichbar sein. Für bewussten LAN-Zugriff
     // explizit via `vite --host` oder SHOWROOM_HOST=0.0.0.0 überschreiben.
     host: process.env.SHOWROOM_HOST || '127.0.0.1',
-    // Beim Start Root öffnen = Showroom (index.html), nicht Port 3000 (Converter-API).
-    open: '/',
+    // Browser-Öffnung wird über das Start-Skript gesteuert, damit beim Start
+    // nicht doppelte Tabs im Browser entstehen.
+    open: false,
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
       '/outputs': { target: 'http://localhost:3000', changeOrigin: true },
     },
     watch: {
+      // ZuverlÃ¤ssige Ã„nderungserkennung auf Windows-/externen Laufwerken.
+      // Ohne Polling kann der laufende Vite-Prozess Ã„nderungen in src Ã¼bersehen;
+      // dann bleibt im Browser der alte Event-Handler aktiv, bis F5 geladen wird.
+      usePolling: true,
+      interval: 250,
       ignored: [
+        '**/dist/**', // Build output is replaced during builds; watching it can fail with EBUSY on Windows.
         '**/public/**',
         '**/src/data/products.json',
         '**/src/data/cad-index.json',
@@ -77,6 +89,10 @@ export default defineConfig({
     port: 5050,
     strictPort: true,
     host: process.env.SHOWROOM_HOST || '127.0.0.1',
+    // Auch die lokale Preview darf keinen alten HTML-/JavaScript-Stand liefern.
+    headers: {
+      'Cache-Control': 'no-store',
+    },
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
       '/outputs': { target: 'http://localhost:3000', changeOrigin: true },

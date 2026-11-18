@@ -25,6 +25,56 @@ export function esc(s) {
     .replace(/'/g, '&#39;')
 }
 
+/**
+ * Eigenständiges, optionales Produktdatenfeld `shortText` (SAP-Kurztext).
+ * Wird unverändert im Produktdatensatz gespeichert; die Anzeige kennt keine Datenquelle.
+ * @param {{shortText?: string | null}} product
+ */
+export function formatProductShortText(product) {
+  return typeof product.shortText === 'string' && product.shortText.trim()
+    ? product.shortText
+    : '–'
+}
+
+export function formatProductSapIdentifiers(product) {
+  const ean = String(product.sapEan ?? '').trim()
+  const article = String(product.sapArticleNumber ?? '').trim()
+  return [ean && `EAN: ${ean}`, article && `Artikel: ${article}`].filter(Boolean).join(' · ') || String(product.id ?? '')
+}
+
+export function getProductNameIdentifierMismatch(product) {
+  const name = String(product?.name ?? '')
+  const match = name.match(/^(Produkt\s+)(\d+)(_)(\d+)(.*)$/)
+  if (!match) return null
+
+  const sapEan = String(product?.sapEan ?? '').trim()
+  const sapArticle = String(product?.sapArticleNumber ?? '').trim()
+  const eanMismatch = sapEan !== '' && match[2] !== sapEan
+  const articleMismatch = sapArticle !== '' && match[4] !== sapArticle
+  if (!eanMismatch && !articleMismatch) return null
+  return { eanMismatch, articleMismatch, nameEan: match[2], nameArticle: match[4] }
+}
+
+/**
+ * Markiert ausschließlich abweichende EAN-/Artikel-Segmente eines automatisch
+ * aufgebauten Produktnamens. Der Produktdatensatz selbst bleibt unverändert.
+ */
+export function formatValidatedProductName(product) {
+  const name = String(product?.name ?? '')
+  const match = name.match(/^(Produkt\s+)(\d+)(_)(\d+)(.*)$/)
+  if (!match) return esc(name)
+
+  const [, prefix, nameEan, separator, nameArticle, suffix] = match
+  const mismatch = getProductNameIdentifierMismatch(product)
+  const eanMismatch = mismatch?.eanMismatch === true
+  const articleMismatch = mismatch?.articleMismatch === true
+  const segment = (value, mismatch) => mismatch
+    ? `<span class="card-name-identifier-mismatch">${esc(value)}</span>`
+    : esc(value)
+
+  return `${esc(prefix)}${segment(nameEan, eanMismatch)}${esc(separator)}${segment(nameArticle, articleMismatch)}${esc(suffix)}`
+}
+
 export function formatDate(iso) {
   if (!iso) return ''
   const d = new Date(iso)

@@ -47,6 +47,7 @@ export async function refreshProductThumbnailsAfterConvert({ ROOT, viteServerOri
       glbFetchUrl = new URL(String(glbUrl || ''), String(viteServerOrigin || '')).toString()
     } catch (e) {
             log.warn(`[thumbnail] Ungültige GLB-URL bei ${p.id}:`, e?.message || e)
+      delete p.previewCameraQuaternion
       delete p.previewImage
       delete p.previewImageGeneratedAt
       continue
@@ -72,7 +73,9 @@ export async function refreshProductThumbnailsAfterConvert({ ROOT, viteServerOri
       const v = Math.round(st.mtimeMs)
       p.previewImage = `${relPath}?v=${v}`
       p.previewImageGeneratedAt = new Date().toISOString()
+      p.previewCameraQuaternion = ok.cameraQuaternion
     } else {
+      delete p.previewCameraQuaternion
       delete p.previewImage
       delete p.previewImageGeneratedAt
             log.warn(`[thumbnail] Erzeugung fehlgeschlagen, previewImage entfernt: ${p.id}`)

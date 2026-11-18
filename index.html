@@ -4,16 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>META Online – 3D Showroom</title>
+  <style>
+    .sr-page-switch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 10px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.04);
+      color: #f8fafc;
+      text-decoration: none;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      transition: background .2s ease, border-color .2s ease;
+    }
+    .sr-page-switch:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <script type="module" src="/src/version.js"></script>
   <script type="module" src="/src/main.js"></script>
   <script async type="module" src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
 </head>
 <body class="bg-gray-900">
   <div id="canvas-container"></div>
 
-  <div id="ui-layer" x-data="showroomApp()" x-cloak>
+  <div id="ui-layer" x-data="showroomApp()" @keydown.window="fitView($event)" x-cloak>
 
     <!-- Overlay: quadratischer Ausschnitt (Vorschau für Blender-Render bei Seitenverhältnis 1:1). -->
     <div class="sr-aspect-overlay" x-show="blenderAspectId === 'square'" x-cloak aria-hidden="true">
@@ -38,12 +60,13 @@
     <!-- ─── Top bar ─── -->
     <header class="sr-topbar">
       <div class="sr-topbar-left">
-        <div class="sr-logo">
-          <div class="sr-logo-mark">M</div>
-          <span>META</span>
-        </div>
+        <a href="/" class="sr-logo" title="Zum Showroom">
+          <img src="/img/meta-logo.svg" alt="META" class="sr-logo-img">
+        </a>
         <span class="sr-topbar-sep"></span>
         <span class="sr-topbar-title">3D Showroom</span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.22.m</span></span>
+        <a href="/dashboard.html" class="sr-page-switch" title="Zur Produktverwaltung">Produktverwaltung</a>
       </div>
       <div class="sr-topbar-center" x-show="currentProduct">
         <span class="sr-product-name" x-text="currentProduct?.name"></span>
@@ -58,6 +81,9 @@
         <a href="/converter.html" class="sr-topbar-link" title="GLB Konvertierung">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </a>
+        <button type="button" @click="fitView()" class="sr-topbar-btn" title="F – Ansicht einpassen" aria-label="Ansicht einpassen" aria-keyshortcuts="F">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+        </button>
         <button type="button" @click="resetCamera()" class="sr-topbar-btn" title="Kamera zurücksetzen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
         </button>
@@ -73,6 +99,8 @@
            :class="{ 'sr-sidebar-closed': sidebarClosed }"
            @mouseenter="sidebarClosed && (sidebarPeek = true)"
            @mouseleave="sidebarPeek = false">
+       <div class="sr-sidebar-resize" role="separator" aria-orientation="vertical"
+         aria-label="Breite der Produktliste ändern" @pointerdown="startSidebarResize($event)"></div>
       <button type="button" class="sr-sidebar-toggle" @click="sidebarClosed = !sidebarClosed"
               :title="sidebarClosed ? 'Sidebar öffnen' : 'Sidebar schließen'">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -82,15 +110,30 @@
       </button>
       <div class="sr-sidebar-header">
         <span class="sr-sidebar-label">Produkte</span>
-        <span class="sr-sidebar-count" x-text="colorFilter ? (filteredProducts.length + ' von ' + products.length) : products.length"></span>
+        <span class="sr-sidebar-count" x-text="(colorFilter || productSearch) ? (filteredProducts.length + ' von ' + products.length) : products.length"></span>
       </div>
-      <div class="sr-sidebar-list">
+      <div class="sr-sidebar-search">
+        <input type="search" class="sr-sidebar-search-input" x-model="productSearch" x-ref="productSearchInput"
+               placeholder="Produkt oder ID suchen" aria-label="Produkte nach Name oder ID suchen">
+        <button type="button" class="sr-sidebar-search-clear" x-show="productSearch.length > 0" x-cloak
+                @click="productSearch = ''; $refs.productSearchInput.focus()"
+                aria-label="Produktsuche löschen" title="Suche löschen">×</button>
+      </div>
+      <div class="sr-sidebar-list" x-ref="productList">
         <template x-for="product in filteredProducts" :key="product.id">
           <button type="button" @click="selectProduct(product)"
+                  @mouseenter="showProductPreview(product, $event)"
+                  @mousemove="moveProductPreview($event)"
+                  @mouseleave="hideProductPreview()"
                   class="sr-sidebar-item"
+                  :data-product-id="product.id"
                   :class="currentProduct?.id === product.id && 'active'">
             <span class="sr-sidebar-item-name" x-text="product.name"></span>
-            <span class="sr-sidebar-item-sub" x-text="product.specs?.load && product.specs.load !== '–' ? product.specs.load : product.id"></span>
+            <span class="sr-sidebar-item-sub" x-text="product.shortText?.trim() || product.id"></span>
+            <span class="sr-sidebar-item-file-actions" @mouseenter.stop @mousemove.stop @mouseleave.stop>
+              <span class="sr-sidebar-item-file-badge sr-sidebar-item-file-glb" role="button" tabindex="0" title="GLB-Datei im Explorer anzeigen" aria-label="GLB-Datei im Explorer anzeigen" @click.stop.prevent="revealProductSource(product.id, 'glb')" @keydown.enter.stop.prevent="revealProductSource(product.id, 'glb')" @keydown.space.stop.prevent="revealProductSource(product.id, 'glb')">GLB</span>
+              <span class="sr-sidebar-item-file-badge sr-sidebar-item-file-step" role="button" tabindex="0" title="STEP-Datei im Explorer anzeigen" aria-label="STEP-Datei im Explorer anzeigen" @click.stop.prevent="revealProductSource(product.id, 'step')" @keydown.enter.stop.prevent="revealProductSource(product.id, 'step')" @keydown.space.stop.prevent="revealProductSource(product.id, 'step')">STEP</span>
+            </span>
           </button>
         </template>
       </div>
@@ -100,6 +143,15 @@
       </button>
     </aside>
 
+    <div class="sr-product-hover-preview" x-show="hoveredProduct" x-cloak
+         :style="productPreviewStyle" aria-hidden="true">
+      <img :src="productPreviewUrl(hoveredProduct)" alt="">
+    </div>
+
+    <section class="sr-color-controls" aria-label="Farbsteuerung" data-collapsed="false">
+      <button type="button" class="sr-color-toggle" aria-controls="colorControlsBody" aria-expanded="true"
+              aria-label="Farbauswahl einklappen" title="Farbauswahl einklappen">▼</button>
+      <div class="sr-color-controls-body" id="colorControlsBody">
     <!-- ─── Farbfilter: nur Produkte in gewählter RAL-Farbe ─── -->
     <div class="sr-color-filter">
       <span class="sr-color-filter-label">Farbfilter:</span>
@@ -138,6 +190,9 @@
         </button>
       </template>
     </div>
+
+      </div>
+    </section>
 
     <!-- ─── Anbau button (floating, contextual) ─── -->
     <button type="button" x-show="canAddAnbau" x-transition @click="addAnbau()"
@@ -387,6 +442,10 @@
               :class="showPivotDebug && 'active'">
         <span x-text="showPivotDebug ? 'Pivots ausblenden' : 'Pivots anzeigen'"></span>
       </button>
+      <button type="button" @click="toggleCoordinateSystem()" class="sr-settings-btn"
+              :class="showCoordinateSystem && 'active'">
+        <span x-text="showCoordinateSystem ? 'Koordinatensystem ausblenden' : 'Koordinatensystem anzeigen'"></span>
+      </button>
       <button type="button" @click="toggleMeshInfo()" class="sr-settings-btn"
               :class="showMeshInfo && 'active'">
         <span x-text="showMeshInfo ? 'Mesh-Info ausblenden' : 'Mesh-Info anzeigen'"></span>
@@ -465,15 +524,15 @@
         <span class="sr-perf-label">Geometrie</span>
         <p class="sr-perf-muted" x-show="!perfStats">Kein Modell geladen.</p>
         <div class="sr-perf-rows" x-show="perfStats">
-          <div class="sr-perf-row"><span>Vertices</span><span x-text="perfStats.vertices.toLocaleString('de-DE')"></span></div>
-          <div class="sr-perf-row"><span>Triangles</span><span x-text="perfStats.triangles.toLocaleString('de-DE')"></span></div>
-          <div class="sr-perf-row"><span>Meshes</span><span x-text="String(perfStats.meshes)"></span></div>
-          <div class="sr-perf-row"><span>Unique Geometrien</span><span x-text="String(perfStats.uniqueGeometries)"></span></div>
-          <div class="sr-perf-row"><span>Unique Materialien</span><span x-text="String(perfStats.uniqueMaterials)"></span></div>
+          <div class="sr-perf-row"><span>Vertices</span><span x-text="(perfStats?.vertices ?? 0).toLocaleString('de-DE')"></span></div>
+          <div class="sr-perf-row"><span>Triangles</span><span x-text="(perfStats?.triangles ?? 0).toLocaleString('de-DE')"></span></div>
+          <div class="sr-perf-row"><span>Meshes</span><span x-text="String(perfStats?.meshes ?? 0)"></span></div>
+          <div class="sr-perf-row"><span>Unique Geometrien</span><span x-text="String(perfStats?.uniqueGeometries ?? 0)"></span></div>
+          <div class="sr-perf-row"><span>Unique Materialien</span><span x-text="String(perfStats?.uniqueMaterials ?? 0)"></span></div>
         </div>
         <div class="sr-perf-top-wrap" x-show="perfStats && perfStats.topMeshes && perfStats.topMeshes.length">
           <span class="sr-perf-sublabel">Top-Meshes (Triangles)</span>
-          <template x-for="row in perfStats.topMeshes" :key="row.index">
+          <template x-for="row in (perfStats?.topMeshes ?? [])" :key="row.index">
             <button type="button" class="sr-perf-top-row"
                     @click="toggleMeshPartIsolate(row.index)"
                     title="Nur dieses Mesh anzeigen (wie Mesh-Info)">
@@ -488,9 +547,9 @@
         <span class="sr-perf-label">GPU-Memory (Schätzung)</span>
         <p class="sr-perf-muted" x-show="!perfStats">–</p>
         <div class="sr-perf-rows" x-show="perfStats">
-          <div class="sr-perf-row"><span>Geometrie</span><span x-text="perfStats.geomMb.toFixed(2) + ' MB'"></span></div>
-          <div class="sr-perf-row"><span>Texturen</span><span x-text="perfStats.texMb.toFixed(2) + ' MB'"></span></div>
-          <div class="sr-perf-row sr-perf-row-strong"><span>Summe</span><span x-text="perfStats.totalMb.toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row"><span>Geometrie</span><span x-text="(perfStats?.geomMb ?? 0).toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row"><span>Texturen</span><span x-text="(perfStats?.texMb ?? 0).toFixed(2) + ' MB'"></span></div>
+          <div class="sr-perf-row sr-perf-row-strong"><span>Summe</span><span x-text="(perfStats?.totalMb ?? 0).toFixed(2) + ' MB'"></span></div>
         </div>
       </div>
 

@@ -4,9 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>META Produktverwaltung</title>
+  <style>
+    .sr-page-switch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 8px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(31, 41, 55, 0.75);
+      color: #f8fafc;
+      text-decoration: none;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      transition: background .2s ease, border-color .2s ease;
+    }
+    .sr-page-switch:hover {
+      background: rgba(55, 65, 81, 0.9);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <script type="module" src="/src/version.js"></script>
   <script type="module" src="/src/dashboard/main.js"></script>
 </head>
 <body>
@@ -20,14 +42,11 @@
       </a>
       <div class="breadcrumb">
         / <span>Produktverwaltung</span>
+        <span class="sr-topbar-version">· <span id="appVersionBadge">MARA09.24.b</span></span>
       </div>
+      <a href="/" class="sr-page-switch" title="Zum Showroom">Showroom</a>
     </div>
     <div class="top-bar-right">
-      <div class="conv-indicator" id="convIndicator" hidden aria-live="polite">
-        <span class="conv-indicator-dot" aria-hidden="true"></span>
-        <span class="conv-indicator-label" id="convIndicatorLabel">Konvertierung läuft</span>
-        <span class="conv-indicator-elapsed" id="convIndicatorElapsed">0:00</span>
-      </div>
       <a href="/converter.html" class="btn btn-ghost" title="GLB Konvertierung">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Konvertierung
@@ -48,6 +67,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         Speichern
       </button>
+      <button type="button" class="btn btn-ghost" id="btnFileManagerSettings" title="Dateimanager einstellen" aria-label="Dateimanager einstellen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20h-3v-.08A1.7 1.7 0 0 0 10.66 18.36a1.7 1.7 0 0 0-1.88.34l-.06.06L6.6 16.64l.06-.06A1.7 1.7 0 0 0 7 14.7a1.7 1.7 0 0 0-1.56-1.04H5v-3h.08A1.7 1.7 0 0 0 6.64 9.62a1.7 1.7 0 0 0-.34-1.88l-.06-.06L8.36 5.56l.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.34 4.4V4h3v.08a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.08v3h-.08A1.7 1.7 0 0 0 19.4 15z"/></svg>
+      </button>
       <button class="btn btn-primary" id="btnExport" title="products.json als Download">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Exportieren
@@ -55,6 +77,9 @@
     </div>
   </header>
 
+  <section class="dashboard-controls" id="dashboardControls" aria-label="Dashboard-Steuerbereich">
+    <div class="dashboard-controls-body" id="dashboardControlsBody">
+      <div class="dashboard-controls-inner">
   <!-- ═══════ Stats strip ═══════ -->
   <section class="stats-strip" id="statsStrip"></section>
 
@@ -65,7 +90,9 @@
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input class="search-input" id="searchInput" type="text" placeholder="Suche: Name, ID, Artikelnr., dominante RAL …" title="Mehrere Artikel gleichzeitig finden: Begriffe mit Komma trennen, z. B. „12345, 98765, RAL 7035“">
+        <input class="search-input" id="searchInput" type="text" placeholder="Suche: Name, ID, Artikelnr., Kurztext, dominante RAL …" title="Mehrere Artikel gleichzeitig finden: Begriffe mit Komma trennen, z. B. „12345, 98765, RAL 7035“">
+        <button type="button" class="search-clear" id="searchClear" hidden
+                aria-label="Produktsuche löschen" title="Suche löschen">×</button>
       </div>
       <div class="filter-sep"></div>
       <div class="sort-wrap mapping-target-wrap">
@@ -113,6 +140,8 @@
           <option value="newest" selected>Neueste zuerst</option>
           <option value="oldest">Älteste zuerst</option>
           <option value="name">Name A–Z</option>
+          <option value="shortTextAsc">Kurztext A–Z</option>
+          <option value="shortTextDesc">Kurztext Z–A</option>
         </select>
       </div>
       <div class="sort-wrap export-rotation-wrap">
@@ -177,6 +206,13 @@
       </div>
     </div>
   </nav>
+        <div id="paginationBar"></div>
+      </div>
+    </div>
+    <button type="button" class="dashboard-controls-toggle" id="dashboardControlsToggle"
+      aria-controls="dashboardControlsBody" aria-expanded="true"
+      aria-label="Steuerbereich einklappen" title="Steuerbereich einklappen">▲</button>
+  </section>
 
   <!-- ═══════ Main content ═══════ -->
   <main class="main-content">
@@ -187,12 +223,147 @@
         <span>GLB- oder CAD-Dateien hier ablegen</span>
       </div>
     </div>
-    <div class="product-grid" id="productGrid"></div>
+    <div class="product-scroll" id="productScroll">
+      <div class="product-grid" id="productGrid"></div>
+    </div>
   </main>
+</div>
+
+<div class="name-rules-modal" id="fileManagerSettingsModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="fileManagerSettingsBackdrop"></div>
+  <div class="name-rules-modal-panel file-manager-settings-panel" role="dialog" aria-labelledby="fileManagerSettingsTitle" aria-modal="true">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="fileManagerSettingsTitle">Einstellungen</h2>
+    </div>
+    <div class="file-manager-settings-body">
+      <section class="file-manager-settings-section" aria-labelledby="fileManagerSettingsSectionTitle">
+        <h3 class="file-manager-settings-section-title" id="fileManagerSettingsSectionTitle">Dateimanager</h3>
+        <label class="file-manager-settings-field">Dateimanager
+          <select class="sort-select" id="fileManagerChoice">
+            <option value="explorer">Windows Explorer</option>
+            <option value="freecommander">FreeCommander</option>
+          </select>
+        </label>
+        <label class="file-manager-settings-field" id="freeCommanderPathRow" hidden>Pfad zu FreeCommander.exe
+          <input class="detail-input" id="freeCommanderPath" type="text" placeholder="C:\\Program Files\\FreeCommander XE\\FreeCommander.exe">
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="conversionSettingsSectionTitle">
+        <h3 class="file-manager-settings-section-title" id="conversionSettingsSectionTitle">Konvertierung</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Automatische Konvertierung nach Drag &amp; Drop</span>
+          <input type="checkbox" id="autoConvertOnDrop">
+        </label>
+        <label class="file-manager-settings-field">Gleichzeitige Konvertierungen
+          <select class="sort-select" id="maxParallelConversions">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="viewCubeSettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="viewCubeSettingsTitle">3D-Ansicht</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>ViewCube anzeigen</span>
+          <input type="checkbox" id="showViewCube" checked>
+        </label>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Koordinatensystem anzeigen</span>
+          <input type="checkbox" id="showCoordinateSystem">
+        </label>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Ursprungspunkt anzeigen</span>
+          <input type="checkbox" id="showCoordinateOrigin" checked>
+        </label>
+        <label class="file-manager-settings-field">
+          <span>XYZ-Achsengröße: <output id="coordinateAxisSizeValue">50 px</output></span>
+          <input id="coordinateAxisSizePx" type="range" min="25" max="100" step="1" value="50">
+        </label>
+        <label class="file-manager-settings-field">Position
+          <select class="sort-select" id="viewCubePosition">
+            <option value="left">Links</option>
+            <option value="center">Mittig</option>
+            <option value="right" selected>Rechts</option>
+          </select>
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="meshDisplaySettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="meshDisplaySettingsTitle">Darstellung</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>RAL-Farbe in Mesh-Liste anzeigen</span>
+          <input type="checkbox" id="showMeshRal" checked>
+        </label>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="automaticCategorySettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="automaticCategorySettingsTitle">Automatische Kategoriezuordnung</h3>
+        <p class="automatic-category-help">Produkte ohne Hauptkategorie werden anhand des Anfangs ihres SAP-Kurztexts zugeordnet.</p>
+        <div class="automatic-category-table-head" aria-hidden="true"><span>Kürzel</span><span>Hauptkategorie</span><span></span></div>
+        <div class="automatic-category-mappings" id="automaticCategoryMappingsRows"></div>
+        <div class="automatic-category-actions">
+          <button type="button" class="btn btn-ghost" id="automaticCategoryMappingAdd">Zuordnung hinzufügen</button>
+          <button type="button" class="btn btn-ghost" id="automaticCategoryApply">Nicht zugeordnete Produkte prüfen</button>
+        </div>
+        <div class="automatic-category-status" id="automaticCategoryAssignmentStatus" role="status" aria-live="polite"></div>
+      </section>
+      <section class="file-manager-settings-section" aria-labelledby="detailSidebarSettingsTitle">
+        <h3 class="file-manager-settings-section-title" id="detailSidebarSettingsTitle">Produktdetail-Sidebar</h3>
+        <label class="file-manager-settings-field file-manager-settings-toggle">
+          <span>Produktdetail-Sidebar fixiert anzeigen</span>
+          <input type="checkbox" id="detailSidebarPinned" checked>
+        </label>
+      </section>
+    </div>
+    <div class="name-rules-modal-actions">
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="fileManagerSettingsCancel">Abbrechen</button>
+      <button type="button" class="btn btn-primary" id="fileManagerSettingsSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<div class="name-rules-modal" id="automaticColorMappingsModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="automaticColorMappingsBackdrop"></div>
+  <div class="name-rules-modal-panel automatic-color-mappings-panel" role="dialog" aria-labelledby="automaticColorMappingsTitle" aria-modal="true">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="automaticColorMappingsTitle">Automatische Farb-Zuordnung</h2>
+      <p class="name-rules-modal-hint">Zeichnungsnummern werden beim Produkt auf die gewählte RAL-Farbe abgebildet.</p>
+    </div>
+    <div class="automatic-color-mappings-body">
+      <label class="automatic-color-search" for="automaticColorMappingsSearch">
+        <span>Zeichnungsnummer oder Bauteilbezeichnung suchen</span>
+        <input class="detail-input" id="automaticColorMappingsSearch" type="search" placeholder="Zeichnungsnummer oder Bauteilbezeichnung suchen …" autocomplete="off">
+      </label>
+      <div class="automatic-color-mappings-list" id="automaticColorMappingsList">
+        <div class="automatic-color-table-head" aria-hidden="true"><span>Zeichnungsnummer</span><span>Bauteilbezeichnung</span><span>RAL-Farbe</span><span>Immer</span><span>Löschen</span></div>
+        <div class="automatic-category-mappings" id="automaticColorMappingsRows"></div>
+      </div>
+      <div class="automatic-category-actions">
+        <button type="button" class="btn btn-ghost" id="automaticColorMappingAdd">Zuordnung hinzufügen</button>
+      </div>
+    </div>
+    <div class="name-rules-modal-actions">
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="automaticColorMappingsCancel">Abbrechen</button>
+      <button type="button" class="btn btn-primary" id="automaticColorMappingsSave">Speichern</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════ Detail panel ═══════ -->
 <div class="detail-overlay" id="detailOverlay"></div>
+<aside class="detail-secondary-panel" id="detailSecondaryPanel" aria-hidden="true" aria-labelledby="detailSecondaryTitle">
+  <header class="detail-secondary-header">
+    <div class="detail-secondary-heading">
+      <span class="detail-secondary-label">Produktdetails</span>
+      <span class="detail-secondary-title" id="detailSecondaryTitle">Produktdetails</span>
+    </div>
+    <button type="button" class="detail-secondary-toggle" id="detailSecondaryClose" aria-label="Produktdetails einklappen" title="Produktdetails einklappen">›</button>
+  </header>
+  <div class="detail-secondary-content" id="detailSecondaryContent"></div>
+</aside>
 <aside class="detail-panel" id="detailPanel">
   <div class="detail-header">
     <div class="detail-header-left">
@@ -202,30 +373,68 @@
       <button class="detail-nav-btn" id="detailNext" title="Nächstes Produkt (→)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
       </button>
-      <span class="detail-title" id="detailTitle"></span>
+      <div class="detail-heading">
+        <span class="detail-title" id="detailTitle"></span>
+        <div class="detail-short-text" id="detailShortText"></div>
+      </div>
       <span class="detail-position" id="detailPosition"></span>
     </div>
+    <button type="button" class="detail-secondary-toggle detail-secondary-toggle-primary" id="detailSecondaryToggle" aria-controls="detailSecondaryPanel" aria-expanded="false" aria-label="Produktdetails ausklappen" title="Produktdetails ausklappen">‹</button>
     <button class="detail-close" id="detailClose">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
   </div>
   <div class="detail-content" id="detailContent"></div>
+  <div class="detail-conversion-status" id="detailConversionStatus" aria-live="polite" aria-atomic="false"></div>
   <div class="detail-footer">
-    <button class="btn btn-danger" id="btnDeleteProduct" style="margin-right:auto">
+    <button class="btn btn-danger" id="btnDeleteProduct">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-      Löschen
+      Produkt entfernen
     </button>
-    <a class="btn btn-ghost" id="btnShowroom" href="/" target="_blank" style="display:none">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-      Im Showroom öffnen
-    </a>
-    <button class="btn btn-ghost" id="btnCancelDetail">Abbrechen</button>
-    <button class="btn btn-primary" id="btnSaveDetail">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-      Übernehmen
-    </button>
+    <div class="detail-footer-actions">
+      <a class="btn btn-ghost" id="btnShowroom" href="/" target="_blank" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        Im Showroom öffnen
+      </a>
+      <button class="btn btn-ghost" id="btnReconvertDetail">Neu konvertieren</button>
+      <button class="btn btn-ghost" id="btnCancelDetail">Abbrechen</button>
+      <button class="btn btn-primary" id="btnSaveDetail">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Übernehmen
+      </button>
+    </div>
   </div>
 </aside>
+
+<!-- ═══════ Produkt archivieren ═══════ -->
+<div class="name-rules-modal" id="archiveRemovalModal" aria-hidden="true">
+  <div class="name-rules-modal-backdrop" id="archiveRemovalBackdrop"></div>
+  <div class="name-rules-modal-panel archive-removal-modal-panel" role="dialog" aria-labelledby="archiveRemovalTitle" aria-modal="true">
+    <div class="name-rules-modal-header">
+      <h2 class="name-rules-modal-title" id="archiveRemovalTitle">Dateien ins Archiv verschieben</h2>
+      <div class="archive-removal-summary" id="archiveRemovalSummary"></div>
+    </div>
+    <div class="archive-removal-body">
+      <h3 class="archive-removal-heading">Gefundene Dateien</h3>
+      <div class="archive-removal-table-wrap">
+        <table class="archive-removal-table">
+          <thead><tr><th>Typ</th><th>Dateiname</th><th>Quelle</th><th>Ziel</th><th>Status</th></tr></thead>
+          <tbody id="archiveRemovalFiles"></tbody>
+        </table>
+      </div>
+      <section class="archive-removal-retained" id="archiveRemovalRetained" hidden>
+        <h3 class="archive-removal-heading">Bleibt erhalten</h3>
+        <ul id="archiveRemovalRetainedList"></ul>
+      </section>
+    </div>
+    <div class="name-rules-modal-actions">
+      <span class="archive-removal-warning" id="archiveRemovalWarning"></span>
+      <div class="name-rules-modal-actions-spacer"></div>
+      <button type="button" class="btn btn-ghost" id="archiveRemovalCancel">Abbrechen</button>
+      <button type="button" class="btn btn-danger" id="archiveRemovalConfirm">Produkt entfernen und Dateien verschieben</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══════ Globale Namens-Farbregeln ═══════ -->
 <div class="name-rules-modal" id="globalNameRulesModal" aria-hidden="true">

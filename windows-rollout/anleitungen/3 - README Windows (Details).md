@@ -21,12 +21,12 @@ npm run dist:win
 
 Die fertigen Dateien liegen in `release/`:
 
-- **META Showroom Setup 1.0.0.exe** – NSIS-Installer (empfohlen zum Verteilen)
+- **META Showroom Setup 1.0.1.exe** – NSIS-Installer (empfohlen zum Verteilen)
 - Optional: portable Version in `release/win-unpacked/`
 
 ### Installer installieren
 
-1. `META Showroom Setup 1.0.0.exe` ausführen.
+1. `META Showroom Setup 1.0.1.exe` ausführen.
 2. Installationspfad wählen (oder Standard übernehmen).
 3. Installation abschließen – die App erscheint im Startmenü und auf dem Desktop.
 

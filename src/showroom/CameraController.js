@@ -1,8 +1,11 @@
+import { createViewCube } from './ViewCube.js'
+import { loadViewCubeSettings } from '../lib/viewCubeSettings.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import * as THREE from 'three'
 import SceneManager from './SceneManager.js'
 import gsap from 'gsap'
 import { EURIS } from './eurisConstants.js'
+import { getVisibleProductBounds, getFitView } from './fitToView.js'
 
 /**
  * OrbitControls: Drehen um den aktuellen Drehpunkt, Klick setzt keinen neuen Pivot.
@@ -39,6 +42,14 @@ class CameraController {
     /** Aktuelle Brennweite (Kleinbild-Äquivalent, mm). 24 ≙ ~53° vFOV (nahe Three.js-Standard 60°). */
     this.focalLengthMm = 24
     this.setFocalLength(this.focalLengthMm)
+    this.viewCube = createViewCube(SceneManager.container, this.camera, this.controls)
+    this.controls.addEventListener('start', () => {
+      if (!this._fitting) return
+      gsap.killTweensOf(this.camera.position)
+      gsap.killTweensOf(this.controls.target)
+      this._fitting = false
+    })
+    loadViewCubeSettings()
   }
 
   /**
@@ -67,6 +78,8 @@ class CameraController {
    * @param {boolean} on
    */
   setEurisMode(on) {
+    this.restoreFitLimits()
+    this.viewCube?.cancel()
     const c = this.controls
     const cam = this.camera
     const s = this._showroomControls
@@ -114,6 +127,8 @@ class CameraController {
    * @param {THREE.Box3|null} worldBox - optionale Welt-Bounding-Box des Produkts (für Framing)
    */
   focusProduct(position, duration = 0.8, worldBox = null) {
+    this.restoreFitLimits()
+    this.viewCube?.cancel()
     const target = position instanceof THREE.Vector3
       ? position
       : new THREE.Vector3(position.x, position.y, position.z)
@@ -122,20 +137,31 @@ class CameraController {
 
     const dir = new THREE.Vector3(0, 1.5, 3).normalize()
     let distance = dir.length()
+    let fittedPosition = null
     if (worldBox) {
-      const sphere = new THREE.Sphere()
-      worldBox.getBoundingSphere(sphere)
-      const aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight
-      const vFov = (cam.fov * Math.PI) / 180
-      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect)
-      const margin = 1.4
-      const minDistance = Math.max(sphere.radius / Math.tan(hFov / 2), sphere.radius / Math.tan(vFov / 2)) * margin
-      distance = THREE.MathUtils.clamp(minDistance, this.controls.minDistance, this.controls.maxDistance)
+      const width = this.domElement.clientWidth
+      const height = this.domElement.clientHeight
+      const aspect = width / height
+      // Produktwechsel immer aus derselben Showroom-Ausgangsperspektive fitten;
+      // eine zuvor per Orbit eingestellte Ansicht darf den nächsten Produktstart
+      // nicht dauerhaft übernehmen.
+      const savedCameraPosition = cam.position.clone()
+      const defaultDirection = this.startPosition.clone().sub(this.startTarget).normalize()
+      cam.position.copy(target).add(defaultDirection)
+      const fit = getFitView(worldBox, cam, target, aspect, 1.11)
+      cam.position.copy(savedCameraPosition)
+      if (fit) {
+        // 1.11 entspricht ungefähr 90 % sichtbarer Modellgröße und berücksichtigt
+        // die vollständige Bounding-Box statt nur einer umschließenden Kugel.
+        distance = THREE.MathUtils.clamp(fit.distance, this.controls.minDistance, this.controls.maxDistance)
+        target.copy(fit.target)
+        fittedPosition = target.clone().add(fit.position.clone().sub(fit.target).setLength(distance))
+      }
     } else {
       distance = new THREE.Vector3(0, 1.5, 3).length()
     }
 
-    const desiredPos = new THREE.Vector3().copy(target).add(dir.clone().multiplyScalar(distance))
+    const desiredPos = fittedPosition || new THREE.Vector3().copy(target).add(dir.clone().multiplyScalar(distance))
 
     gsap.to(cam.position, {
       x: desiredPos.x,
@@ -159,6 +185,8 @@ class CameraController {
    * @param {number} duration
    */
   setToView(view, duration = 0.6) {
+    this.restoreFitLimits()
+    this.viewCube?.cancel()
     if (!view || !view.position || !view.target) return
     const cam = this.camera
     const controls = this.controls
@@ -208,6 +236,8 @@ class CameraController {
    * Setzt Kamera und Target auf Startposition zurück.
    */
   resetCamera() {
+    this.restoreFitLimits()
+    this.viewCube?.cancel()
     gsap.to(this.camera.position, {
       x: this.startPosition.x,
       y: this.startPosition.y,
@@ -227,6 +257,55 @@ class CameraController {
   /** @returns {OrbitControls} */
   getControls() {
     return this.controls
+  }
+
+  restoreFitLimits() {
+    if (this._fitting) {
+      gsap.killTweensOf(this.camera.position)
+      gsap.killTweensOf(this.controls.target)
+      this._fitting = false
+    }
+    if (!this._fitLimits) return
+    const { minDistance, maxDistance, near, far } = this._fitLimits
+    Object.assign(this.controls, { minDistance, maxDistance })
+    Object.assign(this.camera, { near, far })
+    this.camera.updateProjectionMatrix()
+    this._fitLimits = null
+  }
+
+  /** Reframe only visible product meshes using this camera and its existing OrbitControls. */
+  fitVisibleProduct(root) {
+    const box = getVisibleProductBounds(root, this.camera)
+    const { width, height } = this.domElement.getBoundingClientRect()
+    if (!box || width <= 0 || height <= 0) return false
+    this.restoreFitLimits()
+    this.viewCube?.stopTransition()
+    gsap.killTweensOf(this.camera.position)
+    gsap.killTweensOf(this.controls.target)
+    // Consume residual mouse damping before calculating the final viewing direction.
+    const damping = this.controls.enableDamping
+    this.controls.enableDamping = false
+    this.controls.update()
+    this.controls.enableDamping = damping
+    const view = getFitView(box, this.camera, this.controls.target, width / height)
+    if (!view) return false
+    const cam = this.camera, controls = this.controls
+    this._fitLimits = { minDistance: controls.minDistance, maxDistance: controls.maxDistance, near: cam.near, far: cam.far }
+    controls.minDistance = Math.min(controls.minDistance, view.distance * .1)
+    controls.maxDistance = Math.max(controls.maxDistance, view.distance * 2)
+    cam.near = Math.min(cam.near, (view.distance - view.depth) / 2)
+    cam.far = Math.max(cam.far, (view.distance + view.depth) * 1.2)
+    cam.aspect = width / height
+    cam.updateProjectionMatrix()
+    const duration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : .35
+    this._fitting = true
+    gsap.to(controls.target, { ...view.target, duration, ease: 'power2.inOut' })
+    gsap.to(cam.position, {
+      ...view.position, duration, ease: 'power2.inOut',
+      onUpdate: () => controls.update(),
+      onComplete: () => { this._fitting = false; controls.update() },
+    })
+    return true
   }
 }
 

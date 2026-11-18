@@ -14,9 +14,12 @@ import ProductPlacement from './showroom/ProductPlacement.js'
 import MaterialManager from './showroom/MaterialManager.js'
 import HotspotManager from './showroom/HotspotManager.js'
 import CameraController from './showroom/CameraController.js'
+import { initColorControls } from './showroom/colorControls.js'
+import { isFitViewShortcut } from './showroom/fitToView.js'
 import ARManager from './showroom/ARManager.js'
 import LightDebugView from './showroom/LightDebugView.js'
 import PivotDebugView from './showroom/PivotDebugView.js'
+import CoordinateSystemView from './showroom/CoordinateSystemView.js'
 import performanceMonitor from './showroom/PerformanceMonitor.js'
 
 // products.public.json = products.json ohne interne Dashboard/Konverter-Felder
@@ -83,6 +86,7 @@ function showroomApp() {
     freeLightPitch: -27,
     showLightDebug: false,
     showPivotDebug: false,
+    showCoordinateSystem: false,
     showMeshInfo: false,
     /** Performance-Test-Overlay (Geometrie, GPU-Schätzung, Stresstest) */
     perfPanelOpen: false,
@@ -116,16 +120,46 @@ function showroomApp() {
     showOriginalOrientation: false,
     sidebarClosed: false,
     sidebarPeek: false,
+    productSearch: '',
+    sidebarWidth: 320,
+    hoveredProduct: null,
+    productPreviewStyle: '',
     settingsOpen: false,
     /** RAL-Code oder null = alle Farben. Filtert die Produktliste nach defaultColor. */
     colorFilter: null,
 
-    /** Produkte, gefiltert nach colorFilter (defaultColor). */
+    async revealProductSource(productId, sourceType) {
+      try {
+        const response = await fetch(`/__api/products/${encodeURIComponent(productId)}/reveal-source?source=${encodeURIComponent(sourceType)}`, { method: 'POST' })
+        let data = {}
+        try { data = await response.json() } catch {}
+        if (!response.ok) throw new Error(data.error || 'Die CAD-/Quelldatei konnte nicht gefunden werden.')
+      } catch (error) {
+        window.alert(error.message || 'Die CAD-/Quelldatei konnte nicht im Explorer angezeigt werden.')
+      }
+    },
+
+    /** Produkte, gefiltert nach Farbe sowie Name oder ID. */
     get filteredProducts() {
-      if (!this.colorFilter) return this.products
-      return this.products.filter(
-        (p) => resolveEffectiveDefaultColorOrFallback(p) === this.colorFilter,
-      )
+      const searchTerms = this.productSearch.trim().toLocaleLowerCase('de-DE').split(/\s+/).filter(Boolean)
+      return this.products.filter((product) => {
+        const matchesColor = !this.colorFilter
+          || resolveEffectiveDefaultColorOrFallback(product) === this.colorFilter
+        const searchableText = [
+          product.name,
+          product.id,
+          product.sapEan,
+          product.sapArticleNumber,
+          product.articleNumber,
+          product.shopwareProductId,
+          product.specs?.load,
+          product.shortText,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase('de-DE')
+        return matchesColor && searchTerms.every((term) => searchableText.includes(term))
+      })
     },
 
     setColorFilter(ralCode) {
@@ -137,7 +171,54 @@ function showroomApp() {
       }
     },
 
+    startSidebarResize(event) {
+      if (event.button !== 0) return
+      event.preventDefault()
+      const startX = event.clientX
+      const startWidth = this.sidebarWidth
+      const resize = (moveEvent) => {
+        const width = Math.min(480, Math.max(260, startWidth + moveEvent.clientX - startX))
+        this.sidebarWidth = width
+        document.documentElement.style.setProperty('--sr-sidebar-w', `${width}px`)
+      }
+      const finish = () => {
+        window.removeEventListener('pointermove', resize)
+        window.removeEventListener('pointerup', finish)
+      }
+      window.addEventListener('pointermove', resize)
+      window.addEventListener('pointerup', finish, { once: true })
+    },
+
+    showProductPreview(product, event) {
+      if (!product.previewImage) return
+      this.hoveredProduct = product
+      this.moveProductPreview(event)
+    },
+
+    moveProductPreview(event) {
+      if (!this.hoveredProduct) return
+      const width = 292
+      const height = 242
+      const gap = 18
+      const left = event.clientX + width + gap > window.innerWidth
+        ? Math.max(12, event.clientX - width - gap)
+        : event.clientX + gap
+      const top = event.clientY + height + gap > window.innerHeight
+        ? Math.max(12, event.clientY - height - gap)
+        : event.clientY + gap
+      this.productPreviewStyle = `left:${left}px; top:${top}px;`
+    },
+
+    hideProductPreview() {
+      this.hoveredProduct = null
+    },
+
+    productPreviewUrl(product) {
+      return product?.previewImage ? resolveAssetUrl(product.previewImage) : ''
+    },
+
     init() {
+      this.$nextTick(() => { this._disposeColorControls = initColorControls() })
       this.isMobile = ARManager.isTouchDevice()
       ProductLoader.on('load-progress', (e) => {
         this.loadProgress = e.detail.progress
@@ -169,6 +250,8 @@ function showroomApp() {
         HotspotManager.updatePositions()
         LightDebugView.updatePositions()
         PivotDebugView.updatePositions(PRIMARY_ZONE)
+        CoordinateSystemView.update(PRIMARY_ZONE)
+        CoordinateSystemView.updateAxisSize(SceneManager.getCamera(), SceneManager.container?.clientHeight)
       }
       SceneManager.start()
       this.setLightIntensity()
@@ -180,6 +263,11 @@ function showroomApp() {
       this._resolveInitialProduct(urlProduct).then((initial) => {
         if (initial) {
           this.selectProduct(initial)
+          this.$nextTick(() => {
+            const item = Array.from(this.$refs.productList.querySelectorAll('.sr-sidebar-item'))
+              .find((entry) => entry.dataset.productId === String(this.currentProduct?.id))
+            item?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+          })
         } else {
           this.isLoading = false
           this.loadStatus = this.products.length
@@ -382,6 +470,7 @@ function showroomApp() {
       ProductPlacement.placeProduct(PRIMARY_ZONE, product.id, product, hex, this.products).then((group) => {
         this.isLoading = false
         this.showOriginalOrientation = false
+        CoordinateSystemView.update(PRIMARY_ZONE)
         if (group) {
           HotspotManager.setProductHotspots(group, product.hotspots)
           this.productCameras = ProductPlacement.getProductCameras(PRIMARY_ZONE)
@@ -503,9 +592,22 @@ function showroomApp() {
       ARManager.showAR(glb, hex, usdz)
     },
 
+    destroy() {
+      this._disposeColorControls?.()
+    },
+
     resetCamera() {
       this.selectedCameraId = 'orbit'
       CameraController.resetCamera()
+    },
+
+    fitView(event) {
+      if (event && !isFitViewShortcut(event)) return
+      const group = ProductPlacement.getPlacement(PRIMARY_ZONE)?.group
+      if (CameraController.fitVisibleProduct(group)) {
+        event?.preventDefault()
+        this.selectedCameraId = 'orbit'
+      }
     },
 
     /** Wechselt die virtuelle Objektiv-Brennweite (Kleinbild-Äquivalent, mm). */
@@ -723,6 +825,12 @@ function showroomApp() {
     togglePivotDebug() {
       this.showPivotDebug = !this.showPivotDebug
       PivotDebugView.setVisible(this.showPivotDebug)
+    },
+
+    toggleCoordinateSystem() {
+      this.showCoordinateSystem = !this.showCoordinateSystem
+      CoordinateSystemView.setVisible(this.showCoordinateSystem)
+      CoordinateSystemView.update(PRIMARY_ZONE)
     },
 
     toggleOriginalOrientation() {

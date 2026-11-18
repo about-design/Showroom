@@ -112,7 +112,7 @@ async function main() {
       const res = await fetch(`${ORIGIN}/__api/products/${encodeURIComponent(p.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-        body: JSON.stringify({ previewImage, previewImageGeneratedAt: new Date().toISOString() }),
+        body: JSON.stringify({ previewImage, previewCameraQuaternion: success.cameraQuaternion, previewImageGeneratedAt: new Date().toISOString() }),
       })
       if (res.ok) {
         ok++

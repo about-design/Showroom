@@ -12,8 +12,8 @@ erzeugen, die du **mit der IT beim Kollegen** installieren kannst.
 
 | Artefakt | Inhalt | Zielrechner braucht | Wann nehmen |
 |----------|--------|---------------------|-------------|
-| **A) `META Showroom Setup 1.0.0.exe`** (NSIS-Installer, Electron) | Nur **3D-Showroom-Viewer** mit den aktuell in `src/data/products.json` hinterlegten Produkten | **nichts extra** (kein Node/Python/Blender) | Schnell beim Kollegen zeigen / nur ansehen |
-| **B) `meta-showroom-1.0.0-win-x64.zip`** (voller Stack) | Showroom **+ Dashboard + CAD-Konverter** | Node 20+, Python 3.10+, Blender 4.x, Memurai (Redis) | Voller Funktionsumfang inkl. Konvertierung |
+| **A) `META Showroom Setup 1.0.1.exe`** (NSIS-Installer, Electron) | Nur **3D-Showroom-Viewer** mit den aktuell in `src/data/products.json` hinterlegten Produkten | **nichts extra** (kein Node/Python/Blender) | Schnell beim Kollegen zeigen / nur ansehen |
+| **B) `meta-showroom-1.0.1-win-x64.zip`** (voller Stack) | Showroom **+ Dashboard + CAD-Konverter** | Node 20+, Python 3.10+, Blender 4.x, Memurai (Redis) | Voller Funktionsumfang inkl. Konvertierung |
 
 Für „mal eben beim Kollegen installieren und zeigen" ist **A** ideal. Wenn der Kollege auch
 **konvertieren / Produkte pflegen** soll, zusätzlich **B** (mehr IT-Aufwand, siehe
@@ -80,12 +80,12 @@ Das führt aus: `npm run build` (Showroom nach `dist\`) und danach `electron-bui
 
 Ergebnis in `release\`:
 
-- **`META Showroom Setup 1.0.0.exe`** ← das ist der Installer zum Weitergeben
+- **`META Showroom Setup 1.0.1.exe`** ← das ist der Installer zum Weitergeben
 - `win-unpacked\` ← entpackte App (optional, portabel startbar via `META Showroom.exe`)
 
 ### Beim Kollegen installieren (mit IT)
 
-1. `META Showroom Setup 1.0.0.exe` ausführen.
+1. `META Showroom Setup 1.0.1.exe` ausführen.
 2. Installationsordner bestätigen (Standard ok). Bei „SmartScreen"-Hinweis: *Weitere Informationen →
    Trotzdem ausführen* (Setup ist nicht signiert – mit der IT abklären; ggf. Code-Signing-Zertifikat).
 3. Fertig: Eintrag im **Startmenü** und Verknüpfung auf dem **Desktop** („META Showroom").
@@ -104,7 +104,7 @@ Voraussetzung: `blender-exporter\` liegt im Projektroot (siehe oben).
 npm run package:win
 ```
 
-Ergebnis: `release\meta-showroom-1.0.0-win-x64.zip` (enthält `dist\`, `node_modules\`, Skripte,
+Ergebnis: `release\meta-showroom-1.0.1-win-x64.zip` (enthält `dist\`, `node_modules\`, Skripte,
 `install-windows.ps1`, `start-/stop-showroom.cmd`, Doku, Converter).
 
 ### Übergabe an die IT

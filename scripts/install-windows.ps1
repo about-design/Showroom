@@ -86,7 +86,12 @@ function Set-BlenderPathEnv {
         return
     }
     Write-Ok "Blender: $BlenderExe"
-    [Environment]::SetEnvironmentVariable("BLENDER_PATH", $BlenderExe, "Machine")
+    try {
+        [Environment]::SetEnvironmentVariable("BLENDER_PATH", $BlenderExe, "Machine")
+    } catch [System.Security.SecurityException] {
+        [Environment]::SetEnvironmentVariable("BLENDER_PATH", $BlenderExe, "User")
+        Write-Warn "Keine Admin-Rechte: BLENDER_PATH wurde fuer den Benutzer gesetzt."
+    }
     $env:BLENDER_PATH = $BlenderExe
 }
 
@@ -194,7 +199,7 @@ function Install-Shortcuts {
     if (Test-Path $stopCmd) {
         New-DesktopShortcut -Name "META Showroom stoppen" -TargetPath $stopCmd
     }
-    $startMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
+    $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
     if (Test-Path $startMenu) {
         $menuDir = Join-Path $startMenu "META Showroom"
         if (-not (Test-Path $menuDir)) { New-Item -ItemType Directory -Path $menuDir | Out-Null }

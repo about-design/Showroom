@@ -1,0 +1,306 @@
+import { Queue, Worker } from 'bullmq';
+import Redis from 'ioredis';
+import axios from 'axios';
+import path from 'path';
+import fs from 'fs/promises';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('ConversionService');
+
+export class ConversionService {
+  constructor() {
+    // Redis connection for BullMQ
+    this.redis = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: process.env.REDIS_PORT || 6379,
+      maxRetriesPerRequest: 3,
+      retryDelayOnFailover: 100
+    });
+
+    // BullMQ queue for conversion jobs
+    this.conversionQueue = new Queue('blender-conversion', {
+      connection: this.redis,
+      defaultJobOptions: {
+        removeOnComplete: 10,
+        removeOnFail: 50,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000
+        }
+      }
+    });
+
+    // Initialize worker
+    this.initializeWorker();
+
+    // MCP server configuration
+    this.mcpServerUrl = process.env.MCP_SERVER_URL || 'http://localhost:8001';
+  }
+
+  /**
+   * Initialize BullMQ worker for processing conversion jobs
+   */
+  initializeWorker() {
+    this.worker = new Worker('blender-conversion', async (job) => {
+      return await this.processConversionJob(job);
+    }, {
+      connection: this.redis,
+      concurrency: parseInt(process.env.WORKER_CONCURRENCY) || 2
+    });
+
+    this.worker.on('completed', (job) => {
+      logger.info(`Job ${job.id} completed successfully`);
+    });
+
+    this.worker.on('failed', (job, err) => {
+      logger.error(`Job ${job.id} failed:`, err);
+    });
+
+    this.worker.on('progress', (job, progress) => {
+      logger.info(`Job ${job.id} progress: ${progress}%`);
+    });
+  }
+
+  /**
+   * Start a new conversion job
+   * @param {Object} conversionData - Job data including jobId, files, and options
+   * @returns {Object} Job information
+   */
+  async startConversion(conversionData) {
+    try {
+      logger.info(`Starting conversion job: ${conversionData.jobId}`);
+      
+      const job = await this.conversionQueue.add(
+        'convert-to-glb',
+        conversionData,
+        {
+          jobId: conversionData.jobId,
+          delay: 0
+        }
+      );
+
+      // Store initial job metadata
+      await this.redis.hset(
+        `job:${conversionData.jobId}`,
+        'status', 'queued',
+        'createdAt', new Date().toISOString(),
+        'files', JSON.stringify(conversionData.files),
+        'options', JSON.stringify(conversionData.options)
+      );
+
+      return {
+        id: job.id,
+        jobId: conversionData.jobId,
+        status: 'queued'
+      };
+    } catch (error) {
+      logger.error(`Failed to start conversion job: ${conversionData.jobId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process a conversion job by communicating with MCP server
+   * @param {Object} job - BullMQ job object
+   */
+  async processConversionJob(job) {
+    const { jobId, files, options } = job.data;
+    
+    try {
+      logger.info(`Processing conversion job: ${jobId}`);
+      
+      // Update status to processing
+      await this.updateJobStatus(jobId, 'processing', { progress: 10 });
+
+      // Prepare file paths for MCP server
+      const inputData = {
+        jobId,
+        objFile: files.obj[0]?.path,
+        mtlFile: files.mtl[0]?.path,
+        textureFiles: files.textures.map(f => f.path),
+        options: {
+          embedTextures: options.embedTextures,
+          useAI: options.useAI,
+          outputFormat: options.outputFormat
+        }
+      };
+
+      await this.updateJobStatus(jobId, 'processing', { progress: 30 });
+
+      // Call MCP server to perform Blender conversion
+      logger.info(`Calling MCP server at ${this.mcpServerUrl}/mcp/call for job ${jobId}`);
+      
+      try {
+        const mcpResponse = await axios.post(`${this.mcpServerUrl}/mcp/call`, {
+          method: 'blender-convert',
+          params: inputData
+        }, {
+          timeout: 600000, // 10 minutes timeout for large files
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        await this.updateJobStatus(jobId, 'processing', { progress: 80 });
+
+        if (mcpResponse.data.success) {
+        const outputPath = mcpResponse.data.result.outputPath;
+        const logs = mcpResponse.data.result.logs || [];
+        
+        // Store output information
+        await this.redis.hset(
+          `job:${jobId}`,
+          'outputPath', outputPath,
+          'logs', JSON.stringify(logs),
+          'completedAt', new Date().toISOString()
+        );
+
+        await this.updateJobStatus(jobId, 'completed', { 
+          progress: 100,
+          outputPath,
+          logs
+        });
+
+        logger.info(`Conversion job ${jobId} completed successfully`);
+        return { success: true, outputPath, logs };
+      } else {
+        throw new Error(`MCP server error: ${mcpResponse.data.error}`);
+      }
+
+    } catch (error) {
+      logger.error(`Conversion job ${jobId} failed:`, error);
+      
+      await this.updateJobStatus(jobId, 'failed', {
+        error: error.message,
+        failedAt: new Date().toISOString()
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Get job status and information
+   * @param {string} jobId - Job identifier
+   * @returns {Object|null} Job status information
+   */
+  async getJobStatus(jobId) {
+    try {
+      const jobData = await this.redis.hgetall(`job:${jobId}`);
+      
+      if (!jobData || !jobData.status) {
+        return null;
+      }
+
+      // Parse JSON fields
+      const files = jobData.files ? JSON.parse(jobData.files) : {};
+      const options = jobData.options ? JSON.parse(jobData.options) : {};
+      const logs = jobData.logs ? JSON.parse(jobData.logs) : [];
+
+      return {
+        status: jobData.status,
+        progress: jobData.progress || 0,
+        createdAt: jobData.createdAt,
+        completedAt: jobData.completedAt,
+        failedAt: jobData.failedAt,
+        files,
+        options,
+        logs,
+        error: jobData.error,
+        outputPath: jobData.outputPath
+      };
+    } catch (error) {
+      logger.error(`Failed to get job status for ${jobId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get output file path for completed job
+   * @param {string} jobId - Job identifier
+   * @returns {string|null} Output file path or null if not ready
+   */
+  async getOutputFile(jobId) {
+    try {
+      const status = await this.getJobStatus(jobId);
+      
+      if (status?.status === 'completed' && status.outputPath) {
+        return status.outputPath;
+      }
+      
+      return null;
+    } catch (error) {
+      logger.error(`Failed to get output file for job ${jobId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Clean up job files and data
+   * @param {string} jobId - Job identifier
+   */
+  async cleanupJob(jobId) {
+    try {
+      logger.info(`Cleaning up job: ${jobId}`);
+      
+      // Get job data to find file paths
+      const jobStatus = await this.getJobStatus(jobId);
+      
+      if (jobStatus) {
+        // Clean up upload directory
+        const uploadDir = path.join(process.cwd(), '..', 'uploads', jobId);
+        try {
+          await fs.rm(uploadDir, { recursive: true, force: true });
+        } catch (error) {
+          logger.warn(`Failed to remove upload directory for job ${jobId}:`, error.message);
+        }
+
+        // Clean up output file
+        if (jobStatus.outputPath) {
+          try {
+            await fs.unlink(jobStatus.outputPath);
+          } catch (error) {
+            logger.warn(`Failed to remove output file for job ${jobId}:`, error.message);
+          }
+        }
+      }
+
+      // Remove job data from Redis
+      await this.redis.del(`job:${jobId}`);
+      
+      logger.info(`Job ${jobId} cleaned up successfully`);
+    } catch (error) {
+      logger.error(`Failed to cleanup job ${jobId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update job status in Redis
+   * @param {string} jobId - Job identifier
+   * @param {string} status - New status
+   * @param {Object} additionalData - Additional data to store
+   */
+  async updateJobStatus(jobId, status, additionalData = {}) {
+    const updateData = {
+      status,
+      updatedAt: new Date().toISOString(),
+      ...additionalData
+    };
+
+    await this.redis.hset(`job:${jobId}`, updateData);
+  }
+
+  /**
+   * Close connections
+   */
+  async close() {
+    if (this.worker) {
+      await this.worker.close();
+    }
+    if (this.redis) {
+      this.redis.disconnect();
+    }
+  }
+}

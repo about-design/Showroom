@@ -1,4 +1,11 @@
+import { validThumbnailQuaternion } from '../../src/lib/thumbnailCamera.js'
+import { isStepFile, replaceStep } from '../lib/replaceStep.mjs'
+import { recordColorRuleConversion, colorRulesVersion, removedColorRules, ruleMatchesMesh, colorRulesAreConverted } from '../../src/lib/colorRuleConversion.js'
 import { defineConfig } from 'vite'
+import { resolveProductSapRecord } from '../lib/sapShortText.mjs'
+import { compareShortText } from '../lib/shortTextSort.mjs'
+import { normalizeAutomaticCategoryMappings, planAutomaticCategoryAssignments, resolveAutomaticCategory } from '../lib/automaticCategoryAssignment.mjs'
+import { normalizeAutomaticColorMappings, drawingNumberFromMeshName } from '../../src/lib/automaticColorAssignment.js'
 import { resolve, dirname, relative, isAbsolute, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
 import { buildColorOverridesFromMapping, normalizeMappingHex } from '../../src/lib/hexMapping.js'
@@ -15,7 +22,7 @@ import { getMtllibFromObjContent, setMtllibInObjContent } from '../../src/lib/ob
 const __dirname = typeof import.meta.dirname !== 'undefined'
   ? import.meta.dirname
   : dirname(fileURLToPath(import.meta.url))
-import { spawnSync } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { open, readdir, readFile, writeFile, mkdir, stat, copyFile, unlink, rename } from 'fs/promises'
 
 /** @param {string} abs */
@@ -48,7 +55,7 @@ function headerAllowsOverwrite(req) {
   const v = String(req.headers['x-overwrite'] ?? '').trim().toLowerCase()
   return v === '1' || v === 'true' || v === 'yes'
 }
-import { watch as fsWatch, createReadStream } from 'node:fs'
+import { watch as fsWatch, createReadStream, constants as fsConstants } from 'node:fs'
 import tailwindcss from '@tailwindcss/vite'
 import { createBlenderRenderMiddleware } from '../render/blenderRenderRoute.mjs'
 import { createLogger, withRequestLogger } from '../lib/logger.mjs'
@@ -117,6 +124,25 @@ function extractGlbMaterialRgbColors(glbBuffer) {
     colors.add(rgb.join(','))
   }
   return colors
+}
+
+/** Liefert technische Node-/Mesh-Namen aus dem GLB, ohne die GLB-Datei zu verändern. */
+function extractGlbMeshNames(glbBuffer) {
+  if (!glbBuffer || glbBuffer.length < 20 || glbBuffer.readUInt32LE(0) !== 0x46546c67) return []
+  const jsonLen = glbBuffer.readUInt32LE(12)
+  const jsonType = glbBuffer.readUInt32LE(16)
+  if (jsonType !== 0x4e4f534a || !Number.isFinite(jsonLen) || jsonLen <= 0) return []
+  const end = 20 + jsonLen
+  if (end > glbBuffer.length) return []
+  try {
+    const doc = JSON.parse(glbBuffer.subarray(20, end).toString('utf-8'))
+    const meshes = Array.isArray(doc?.meshes) ? doc.meshes : []
+    const meshNames = meshes.map((mesh) => mesh?.name).filter(Boolean)
+    const nodeNames = (Array.isArray(doc?.nodes) ? doc.nodes : []).map((node) => node?.name).filter(Boolean)
+    return [...new Set([...meshNames, ...nodeNames].map((name) => String(name).trim()).filter(Boolean))]
+  } catch {
+    return []
+  }
 }
 
 /**
@@ -326,6 +352,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
   const PRODUCTS_PATH = resolve(ROOT, 'src/data/products.json')
   const MODELS_BASE = resolve(ROOT, 'public/models')
   const MODELS_UPLOAD_DIR = resolve(ROOT, 'public/models/products')
+  const PUBLIC_ROOT = resolve(ROOT, 'public')
+  const FILE_MANAGER_SETTINGS_PATH = resolve(ROOT, 'dashboard-file-manager-settings.json')
+  const ARCHIVE_BASE = 'D:\\Showroom Datei Move'
 
   const CAD_INDEX_PATH = resolve(ROOT, 'src/data/cad-index.json')
   const MAX_UPLOAD_BYTES = 512 * 1024 * 1024 // 512 MB
@@ -357,9 +386,138 @@ export function registerDashboardApi(middlewares, opts = {}) {
     const existing = new Set(product.cadFiles || [])
     const merged = [...existing]
     for (const f of discovered) {
+      if (isStepFile(f) && [...existing].some(isStepFile)) continue
       if (!existing.has(f)) merged.push(f)
     }
     return { ...product, cadFiles: merged }
+  }
+
+  function storedFileUrl(value) {
+    return String(value || '').trim().split(/[?#]/)[0]
+  }
+
+  async function getFileManagerSettings() {
+    try {
+      const saved = JSON.parse(await readFile(FILE_MANAGER_SETTINGS_PATH, 'utf-8'))
+      return {
+        fileManager: saved?.fileManager === 'freecommander' ? 'freecommander' : 'explorer',
+        freeCommanderPath: String(saved?.freeCommanderPath || '').trim(),
+        autoConvertOnDrop: saved?.autoConvertOnDrop === true,
+        showMeshRal: saved?.showMeshRal !== false,
+        showViewCube: saved?.showViewCube !== false,
+        showCoordinateSystem: saved?.showCoordinateSystem === true,
+        showCoordinateOrigin: saved?.showCoordinateOrigin !== false,
+        coordinateAxisSizePx: Math.min(100, Math.max(25, Number(saved?.coordinateAxisSizePx) || 50)),
+        viewCubePosition: ['left', 'center', 'right'].includes(saved?.viewCubePosition) ? saved.viewCubePosition : 'right',
+        detailSidebarPinned: saved?.detailSidebarPinned !== false,
+        sidebarWidthPercent: [35, 40, 45, 50, 55].includes(Number(saved?.sidebarWidthPercent))
+          ? Number(saved.sidebarWidthPercent) : 35,
+        maxParallelConversions: [1, 2, 3, 4, 5].includes(Number(saved?.maxParallelConversions))
+          ? Number(saved.maxParallelConversions)
+          : 3,
+        automaticCategoryMappings: normalizeAutomaticCategoryMappings(saved?.automaticCategoryMappings),
+        automaticColorMappings: normalizeAutomaticColorMappings(saved?.automaticColorMappings),
+      }
+    } catch {
+      return {
+        fileManager: 'explorer',
+        freeCommanderPath: '',
+        autoConvertOnDrop: false,
+        showMeshRal: true,
+        showViewCube: true,
+        showCoordinateSystem: false,
+        showCoordinateOrigin: true,
+        coordinateAxisSizePx: 50,
+        viewCubePosition: 'right',
+        detailSidebarPinned: true,
+        sidebarWidthPercent: 35,
+        maxParallelConversions: 3,
+        automaticCategoryMappings: [],
+        automaticColorMappings: [],
+      }
+    }
+  }
+
+  async function buildProductArchivePlan(data, productId) {
+    const product = data.products.find((p) => p.id === productId)
+    if (!product) throw new Error('Produkt nicht gefunden')
+    const knownFiles = [
+      { type: 'GLB', url: storedFileUrl(product.glbFile) },
+      { type: 'USDZ', url: storedFileUrl(product.usdzFile) },
+      { type: 'Thumbnail', url: storedFileUrl(product.previewImage) },
+      ...(product.cadFiles || []).map((url) => ({ type: 'CAD/Original', url: storedFileUrl(url) })),
+    ].filter((file) => file.url)
+    const uniqueKnownFiles = [...new Map(knownFiles.map((file) => [file.url, file])).values()]
+    const files = await Promise.all(uniqueKnownFiles.map(async (file) => {
+      const source = resolve(PUBLIC_ROOT, ...file.url.replace(/^\/+/, '').split('/'))
+      if (!file.url.startsWith('/models/') || !isSafePath(PUBLIC_ROOT, source)) {
+        return { ...file, source: '', target: '', status: 'Unsicherer gespeicherter Pfad', movable: false, blocking: true }
+      }
+      const shared = data.products.some((other) => other.id !== productId && [
+        other.glbFile,
+        other.usdzFile,
+        other.previewImage,
+        ...(other.cadFiles || []),
+      ].map(storedFileUrl).includes(file.url))
+      const target = resolve(ARCHIVE_BASE, relative(ROOT, source))
+      if (!isSafePath(ARCHIVE_BASE, target)) {
+        return { ...file, source, target: '', status: 'Ungültiges Archivziel', movable: false, blocking: true }
+      }
+      if (shared) return { ...file, source, target, status: 'Von anderem Produkt verwendet', movable: false, blocking: false, retained: true }
+      if (!await pathExists(source)) return { ...file, source, target, status: 'Quelldatei fehlt', movable: false, blocking: true }
+      if (await pathExists(target)) return { ...file, source, target, status: 'Wird überschrieben', movable: true, blocking: false, overwrite: true }
+      return { ...file, source, target, status: 'bereit', movable: true, blocking: false }
+    }))
+    return {
+      product: { id: product.id, name: product.name || product.id },
+      archiveBase: ARCHIVE_BASE,
+      files,
+      retained: [],
+      canExecute: !files.some((file) => file.blocking),
+    }
+  }
+
+  async function buildProductFilenameRenamePlan(data, productId) {
+    const product = data.products.find((entry) => entry.id === productId)
+    if (!product) throw new Error('Produkt nicht gefunden')
+    const nameMatch = String(product.name || '').match(/^Produkt\s+(\d+)_(\d+)(.*)$/)
+    const ean = String(product.sapEan || '').trim()
+    const article = String(product.sapArticleNumber || '').trim()
+    if (!nameMatch || !/^\d+$/.test(ean) || !/^\d+$/.test(article)) throw new Error('EAN, Artikelnummer oder aktueller Produktname sind nicht gültig.')
+    const oldBase = `${nameMatch[1]}_${nameMatch[2]}`
+    const newBase = `${ean}_${article}`
+    if (oldBase === newBase) throw new Error('Produktname stimmt bereits mit EAN und Artikelnummer überein.')
+    const idConflict = data.products.some((entry) => entry.id !== productId && entry.id === newBase)
+    const refs = [
+      { type: 'GLB', field: 'glbFile', url: product.glbFile },
+      { type: 'USDZ', field: 'usdzFile', url: product.usdzFile },
+      { type: 'Vorschaubild', field: 'previewImage', url: product.previewImage },
+      ...(product.cadFiles || []).map((url, index) => ({ type: /\.(step|stp)(?:[?#]|$)/i.test(url) ? 'STEP/STP' : 'CAD/Original', field: 'cadFiles', index, url })),
+    ].filter((entry) => storedFileUrl(entry.url))
+    const files = []
+    const updates = { id: newBase, name: `Produkt ${newBase}${nameMatch[3] || ''}`, cadFiles: [...(product.cadFiles || [])] }
+    for (const ref of refs) {
+      const sourceUrl = storedFileUrl(ref.url)
+      const slash = sourceUrl.lastIndexOf('/')
+      const oldName = sourceUrl.slice(slash + 1)
+      if (!oldName.startsWith(oldBase)) continue
+      const newName = `${newBase}${oldName.slice(oldBase.length)}`
+      const targetUrl = `${sourceUrl.slice(0, slash + 1)}${newName}`
+      const source = resolve(PUBLIC_ROOT, ...sourceUrl.replace(/^\/+/, '').split('/'))
+      const target = resolve(PUBLIC_ROOT, ...targetUrl.replace(/^\/+/, '').split('/'))
+      const shared = data.products.some((other) => other.id !== productId && [other.glbFile, other.usdzFile, other.previewImage, ...(other.cadFiles || [])].map(storedFileUrl).includes(sourceUrl))
+      let status = 'bereit'
+      let blocking = false
+      if (!sourceUrl.startsWith('/models/') || !isSafePath(PUBLIC_ROOT, source) || !isSafePath(PUBLIC_ROOT, target)) { status = 'Unsicherer Pfad'; blocking = true }
+      else if (shared) { status = 'Von anderem Produkt verwendet'; blocking = true }
+      else if (!await pathExists(source)) { status = 'Quelldatei fehlt'; blocking = true }
+      else if (await pathExists(target)) { status = 'Zieldatei existiert bereits'; blocking = true }
+      files.push({ ...ref, sourceUrl, targetUrl, source, target, oldName, newName, status, blocking })
+      const query = String(ref.url).slice(sourceUrl.length)
+      if (ref.field === 'cadFiles') updates.cadFiles[ref.index] = `${targetUrl}${query}`
+      else updates[ref.field] = `${targetUrl}${query}`
+    }
+    return { product: { id: product.id, name: product.name }, oldBase, newBase, files, updates, canExecute: !idConflict && files.length > 0 && !files.some((file) => file.blocking), idConflict }
   }
 
   // ── GLB Orientierungs-Erkennung ──────────────────────────────────────
@@ -718,8 +876,9 @@ export function registerDashboardApi(middlewares, opts = {}) {
       // Atomares Write + Serialisierung: verhindert Race-Conditions bei
       // parallelen PATCH/POST-Requests und teil-geschriebene products.json
       // bei Crash/Abbruch. Cache erst nach erfolgreichem rename aktualisieren.
-      async function saveProducts(data) {
+      async function saveProducts(data, reconcile = null) {
         const task = _saveQueue.then(async () => {
+          if (reconcile) reconcile(data, cloneProductsData(await ensureProductsCache()))
           const tmp = `${PRODUCTS_PATH}.tmp-${process.pid}-${Date.now()}`
           const json = JSON.stringify(data, null, 2) + '\n'
           await writeFile(tmp, json, 'utf-8')
@@ -750,7 +909,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
 
       // Invalidierung, wenn products.json extern (z.B. durch Scripts) geändert wurde
       try {
-        fsWatch(PRODUCTS_PATH, { persistent: false }, () => {
+        if (opts.watchProducts !== false) fsWatch(PRODUCTS_PATH, { persistent: false }, () => {
           _productsCache = null
           void writePublicProducts(ROOT)
         })
@@ -846,6 +1005,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         }
       })
 
+      let stepUploadQueue = Promise.resolve()
       middlewares.use('/__api/upload-cad', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
@@ -854,6 +1014,75 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const safeParts = parts.filter(p => p && p !== '..' && p !== '.').map(p => p.replace(/[^a-zA-Z0-9_\-. ]/g, '_'))
           const safePath = safeParts.join('/')
           const targetFile = resolve(MODELS_UPLOAD_DIR, ...safeParts)
+          if (isStepFile(targetFile)) {
+            const productId = decodeURIComponent(String(req.headers['x-product-id'] || ''))
+            if (!productId || /[<>:"/\\|?*\x00-\x1f]/.test(productId) || /[. ]$/.test(productId) || productId === '..') {
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'Gültige Produkt-ID für STEP-Upload erforderlich' })); return
+            }
+            if (!isSafePath(MODELS_UPLOAD_DIR, targetFile)) throw new Error('Ungültiger Dateipfad')
+            const body = await readBody(req)
+            const task = stepUploadQueue.then(async () => {
+              const data = await loadProducts()
+              const previous = data.products.find(p => p.id === productId)
+              const cadIndex = await getCadIndex()
+              const oldCad = [...(previous ? enrichProductCadFiles(previous, cadIndex).cadFiles || [] : [])]
+              const storedOldCad = previous?.cadFiles
+              const newPath = `/models/products/${safePath}`
+              const oldUrls = oldCad.filter(isStepFile)
+              const sources = oldUrls.map(url => {
+                const path = resolve(PUBLIC_ROOT, '.' + (url.startsWith('/') ? url : '/' + url))
+                if (!isSafePath(PUBLIC_ROOT, path)) throw new Error('Alter STEP-Pfad liegt außerhalb des Produktbereichs')
+                return path
+              })
+              if (await pathExists(targetFile)) {
+                if (!headerAllowsOverwrite(req)) {
+                  res.statusCode = 409
+                  res.end(JSON.stringify({ conflict: true, path: newPath, message: 'Vorhandene STEP-Version vor Ersetzen archivieren?' }))
+                  return
+                }
+                if (!sources.some(path => path.toLowerCase() === targetFile.toLowerCase())) sources.push(targetFile)
+              }
+              for (const other of data.products) {
+                if (other.id === productId) continue
+                if ((enrichProductCadFiles(other, cadIndex).cadFiles || []).some(url => sources.some(path => path.toLowerCase() === resolve(PUBLIC_ROOT, '.' + (url.startsWith('/') ? url : '/' + url)).toLowerCase()))) {
+                  throw new Error('Die STEP-Datei wird auch von einem anderen Produkt verwendet. Upload abgebrochen.')
+                }
+              }
+              const nextCad = [...oldCad.filter(url => !isStepFile(url)), newPath]
+              const template = previous || JSON.parse(decodeURIComponent(String(req.headers['x-product-template'] || '{}')))
+              const update = async (restore) => {
+                const snapshot = await loadProducts()
+                await saveProducts(snapshot, (draft, latest) => {
+                  draft.products = latest.products
+                  const index = draft.products.findIndex(p => p.id === productId)
+                  if (restore && !previous) { if (index !== -1) draft.products.splice(index, 1); return }
+                  const current = index === -1 ? template : draft.products[index]
+                  const changed = { ...current, id: productId, createdAt: current.createdAt || new Date().toISOString(), cadFiles: restore ? storedOldCad : nextCad }
+                  if (restore && storedOldCad === undefined) delete changed.cadFiles
+                  if (index === -1) draft.products.push(changed)
+                  else draft.products[index] = changed
+                })
+                const saved = (await loadProducts()).products.find(p => p.id === productId)
+                if (!restore && JSON.stringify(saved?.cadFiles) !== JSON.stringify(nextCad)) throw new Error('Prüfung der STEP-Produktverweise fehlgeschlagen')
+                return saved
+              }
+              const result = await replaceStep({ productId, target: targetFile, body, sources,
+                archiveRoot: opts.stepArchiveRoot || resolve(ARCHIVE_BASE, 'Ersetzte STEP'),
+                commit: () => update(false), rollback: () => update(true),
+                audit: async record => {
+                  const folder = resolve(ROOT, 'logs')
+                  await mkdir(folder, { recursive: true })
+                  await writeFile(resolve(folder, 'step-replacements.jsonl'), JSON.stringify(record) + '\n', { flag: 'a' })
+                  log.info(`[STEP-Archiv] ${JSON.stringify(record)}`)
+                },
+              })
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ ok: true, filename: safePath, path: newPath, ...result }))
+            })
+            stepUploadQueue = task.catch(() => {})
+            await task
+            return
+          }
           if (!isSafePath(MODELS_UPLOAD_DIR, targetFile)) {
             res.statusCode = 400; res.end(JSON.stringify({ error: 'Ungültiger Dateipfad' })); return
           }
@@ -892,6 +1121,11 @@ export function registerDashboardApi(middlewares, opts = {}) {
         try {
           const body = JSON.parse((await readBody(req, 16 * 1024)).toString('utf-8'))
           const rel = String(body?.path || '').trim()
+          if (isStepFile(rel)) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'STEP-Dateien dürfen nur über den archivierenden STEP-Upload ersetzt werden' }))
+            return
+          }
           if (!rel.startsWith('/models/products/')) {
             res.statusCode = 400
             res.end(JSON.stringify({ error: 'Nur Pfade unter /models/products/ dürfen gelöscht werden' }))
@@ -1260,7 +1494,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         try {
           const body = JSON.parse((await readBody(req)).toString('utf-8'))
-          const { outputPaths = [], cadFileUrls = [], productId, conversionPreset } = body
+          const { outputPaths = [], cadFileUrls = [], productId, conversionPreset, conversionStatus } = body
           const data = await loadProducts()
           const warnings = []
 
@@ -1273,6 +1507,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
           const outputDir = resolve(ROOT, 'public/models/output')
           const bakeScript = resolve(ROOT, 'scripts/bake-glb-yup.js')
           const productForRal = productId ? data.products.find((x) => x.id === productId) : null
+          const bakePreset = conversionPreset && typeof conversionPreset === 'object' && !Array.isArray(conversionPreset) ? conversionPreset : productForRal?.conversionPreset
           const converterApiBase = process.env.CONVERTER_API_URL || 'http://localhost:3000'
 
           await ensureGlbOutputDir(outputDir, log)
@@ -1363,10 +1598,12 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const targetId = productId || (added.length === 1 ? added[0] : null)
             if (targetId) {
               const tgt = data.products.find((x) => x.id === targetId)
-              if (tgt) tgt.conversionPreset = conversionPreset
+              if (tgt && !productId) tgt.conversionPreset = conversionPreset
             }
           }
 
+          // Bauteilbezeichnungen werden als Produktmetadaten aus der technischen
+          // Zeichnungsnummer abgeleitet. Die GLB-Mesh-Namen selbst bleiben unverändert.
           let ralCode = null
           let ralSource = null
           {
@@ -1421,10 +1658,10 @@ export function registerDashboardApi(middlewares, opts = {}) {
               const mappingRaw = await readFile(mappingPath, 'utf-8').catch(() => null)
               if (mappingRaw) {
                 const mapping = JSON.parse(mappingRaw)
-                mergedNameColorRuleEntries = mergeNameColorRuleEntries(mapping, productForRal.conversionPreset)
-                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(mapping, productForRal.conversionPreset)
-                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(mapping, productForRal.conversionPreset)
-                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(mapping, productForRal.conversionPreset)
+                mergedNameColorRuleEntries = mergeNameColorRuleEntries(mapping, bakePreset)
+                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(mapping, bakePreset)
+                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(mapping, bakePreset)
+                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(mapping, bakePreset)
                 const ralRaw = await readFile(resolve(ROOT, 'src/data/ralColors.json'), 'utf-8')
                 const ralPalette = JSON.parse(ralRaw)
                 const getRalHex = (ralKey) => {
@@ -1457,22 +1694,29 @@ export function registerDashboardApi(middlewares, opts = {}) {
                   }
                 }
               } else {
-                mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, productForRal.conversionPreset)
-                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, productForRal.conversionPreset)
-                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, productForRal.conversionPreset)
-                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, productForRal.conversionPreset)
+                mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, bakePreset)
+                mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, bakePreset)
+                mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, bakePreset)
+                mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, bakePreset)
               }
             } catch (e) {
                             log.scoped("register-converted").warn("Mapping-Overrides für Bake:", e.message)
               mergedBakeOverrides = null
-              mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, productForRal?.conversionPreset)
-              mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, productForRal?.conversionPreset)
-              mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, productForRal?.conversionPreset)
-              mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, productForRal?.conversionPreset)
+              mergedNameColorRuleEntries = mergeNameColorRuleEntries(null, bakePreset)
+              mergedGeometryColorRuleEntries = mergeGeometryColorRuleEntries(null, bakePreset)
+              mergedVertexReductionRuleEntries = mergeVertexReductionRuleEntries(null, bakePreset)
+              mergedVisibilityRuleEntries = mergeVisibilityRuleEntries(null, bakePreset)
             }
           }
           if (mergedNameColorRuleEntries.length) {
                         log.info(`[register-converted] nameColorRules: ${mergedNameColorRuleEntries.length} Regel(n)`)
+          }
+          const removedNameColorRuleEntries = removedColorRules(
+            productForRal?._colorRuleConversion?.mergedRules || [],
+            mergedNameColorRuleEntries,
+          )
+          if (removedNameColorRuleEntries.length) {
+            log.info(`[register-converted] entfernte nameColorRules: ${removedNameColorRuleEntries.length} Regel(n) – frühere Treffer werden auf Standard-Grau zurückgesetzt`)
           }
           if (mergedGeometryColorRuleEntries.length) {
                         log.info(`[register-converted] geometryColorRules: ${mergedGeometryColorRuleEntries.length} Regel(n)`)
@@ -1523,6 +1767,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
 
           for (const row of glbRows) {
             const { safe, rawBasename, glbUrl, localPath, p, absPath, previousGlbFile, previousUsdzFile, isNewProduct } = row
+            p._colorRulesDirty = true
             if (!isSafePath(outputDir, localPath)) {
                             log.warn(`[register-converted] Ungültiger Dateipfad abgewiesen: ${absPath}`)
               warnings.push({
@@ -1650,6 +1895,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
               let nameRulesFile = null
               if (
                 mergedNameColorRuleEntries.length > 0 ||
+                removedNameColorRuleEntries.length > 0 ||
                 mergedGeometryColorRuleEntries.length > 0 ||
                 mergedVertexReductionRuleEntries.length > 0 ||
                 mergedVisibilityRuleEntries.length > 0
@@ -1657,6 +1903,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 nameRulesFile = `${localPath}.name-rules.json`
                 const rulesPayload = {}
                 if (mergedNameColorRuleEntries.length > 0) rulesPayload.nameColorRules = mergedNameColorRuleEntries
+                if (removedNameColorRuleEntries.length > 0) rulesPayload.removedNameColorRules = removedNameColorRuleEntries
                 if (mergedGeometryColorRuleEntries.length > 0) {
                   rulesPayload.geometryColorRules = mergedGeometryColorRuleEntries
                 }
@@ -1693,9 +1940,14 @@ export function registerDashboardApi(middlewares, opts = {}) {
               if (nameRulesFile) {
                 await unlink(nameRulesFile).catch(() => {})
               }
-              if (result.stdout) log.scoped("register-converted").info("STDOUT:n", + result.stdout)
-              if (result.stderr) log.scoped("register-converted").warn("STDERR:n", + result.stderr)
-              if (result.status !== 0) log.scoped("register-converted").warn("Bake EXIT:", result.status)
+              if (result.stdout) log.scoped("register-converted").info("STDOUT:", result.stdout)
+              if (result.stderr) log.scoped("register-converted").warn("STDERR:", result.stderr)
+              recordColorRuleConversion(p, bakePreset?.nameColorRules || [], mergedNameColorRuleEntries, result, !conversionStatus || conversionStatus === 'completed')
+              if (result.status !== 0 || result.error || result.signal) {
+                p.conversionError = { reason: 'color-rule-bake-failed', at: new Date().toISOString() }
+                warnings.push({ productId: p.id, reason: 'color-rule-bake-failed', expected: glbUrl })
+                continue
+              }
 
               // Prozessschutz: Farb-Kollaps früh sichtbar machen (STEP mehrfarbig, GLB einfarbig).
               try {
@@ -1733,6 +1985,34 @@ export function registerDashboardApi(middlewares, opts = {}) {
               } catch (e) {
                                 log.scoped("register-converted").warn("color-parity-check:", e?.message || e)
               }
+            }
+          }
+
+          // Das GLB liegt erst nach dem Kopier-/Bake-Schritt zuverlässig am
+          // Zielpfad. Die Zuordnung erfolgt deshalb hier noch im selben
+          // Konvertierungslauf, aber erst nachdem das GLB fertig vorliegt.
+          const automaticColorMappings = (await getFileManagerSettings()).automaticColorMappings
+          const partDescriptionsByDrawingNumber = new Map(
+            normalizeAutomaticColorMappings(automaticColorMappings)
+              .filter((mapping) => mapping.partName)
+              .map((mapping) => [mapping.drawingNumber, mapping.partName]),
+          )
+          if (partDescriptionsByDrawingNumber.size) {
+            for (const row of glbRows) {
+              if (!row.p || row.p.conversionError) continue
+              let names = []
+              try {
+                names = extractGlbMeshNames(await readFile(row.localPath))
+              } catch (_) {}
+              const descriptions = { ...(row.p.partDescriptions || {}) }
+              for (const name of names) {
+                const drawingNumber = drawingNumberFromMeshName(name)
+                const partName = drawingNumber && partDescriptionsByDrawingNumber.get(drawingNumber)
+                if (drawingNumber && partName && !String(descriptions[drawingNumber] || '').trim()) {
+                  descriptions[drawingNumber] = partName
+                }
+              }
+              if (Object.keys(descriptions).length) row.p.partDescriptions = descriptions
             }
           }
 
@@ -1795,7 +2075,24 @@ export function registerDashboardApi(middlewares, opts = {}) {
             }
           }
 
-          await saveProducts(data)
+          const categoryMappings = (await getFileManagerSettings()).automaticCategoryMappings
+          for (const { p } of glbRows) {
+            if (p && !p.conversionError) {
+              Object.assign(p, await resolveProductSapRecord(p))
+              if (!String(p.mainCategory || '').trim()) p.mainCategory = resolveAutomaticCategory(p.shortText, categoryMappings)
+            }
+          }
+          await saveProducts(data, (next, latest) => {
+            // Preserve rules edited while conversion/registration was running. The receipt
+            // deliberately records the older rules actually passed to the bake process.
+            for (const row of glbRows) {
+              const current = latest.products.find(item => item.id === row.p.id)
+              if (current && !row.isNewProduct) row.p.conversionPreset = current.conversionPreset
+            }
+            const touched = new Set(glbRows.map(row => row.p.id))
+            next.products = next.products.map(item => touched.has(item.id) ? item : latest.products.find(p => p.id === item.id) || item)
+            for (const item of latest.products) if (!next.products.some(p => p.id === item.id)) next.products.push(item)
+          })
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ ok: true, added, warnings }))
         } catch (e) {
@@ -2303,12 +2600,22 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const id = req.url.replace(/^\//, '').split('?')[0]
             if (!id) { res.statusCode = 400; res.end(JSON.stringify({ error: 'Keine ID' })); return }
             const patch = JSON.parse((await readBody(req)).toString('utf-8'))
+            delete patch._colorRuleConversion // Only successful server-side baking may certify a rule version.
+            delete patch._colorRulesDirty
             const data = await loadProducts()
             const idx = data.products.findIndex(p => p.id === id)
+            if ('conversionPreset' in patch && colorRulesVersion(data.products[idx]?.conversionPreset?.nameColorRules) !== colorRulesVersion(patch.conversionPreset?.nameColorRules)) patch._colorRulesDirty = true
             if (idx === -1) {
-              data.products.push({ ...patch, id, createdAt: patch.createdAt || new Date().toISOString() })
+              const product = { ...patch, id, createdAt: patch.createdAt || new Date().toISOString() }
+              if (!('mainCategory' in patch) && !String(product.mainCategory || '').trim()) {
+                product.mainCategory = resolveAutomaticCategory(product.shortText, (await getFileManagerSettings()).automaticCategoryMappings)
+              }
+              data.products.push(product)
             } else {
               data.products[idx] = { ...data.products[idx], ...patch, id }
+              if (!('mainCategory' in patch) && !String(data.products[idx].mainCategory || '').trim()) {
+                data.products[idx].mainCategory = resolveAutomaticCategory(data.products[idx].shortText, (await getFileManagerSettings()).automaticCategoryMappings)
+              }
             }
             await saveProducts(data)
             const saved = data.products.find(p => p.id === id)
@@ -2336,6 +2643,175 @@ export function registerDashboardApi(middlewares, opts = {}) {
         if (req.method === 'POST') {
           try {
             const rawPath = req.url.replace(/^\//, '').split('?')[0]
+            const renameFilesMatch = rawPath.match(/^([^/]+)\/rename-files-(preview|execute)$/)
+            if (renameFilesMatch) {
+              const id = decodeURIComponent(renameFilesMatch[1])
+              const data = await loadProducts()
+              const plan = await buildProductFilenameRenamePlan(data, id)
+              if (renameFilesMatch[2] === 'preview') {
+                res.statusCode = plan.canExecute ? 200 : 409
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: plan.canExecute, ...plan, files: plan.files.map(({ source, target, ...file }) => file) }))
+                return
+              }
+              if (!plan.canExecute) {
+                res.statusCode = 409
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: plan.idConflict ? 'Ein Produkt mit dem neuen Namen existiert bereits.' : 'Umbenennung kann nicht sicher ausgeführt werden.', ...plan, files: plan.files.map(({ source, target, ...file }) => file) }))
+                return
+              }
+              const moved = []
+              try {
+                for (const file of plan.files) {
+                  if (await pathExists(file.target)) throw new Error(`Zieldatei existiert bereits: ${file.newName}`)
+                  await copyFile(file.source, file.target, fsConstants.COPYFILE_EXCL)
+                  try { await unlink(file.source) } catch (error) { await unlink(file.target).catch(() => {}); throw error }
+                  moved.push(file)
+                }
+                const product = data.products.find((entry) => entry.id === id)
+                Object.assign(product, plan.updates)
+                for (const entry of data.products) for (const part of entry.parts || []) if (part.productId === id) part.productId = plan.newBase
+                await saveProducts(data)
+                log.info(`[rename-product-files] ${id} -> ${plan.newBase}; ${moved.length} Datei(en)`)
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true, oldId: id, newId: plan.newBase, product, files: plan.files.map(({ source, target, ...file }) => file) }))
+              } catch (error) {
+                const rollbackErrors = []
+                for (const file of moved.reverse()) {
+                  try {
+                    await copyFile(file.target, file.source, fsConstants.COPYFILE_EXCL)
+                    await unlink(file.target)
+                  } catch (rollbackError) { rollbackErrors.push(`${file.oldName}: ${rollbackError.message || rollbackError}`) }
+                }
+                log.error(`[rename-product-files] fehlgeschlagen: ${error.message || error}`)
+                res.statusCode = 500
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: `Umbenennung fehlgeschlagen: ${error.message || error}`, rollbackErrors }))
+              }
+              return
+            }
+            const revealMatch = rawPath.match(/^([^/]+)\/reveal-source$/)
+            if (revealMatch) {
+              if (process.platform !== 'win32') {
+                res.statusCode = 501
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Diese Funktion ist nur lokal unter Windows verfügbar.' }))
+                return
+              }
+              const id = decodeURIComponent(revealMatch[1])
+              const data = await loadProductsRef()
+              const product = data.products.find((entry) => entry.id === id)
+              if (!product) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Produkt nicht gefunden.' }))
+                return
+              }
+              const requestUrl = new URL(req.url, 'http://localhost')
+              const sourceType = requestUrl.searchParams.get('source')
+              const sourceUrl = sourceType === 'glb'
+                ? storedFileUrl(product.glbFile)
+                : storedFileUrl((Array.isArray(product.cadFiles) ? product.cadFiles : []).find((file) => /\.(step|stp)$/i.test(String(file))))
+              const source = cadUrlToAbsPublic(ROOT, sourceUrl)
+              if (!sourceUrl || !sourceUrl.startsWith('/models/') || !source || !isSafePath(PUBLIC_ROOT, source)) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Für dieses Produkt ist keine gültige GLB-Datei gespeichert.' }))
+                return
+              }
+              let sourceStat
+              try {
+                sourceStat = await stat(source)
+              } catch {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Die gespeicherte GLB-Datei wurde nicht gefunden.' }))
+                return
+              }
+              if (!sourceStat.isFile()) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Der gespeicherte GLB-Pfad verweist nicht auf eine Datei.' }))
+                return
+              }
+              const settings = await getFileManagerSettings()
+              const useExplorer = settings.fileManager !== 'freecommander' || requestUrl.searchParams.get('fallback') === 'explorer'
+              if (!useExplorer && (!settings.freeCommanderPath || !await pathExists(settings.freeCommanderPath))) {
+                res.statusCode = 404
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'FreeCommander.exe wurde am gespeicherten Pfad nicht gefunden.', fallbackAvailable: true }))
+                return
+              }
+              const command = useExplorer ? 'explorer.exe' : settings.freeCommanderPath
+              const args = useExplorer ? [`/select,${source}`] : [source]
+              const fileManager = spawn(command, args, { detached: true, stdio: 'ignore' })
+              fileManager.once('error', (error) => log.warn(`[reveal-source] Dateimanager konnte nicht gestartet werden: ${error.message || error}`))
+              fileManager.unref()
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ ok: true }))
+              return
+            }
+            const archiveMatch = rawPath.match(/^([^/]+)\/(archive-preview|archive-remove)$/)
+            if (archiveMatch) {
+              const id = decodeURIComponent(archiveMatch[1])
+              const data = await loadProducts()
+              const plan = await buildProductArchivePlan(data, id)
+              if (archiveMatch[2] === 'archive-preview') {
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true, ...plan }))
+                return
+              }
+              if (!plan.canExecute) {
+                res.statusCode = 409
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Archivierung kann nicht sicher ausgeführt werden', ...plan }))
+                return
+              }
+              const moved = []
+              try {
+                for (const file of plan.files.filter((entry) => entry.movable)) {
+                  await mkdir(dirname(file.target), { recursive: true })
+                  const backup = file.overwrite ? `${file.target}.archive-backup-${Date.now()}-${moved.length}` : null
+                  if (backup) await rename(file.target, backup)
+                  try {
+                    await copyFile(file.source, file.target, fsConstants.COPYFILE_EXCL)
+                    await unlink(file.source)
+                    moved.push({ ...file, backup })
+                  } catch (moveError) {
+                    if (await pathExists(file.target)) await unlink(file.target)
+                    if (backup && await pathExists(backup)) await rename(backup, file.target)
+                    throw moveError
+                  }
+                }
+                data.products = data.products.filter((product) => product.id !== id)
+                await saveProducts(data)
+                for (const file of moved) {
+                  if (!file.backup || !await pathExists(file.backup)) continue
+                  try {
+                    await unlink(file.backup)
+                  } catch (backupError) {
+                    log.warn(`[archive-remove] Sicherungsdatei bleibt erhalten: ${file.backup}: ${backupError.message || backupError}`)
+                  }
+                }
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true, moved }))
+              } catch (error) {
+                const rollbackErrors = []
+                for (const file of moved.reverse()) {
+                  try {
+                    if (await pathExists(file.target) && !await pathExists(file.source)) await rename(file.target, file.source)
+                    else if (await pathExists(file.target)) await unlink(file.target)
+                    if (file.backup && await pathExists(file.backup)) await rename(file.backup, file.target)
+                  } catch (rollbackError) {
+                    rollbackErrors.push(`${file.source}: ${rollbackError.message || rollbackError}`)
+                  }
+                }
+                res.statusCode = 500
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: `Archivierung fehlgeschlagen: ${error.message || error}`, rollbackErrors }))
+              }
+              return
+            }
             const m = rawPath.match(/^([^/]+)\/preview-png$/)
             if (!m) {
               res.statusCode = 404
@@ -2400,12 +2876,14 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const v = Math.round(st.mtimeMs)
             p.previewImage = `/models/output/thumbnails/${pngName}?v=${v}`
             p.previewImageGeneratedAt = new Date().toISOString()
+            p.previewCameraQuaternion = validThumbnailQuaternion(body.cameraQuaternion) ? body.cameraQuaternion : null
             await saveProducts(data)
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify({
               ok: true,
               previewImage: p.previewImage,
               previewImageGeneratedAt: p.previewImageGeneratedAt,
+              previewCameraQuaternion: p.previewCameraQuaternion,
             }))
           } catch (e) {
             res.statusCode = 500
@@ -2455,6 +2933,26 @@ export function registerDashboardApi(middlewares, opts = {}) {
               return enriched
             })
           )
+          let globalNameRules = []
+          try {
+            const mapping = JSON.parse(await readFile(resolve(ROOT, 'public', 'mtl-ral-color-mapping.json'), 'utf-8'))
+            globalNameRules = Array.isArray(mapping?.nameColorRules) ? mapping.nameColorRules : []
+          } catch {}
+          const incompleteByColorRules = new Map()
+          await Promise.all(allProducts.map(async (p) => {
+            if (p.type === 'composed' || !p.glbFile) return
+            try {
+              const glbPath = resolve(PUBLIC_ROOT, '.' + (String(p.glbFile).startsWith('/') ? p.glbFile : `/${p.glbFile}`))
+              if (!isSafePath(PUBLIC_ROOT, glbPath)) return
+              const names = extractGlbMeshNames(await readFile(glbPath))
+              const productRules = Array.isArray(p.conversionPreset?.nameColorRules) ? p.conversionPreset.nameColorRules : []
+              const rules = [...globalNameRules, ...productRules]
+              const assigned = names.filter((name) => rules.some((rule) => ruleMatchesMesh(name, rule))).length
+              const complete = names.length > 0 && assigned === names.length && colorRulesAreConverted(p, productRules, globalNameRules)
+              incompleteByColorRules.set(p.id, !complete)
+            } catch {}
+          }))
+          const isNotCompleted = (p) => incompleteByColorRules.get(p.id) === true
 
           let list = allProducts
           if (search) {
@@ -2470,12 +2968,13 @@ export function registerDashboardApi(middlewares, opts = {}) {
                 const sw = (p.shopwareProductId || '').toLowerCase()
                 const cat = String(p.mainCategory || '').toLowerCase()
                 const dom = String(p._mtlColors?.dominantRal || '').toLowerCase()
-                return tokens.some((t) =>
-                  name.includes(t) ||
-                  id.includes(t) ||
-                  sw.includes(t) ||
-                  cat.includes(t) ||
-                  (dom && dom.includes(t))
+                const shortText = String(p.shortText || '').toLowerCase()
+                const article = String(p.articleNumber || '').toLowerCase()
+                const fields = [name, id, sw, cat, shortText, dom, article]
+                return tokens.some((group) =>
+                  group.split(/\s+/).filter(Boolean).every((term) =>
+                    fields.some((field) => field.includes(term))
+                  )
                 )
               })
             }
@@ -2506,6 +3005,7 @@ export function registerDashboardApi(middlewares, opts = {}) {
             const noShopware = !p.shopwareProductId
             return noName || noSpecs || noShopware
           })
+          if (filter === 'not-completed') list = list.filter(isNotCompleted)
           if (filter === 'glb')        list = list.filter(p => p.glbFile)
           if (filter === 'missing')    list = list.filter(p => !p.glbFile)
           if (filter === 'cad')        list = list.filter(p => p.cadFiles?.length)
@@ -2518,13 +3018,15 @@ export function registerDashboardApi(middlewares, opts = {}) {
             list = [...list].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
           } else if (sort === 'name') {
             list = [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'))
+          } else if (sort === 'shortTextAsc' || sort === 'shortTextDesc') {
+            list = [...list].sort((a, b) => compareShortText(a, b, sort === 'shortTextDesc'))
           }
 
           const total = list.length
           const pages = Math.max(1, Math.ceil(total / limit))
           const safePage = Math.min(page, pages)
           const items = list.slice((safePage - 1) * limit, safePage * limit)
-          const stats = { total: allProducts.length, withGlb: 0, withoutGlb: 0, withCad: 0, approved: 0, rejected: 0, inReview: 0, withIssues: 0 }
+          const stats = { total: allProducts.length, withGlb: 0, withoutGlb: 0, withCad: 0, approved: 0, rejected: 0, inReview: 0, withIssues: 0, notCompleted: 0 }
           for (const p of allProducts) {
             if (p.glbFile) stats.withGlb++
             else stats.withoutGlb++
@@ -2533,11 +3035,128 @@ export function registerDashboardApi(middlewares, opts = {}) {
             else if (p._review?.status === 'rejected') stats.rejected++
             else if (p._review?.status === 'review') stats.inReview++
             if (p._review?.issues?.length) stats.withIssues++
+            if (isNotCompleted(p)) stats.notCompleted++
           }
 
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ products: items, total, page: safePage, pages, stats }))
         } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })) }
+      })
+
+      middlewares.use('/__api/automatic-category-assignment', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        try {
+          const body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf-8'))
+          const mappings = normalizeAutomaticCategoryMappings(body?.mappings)
+          const data = await loadProducts()
+          let assignments = planAutomaticCategoryAssignments(data.products, mappings)
+          if (body?.apply === true && assignments.length) {
+            await saveProducts(data, (draft, latest) => {
+              draft.products = latest.products
+              assignments = planAutomaticCategoryAssignments(draft.products, mappings)
+              const byId = new Map(assignments.map((item) => [item.id, item.category]))
+              for (const product of draft.products) {
+                const category = byId.get(String(product.id))
+                if (category && !String(product.mainCategory || '').trim()) product.mainCategory = category
+              }
+            })
+          }
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ ok: true, count: assignments.length, assignments }))
+        } catch (error) {
+          res.statusCode = 400
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: `Automatische Kategoriezuordnung fehlgeschlagen: ${error.message || error}` }))
+        }
+      })
+
+      middlewares.use('/__api/file-manager-settings', async (req, res) => {
+        if (req.method === 'GET') {
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(await getFileManagerSettings()))
+          return
+        }
+        if (req.method !== 'PUT') { res.statusCode = 405; res.end(); return }
+        try {
+          const body = JSON.parse((await readBody(req, 16 * 1024)).toString('utf-8'))
+          const fileManager = body?.fileManager === 'freecommander' ? 'freecommander' : 'explorer'
+          const freeCommanderPath = String(body?.freeCommanderPath || '').trim()
+          const autoConvertOnDrop = body?.autoConvertOnDrop === true
+          const previousSettings = await getFileManagerSettings()
+          const showViewCube = typeof body?.showViewCube === 'boolean' ? body.showViewCube : previousSettings.showViewCube
+          const showCoordinateSystem = typeof body?.showCoordinateSystem === 'boolean' ? body.showCoordinateSystem : previousSettings.showCoordinateSystem
+          const showCoordinateOrigin = typeof body?.showCoordinateOrigin === 'boolean' ? body.showCoordinateOrigin : previousSettings.showCoordinateOrigin
+          const coordinateAxisSizePx = Math.min(100, Math.max(25, Number(body?.coordinateAxisSizePx) || previousSettings.coordinateAxisSizePx || 50))
+          const viewCubePosition = ['left', 'center', 'right'].includes(body?.viewCubePosition) ? body.viewCubePosition : previousSettings.viewCubePosition
+          const detailSidebarPinned = typeof body?.detailSidebarPinned === 'boolean' ? body.detailSidebarPinned : previousSettings.detailSidebarPinned
+          const showMeshRal = typeof body?.showMeshRal === 'boolean'
+            ? body.showMeshRal
+            : (await getFileManagerSettings()).showMeshRal
+          const sidebarWidthPercent = [35, 40, 45, 50, 55].includes(Number(body?.sidebarWidthPercent))
+            ? Number(body.sidebarWidthPercent)
+            : (await getFileManagerSettings()).sidebarWidthPercent
+          const requestedParallelism = Number(body?.maxParallelConversions)
+          const maxParallelConversions = [1, 2, 3, 4, 5].includes(requestedParallelism)
+            ? requestedParallelism
+            : 3
+          const automaticCategoryMappings = normalizeAutomaticCategoryMappings(body?.automaticCategoryMappings)
+          const automaticColorMappings = Array.isArray(body?.automaticColorMappings)
+            ? normalizeAutomaticColorMappings(body.automaticColorMappings)
+            : previousSettings.automaticColorMappings
+          await writeFile(FILE_MANAGER_SETTINGS_PATH, JSON.stringify({
+            fileManager,
+            freeCommanderPath,
+            autoConvertOnDrop,
+            showMeshRal,
+            showViewCube,
+            showCoordinateSystem,
+            showCoordinateOrigin,
+            coordinateAxisSizePx,
+            viewCubePosition,
+            detailSidebarPinned,
+            sidebarWidthPercent,
+            maxParallelConversions,
+            automaticCategoryMappings,
+            automaticColorMappings,
+          }, null, 2) + '\n', 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({
+            ok: true,
+            fileManager,
+            freeCommanderPath,
+            autoConvertOnDrop,
+            showMeshRal,
+            showViewCube,
+            showCoordinateSystem,
+            showCoordinateOrigin,
+            coordinateAxisSizePx,
+            viewCubePosition,
+            detailSidebarPinned,
+            sidebarWidthPercent,
+            maxParallelConversions,
+            automaticCategoryMappings,
+            automaticColorMappings,
+          }))
+        } catch (error) {
+          res.statusCode = 400
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: `Dateimanager-Einstellungen konnten nicht gespeichert werden: ${error.message || error}` }))
+        }
+      })
+
+      middlewares.use('/__api/migrate-part-descriptions', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        try {
+          const migration = resolve(ROOT, 'scripts/migrate-part-descriptions.mjs')
+          const result = spawnSync(process.execPath, [migration], { cwd: ROOT, encoding: 'utf-8' })
+          if (result.status !== 0) throw new Error(result.stderr || 'Migration fehlgeschlagen')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ ok: true, output: result.stdout.trim() }))
+        } catch (error) {
+          res.statusCode = 500
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: error.message || String(error) }))
+        }
       })
 
       middlewares.use('/__api/list-models', async (req, res) => {

@@ -22,7 +22,7 @@ Anleitung für die IT-Abteilung: Installation auf Büro-Rechnern **ohne dauerhaf
 
 ## Lieferumfang vom Showroom-Team
 
-1. **`meta-showroom-1.0.0-win-x64.zip`** – Anwendungspaket (gebaut mit `npm run package:win`)
+1. **`meta-showroom-1.0.1-win-x64.zip`** – Anwendungspaket (gebaut mit `npm run package:win`)
 2. **Drittsoftware-Installer** (Versionen pinnen, auf IT-Share ablegen):
    - Node.js 20.11+ LTS x64
    - Python 3.10+ oder 3.11+ x64
@@ -85,7 +85,7 @@ sc.exe sdset Memurai "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWD
 
 ```powershell
 New-Item -ItemType Directory -Path "C:\meta\showroom" -Force
-Expand-Archive -Path "\\server\share\meta-showroom-1.0.0-win-x64.zip" -DestinationPath "C:\meta\showroom" -Force
+Expand-Archive -Path "\\server\share\meta-showroom-1.0.1-win-x64.zip" -DestinationPath "C:\meta\showroom" -Force
 ```
 
 Falls ZIP einen Unterordner enthält, Inhalt nach `C:\meta\showroom` verschieben (dort müssen `package.json`, `start-showroom.cmd`, `dist\` liegen).
