@@ -76,6 +76,9 @@ class BlenderOBJToGLBConverter:
         
         # === STEP Support ===
         self.step_converter_available = STEP_CONVERTER_AVAILABLE
+
+        # === Textur-Regeln (--texture-rules-json, von main() gesetzt) ===
+        self.texture_rules = None
         self.metal_keywords = [
             'metal', 'metall', 'stahl', 'steel', 'inox', 'edelstahl', 'aluminium', 'alu',
             'galv', 'verzinkt', 'zinc', 'zink', 'chrome', 'chrom', 'inoxidable'
@@ -2067,6 +2070,11 @@ class BlenderOBJToGLBConverter:
                     if not has_texture:
                         continue
 
+                    # Textur-Regel-Materialien definieren ihr Finish selbst (z. B. Metall
+                    # gebürstet mit metallic > 0) – hier nicht erzwingen.
+                    if mat.get('textureRuleId'):
+                        continue
+
                     changes = []
 
                     metal_in = node.inputs.get("Metallic")
@@ -3805,8 +3813,415 @@ class BlenderOBJToGLBConverter:
         except Exception as e:
             # Non-fatal in headless runs
             self.log(f"Skipping viewport shading setup: {str(e)}", "WARNING")
-    
-    def export_glb(self, output_path: str, embed_textures: bool = True, output_format: str = "glb", 
+
+    # ══════════════ Textur-Regeln (pattern → Textur auf Teile/Meshes) ══════════════
+
+    def _ensure_uv_box_projection(self, obj, repeat_mm: float, mapping: str = 'tile'):
+        """
+        Erzeugt UVs per Box-Projektion in WELTkoordinaten, falls das Mesh keine hat.
+
+        mapping == 'tile' (Default): uv = Weltkoordinate / Kachelgröße —
+        Welt-Anker ⇒ angrenzende Teile fluchten, repeatMm = echte Kachelgröße.
+        mapping == 'fit': die Textur wird pro Projektionsrichtung genau EINMAL
+        über die Ausdehnung des Teils gespannt (wie ein Aufkleber) — für
+        Warnmarkierungen, die exakt auf ein Seitenteil passen sollen.
+
+        Bewusst kein bpy.ops.uv.cube_project: Operator braucht Edit-Mode-Kontext
+        (headless fragil) und arbeitet lokal.
+        Aufruf NACH optimize_for_export: Szene ist dann in Metern (scale 0.001).
+        """
+        mesh = obj.data
+        if mesh is None or not hasattr(mesh, 'uv_layers'):
+            return False
+        if len(mesh.uv_layers) > 0:
+            return True  # vorhandene UVs respektieren
+        uv_layer = mesh.uv_layers.new(name='UVMap')
+        if uv_layer is None:
+            return False
+        uv_data = uv_layer.data
+        tile_m = max(float(repeat_mm), 1.0) / 1000.0
+        fit = str(mapping or 'tile').lower() == 'fit'
+        mw = obj.matrix_world
+        rot = mw.to_3x3()
+        verts = mesh.vertices
+        loops = mesh.loops
+        loop_group = [0] * len(loops) if fit else None
+        for poly in mesh.polygons:
+            n = rot @ poly.normal
+            ax, ay, az = abs(n.x), abs(n.y), abs(n.z)
+            if az >= ax and az >= ay:
+                ui, vi, grp = 0, 1, 2  # Draufsicht: X/Y
+            elif ax >= ay:
+                ui, vi, grp = 1, 2, 0  # Seite: Y/Z
+            else:
+                ui, vi, grp = 0, 2, 1  # Front: X/Z
+            for li in poly.loop_indices:
+                co = mw @ verts[loops[li].vertex_index].co
+                uv_data[li].uv = (co[ui] / tile_m, co[vi] / tile_m)
+                if fit:
+                    loop_group[li] = grp
+        if fit:
+            # Pro Projektionsrichtung auf 0..1 normalisieren → 1 Textur pro Fläche.
+            bounds = {}
+            for li in range(len(loops)):
+                u, v = uv_data[li].uv
+                g = loop_group[li]
+                b = bounds.get(g)
+                if b is None:
+                    bounds[g] = [u, u, v, v]
+                else:
+                    if u < b[0]: b[0] = u
+                    if u > b[1]: b[1] = u
+                    if v < b[2]: b[2] = v
+                    if v > b[3]: b[3] = v
+            for li in range(len(loops)):
+                u, v = uv_data[li].uv
+                b = bounds[loop_group[li]]
+                du = (b[1] - b[0]) or 1.0
+                dv = (b[3] - b[2]) or 1.0
+                uv_data[li].uv = ((u - b[0]) / du, (v - b[2]) / dv)
+        self.log(
+            f"[TextureRules] UV-Box-Projektion: {obj.name} ({len(mesh.polygons)} Faces, "
+            f"{'Einpassen 1×' if fit else f'Kachel {repeat_mm} mm'})"
+        )
+        return True
+
+    def _ensure_uv_unfold_projection(self, obj):
+        """
+        Abwicklungs-Projektion für um die Hochachse gebogene/gekantete Bleche:
+        u = echte Bogenlänge entlang der Blechoberfläche in der Draufsicht
+        (Geodäten-Distanz über die Mesh-Kanten, Höhenanteil ignoriert),
+        v = Höhe (Z). Beides auf 0..1 normalisiert → die Textur liegt wie ein
+        Aufkleber auf dem flach ausgerollten Blech und wird "zurückgebogen".
+
+        Funktioniert für beliebige Biegewinkel, Radien und Mehrfach-Kantungen —
+        unabhängig von der Ausrichtung im Koordinatensystem. Nur Wandflächen
+        (Normale überwiegend horizontal) definieren die Abwicklung; getrennte
+        Blech-Inseln im selben Mesh werden einzeln 0..1 aufgespannt.
+        """
+        import heapq
+
+        mesh = obj.data
+        if mesh is None or not hasattr(mesh, 'uv_layers'):
+            return False
+        if len(mesh.uv_layers) > 0:
+            return True  # vorhandene UVs respektieren
+        uv_layer = mesh.uv_layers.new(name='UVMap')
+        if uv_layer is None:
+            return False
+        uv_data = uv_layer.data
+        mw = obj.matrix_world
+        rot = mw.to_3x3()
+        n_verts = len(mesh.vertices)
+        world = [mw @ v.co for v in mesh.vertices]
+
+        # Wand-Vertices + Kanten-Graph (nur über Wandflächen, Plan-Distanzen)
+        wall_vert = [False] * n_verts
+        adj = {}
+        for poly in mesh.polygons:
+            n = rot @ poly.normal
+            if abs(n.z) >= 0.7071:
+                continue
+            vs_poly = list(poly.vertices)
+            for k in range(len(vs_poly)):
+                a = vs_poly[k]
+                b = vs_poly[(k + 1) % len(vs_poly)]
+                wall_vert[a] = True
+                wall_vert[b] = True
+                wa, wb = world[a], world[b]
+                d = ((wa.x - wb.x) ** 2 + (wa.y - wb.y) ** 2) ** 0.5
+                adj.setdefault(a, []).append((b, d))
+                adj.setdefault(b, []).append((a, d))
+        wall_ids = [i for i in range(n_verts) if wall_vert[i]]
+        if not wall_ids:
+            self.log(f"[TextureRules] {obj.name}: keine Wandflächen für Abwicklung", "WARNING")
+            return False
+
+        # Zusammenhangskomponenten der Wand (getrennte Bleche einzeln abwickeln)
+        comp = {}
+        comp_id = 0
+        for seed in wall_ids:
+            if seed in comp:
+                continue
+            stack = [seed]
+            comp[seed] = comp_id
+            while stack:
+                cur = stack.pop()
+                for nb, _d in adj.get(cur, ()):
+                    if nb not in comp:
+                        comp[nb] = comp_id
+                        stack.append(nb)
+            comp_id += 1
+
+        us = [0.0] * n_verts
+        vs = [world[i].z for i in range(n_verts)]
+        bounds = {}
+        for c in range(comp_id):
+            members = [i for i in wall_ids if comp[i] == c]
+            if not members:
+                continue
+            # Start: Vertex am äußersten Profil-Ende (max. Plan-Abstand vom Schwerpunkt,
+            # dann von dort das entfernteste Ende = eindeutiger Startpunkt)
+            cxm = sum(world[i].x for i in members) / len(members)
+            cym = sum(world[i].y for i in members) / len(members)
+            far = max(members, key=lambda i: (world[i].x - cxm) ** 2 + (world[i].y - cym) ** 2)
+
+            def dijkstra(src):
+                dist = {src: 0.0}
+                pq = [(0.0, src)]
+                while pq:
+                    d, cur = heapq.heappop(pq)
+                    if d > dist.get(cur, 1e18):
+                        continue
+                    for nb, w in adj.get(cur, ()):
+                        nd = d + w
+                        if nd < dist.get(nb, 1e18):
+                            dist[nb] = nd
+                            heapq.heappush(pq, (nd, nb))
+                return dist
+
+            d_far = dijkstra(far)
+            start = max(members, key=lambda i: d_far.get(i, 0.0))
+            dist = dijkstra(start)
+            u_max_c = 0.0
+            v_min_c = min(vs[i] for i in members)
+            v_max_c = max(vs[i] for i in members)
+            for i in members:
+                us[i] = dist.get(i, 0.0)
+                if us[i] > u_max_c:
+                    u_max_c = us[i]
+            bounds[c] = (u_max_c or 1.0, v_min_c, (v_max_c - v_min_c) or 1.0)
+
+        def uv_of_vertex(i):
+            c = comp.get(i)
+            if c is None:
+                return (0.0, 0.0)  # reine Deck-/Fußflächen-Vertices: werden nicht texturiert
+            du, v_min_c, dv = bounds[c]
+            return (us[i] / du, (vs[i] - v_min_c) / dv)
+
+        for li, loop in enumerate(mesh.loops):
+            uv_data[li].uv = uv_of_vertex(loop.vertex_index)
+        self.log(
+            f"[TextureRules] UV-Abwicklung: {obj.name} ({len(mesh.polygons)} Faces, "
+            f"{comp_id} Blech-Insel(n), Bogenlänge 1× eingepasst)"
+        )
+        return True
+
+    # Seiten-Filter: Weltnormale (dominante Achse + Vorzeichen) → Seite.
+    # Bezogen auf das CAD-Koordinatensystem (Z = oben) VOR der Y-up-Drehung des Exports.
+    _TEXTURE_SIDE_AXES = {
+        'top': (2, 1.0), 'bottom': (2, -1.0),
+        'right': (0, 1.0), 'left': (0, -1.0),
+        'back': (1, 1.0), 'front': (1, -1.0),
+    }
+
+    def _face_matches_side(self, world_normal, side):
+        axis_sign = self._TEXTURE_SIDE_AXES.get(side)
+        if not axis_sign:
+            return True
+        axis, sign = axis_sign
+        comps = (world_normal.x, world_normal.y, world_normal.z)
+        v = comps[axis] * sign
+        # Deutlich in Richtung der gewünschten Seite (dominant + > 0.5)
+        return v > 0.5 and abs(comps[axis]) >= max(abs(comps[0]), abs(comps[1]), abs(comps[2])) - 1e-6
+
+    def _texturize_material(self, mat, rule: Dict[str, Any]):
+        """Textur-Nodes + Finish auf ein (bereits eigenes) Material anwenden."""
+        if not mat.use_nodes:
+            mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+        links = mat.node_tree.links
+        principled = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if principled is None:
+            return False
+        maps = rule.get('maps') or {}
+        finish = rule.get('finish') or {}
+        x_offset = -400
+        for map_key, tex_type in (('baseColor', 'diffuse'), ('roughness', 'roughness'),
+                                  ('normal', 'normal'), ('metallic', 'metallic')):
+            path = maps.get(map_key)
+            if path and os.path.isfile(str(path)):
+                self.setup_texture_node(nodes, links, principled, tex_type, str(path), x_offset)
+                x_offset -= 80
+        for sock_name, key in (('Metallic', 'metallic'), ('Roughness', 'roughness')):
+            sock = principled.inputs.get(sock_name)
+            if sock and not sock.is_linked and key in finish:
+                try:
+                    sock.default_value = float(finish[key])
+                except Exception:
+                    pass
+        # Marker: schützt das Material im Bake (Strip-/Farb-Pässe) und im Showroom
+        mat['textureRuleId'] = str(rule.get('textureId') or '')
+        return True
+
+    def _apply_texture_rule_to_object(self, obj, rule: Dict[str, Any]):
+        """
+        Textur einer Regel auf ein Objekt anwenden.
+        side == 'all' (Default): alle Material-Slots werden texturiert.
+        side == top/bottom/left/right/front/back: nur Flächen mit passender
+        Weltnormale bekommen ein texturiertes Material (neuer Slot);
+        die übrigen Flächen behalten ihr Material und bleiben umfärbbar.
+        """
+        repeat_mm = float(rule.get('repeatMm') or 600)
+        side = str(rule.get('side') or 'all').strip().lower()
+        mapping = str(rule.get('mapping') or 'tile').strip().lower()
+        uv_ok = (self._ensure_uv_unfold_projection(obj) if mapping == 'unfold'
+                 else self._ensure_uv_box_projection(obj, repeat_mm, mapping))
+        if not uv_ok:
+            self.log(f"[TextureRules] {obj.name}: keine UVs erzeugbar – übersprungen", "WARNING")
+            return False
+
+        if not obj.material_slots or not any(s.material for s in obj.material_slots):
+            mat_new = bpy.data.materials.new(name=f"{obj.name}_Textured")
+            mat_new.use_nodes = True
+            obj.data.materials.append(mat_new)
+
+        # ── Nur eine Seite: Flächen selektieren und auf texturierte Material-Kopien umhängen ──
+        # Flächen-Filter: gewählte Seite ODER (bei Abwicklung) nur Wandflächen —
+        # Deck-/Fußflächen (Normale ±Z) behalten ihr Material, wie beim echten Produkt.
+        # 'outer'/'inner': Außen-/Innenseite des Blechs aus der Geometrie bestimmt —
+        # Normale zeigt vom Plan-Zentroid der Wandflächen weg (außen) oder hin (innen).
+        mesh = obj.data
+        mw = obj.matrix_world
+        rot = mw.to_3x3()
+        face_filter = None
+        filter_label = None
+        if side in ('outer', 'inner'):
+            csum = [0.0, 0.0, 0]
+            for poly in mesh.polygons:
+                n = rot @ poly.normal
+                if abs(n.z) >= 0.7071:
+                    continue
+                c = mw @ poly.center
+                csum = [csum[0] + c.x, csum[1] + c.y, csum[2] + 1]
+            if csum[2] == 0:
+                self.log(f"[TextureRules] {obj.name}: keine Wandflächen für Seite '{side}'", "WARNING")
+                return False
+            plan_cx, plan_cy = csum[0] / csum[2], csum[1] / csum[2]
+            want_outer = side == 'outer'
+
+            def face_filter(n, c):
+                if abs(n.z) >= 0.7071:
+                    return False
+                dot = n.x * (c.x - plan_cx) + n.y * (c.y - plan_cy)
+                return (dot > 0) == want_outer
+            filter_label = 'Außenseite' if want_outer else 'Innenseite'
+        elif side in self._TEXTURE_SIDE_AXES:
+            face_filter = lambda n, c: self._face_matches_side(n, side)
+            filter_label = f"Seite {side}"
+        elif mapping == 'unfold':
+            face_filter = lambda n, c: abs(n.z) < 0.7071
+            filter_label = "Abwicklung (nur Wandflächen)"
+
+        if face_filter is not None:
+            sel = [poly.index for poly in mesh.polygons
+                   if face_filter(rot @ poly.normal, mw @ poly.center)]
+            if not sel:
+                self.log(f"[TextureRules] {obj.name}: keine Fläche für '{filter_label}' – übersprungen", "WARNING")
+                return False
+            # Pro betroffenem Original-Slot eine texturierte Kopie als neuen Slot anlegen
+            textured_slot_for = {}
+            for pi in sel:
+                orig_idx = mesh.polygons[pi].material_index
+                if orig_idx not in textured_slot_for:
+                    orig_mat = obj.material_slots[orig_idx].material if orig_idx < len(obj.material_slots) else None
+                    if orig_mat is not None:
+                        copy = orig_mat.copy()
+                        copy.name = f"{orig_mat.name}_tex_{side if side in self._TEXTURE_SIDE_AXES else 'wall'}"
+                    else:
+                        copy = bpy.data.materials.new(name=f"{obj.name}_tex_{side if side in self._TEXTURE_SIDE_AXES else 'wall'}")
+                        copy.use_nodes = True
+                    if not self._texturize_material(copy, rule):
+                        bpy.data.materials.remove(copy)
+                        continue
+                    obj.data.materials.append(copy)
+                    textured_slot_for[orig_idx] = len(obj.material_slots) - 1
+                mesh.polygons[pi].material_index = textured_slot_for[orig_idx]
+            if not textured_slot_for:
+                return False
+            self.log(
+                f"[TextureRules] {obj.name} ← '{rule.get('textureId')}' ({filter_label}, "
+                f"{len(sel)} von {len(mesh.polygons)} Flächen)"
+            )
+            return True
+
+        # ── Alle Seiten: bestehende Slots in-place texturieren ──
+        touched = False
+        for slot in obj.material_slots:
+            mat = slot.material
+            if not mat:
+                continue
+            # Geteilte Materialien defensiv kopieren (Fallback-/OBJ-Pfad)
+            if mat.users > 1:
+                mat = mat.copy()
+                slot.material = mat
+            if not self._texturize_material(mat, rule):
+                continue
+            touched = True
+            self.log(f"[TextureRules] {obj.name} ← '{rule.get('textureId')}' (Kachel {repeat_mm} mm, Material '{mat.name}')")
+        return touched
+
+    def _apply_texture_rules(self):
+        """
+        Wendet die per --texture-rules-json übergebenen Regeln an (letzte passende
+        Regel gewinnt, wie bei den Namens-Farbregeln). Aufruf direkt vor export_glb,
+        damit optimize_for_export (Scale) bereits gelaufen ist.
+        """
+        payload = getattr(self, 'texture_rules', None)
+        raw_rules = payload.get('rules') if isinstance(payload, dict) else None
+        if not raw_rules:
+            return
+
+        compiled = []
+        for r in raw_rules:
+            if not isinstance(r, dict):
+                continue
+            pattern = str(r.get('pattern') or '').strip()
+            if not pattern:
+                continue
+            flags = re.IGNORECASE if r.get('flags') == 'i' else 0
+            try:
+                rx = re.compile(pattern, flags)
+            except Exception as e:
+                self.log(f"[TextureRules] Ungültiges Pattern übersprungen: {pattern} ({e})", "WARNING")
+                continue
+            target = r.get('target') if r.get('target') in ('mesh', 'node', 'material', 'nodePath') else 'mesh'
+            compiled.append({
+                'target': target,
+                'regex': rx,
+                'textureId': r.get('textureId'),
+                'repeatMm': r.get('repeatMm'),
+                'side': r.get('side'),
+                'mapping': r.get('mapping'),
+                'maps': r.get('maps') if isinstance(r.get('maps'), dict) else {},
+                'finish': r.get('finish') if isinstance(r.get('finish'), dict) else {},
+            })
+        if not compiled:
+            return
+
+        applied = 0
+        matched = 0
+        for obj in [o for o in bpy.data.objects if o.type == 'MESH']:
+            mat_names = ' '.join(s.material.name for s in obj.material_slots if s.material)
+            hit = None
+            for rule in compiled:
+                # Objektname trägt bereits den __-Hierarchiepfad (mesh/node/nodePath identisch)
+                hay = mat_names if rule['target'] == 'material' else obj.name
+                if hay and rule['regex'].search(hay):
+                    hit = rule
+            if hit is None:
+                continue
+            matched += 1
+            if not hit.get('textureId') or not hit['maps'].get('baseColor'):
+                continue  # textureId null → Regel hebt frühere Zuweisung auf
+            try:
+                if self._apply_texture_rule_to_object(obj, hit):
+                    applied += 1
+            except Exception as e:
+                self.log(f"[TextureRules] {obj.name}: Anwendung fehlgeschlagen: {e}", "WARNING")
+        self.log(f"[TextureRules] {applied} von {matched} gematchten Objekt(en) texturiert ({len(compiled)} Regel(n))")
+
+    def export_glb(self, output_path: str, embed_textures: bool = True, output_format: str = "glb",
                    gtin: Optional[str] = None, article_number: Optional[str] = None,
                    use_gtin_naming: bool = False, rotate_y_up: bool = False, use_draco: bool = False,
                    strip_cameras_lights: bool = True):
@@ -3936,6 +4351,9 @@ class BlenderOBJToGLBConverter:
                 'export_image_format': 'AUTO',
                 'export_texcoords': True,
                 'export_normals': True,
+                # Custom Properties (z. B. textureRuleId) als glTF-extras exportieren —
+                # Bake und Showroom erkennen texturierte Materialien daran.
+                'export_extras': True,
                 'export_materials': 'EXPORT',
                 'use_mesh_edges': False,
                 'use_mesh_vertices': False,
@@ -3976,6 +4394,11 @@ class BlenderOBJToGLBConverter:
                     base_in = node.inputs.get("Base Color")
                     has_texture = (base_in and base_in.is_linked) or self._is_mtl_textured_material_name(mat.name, mtl_textured)
                     if not has_texture:
+                        continue
+
+                    # Textur-Regel-Materialien definieren ihr Finish selbst (z. B. Metall
+                    # gebürstet mit metallic > 0) – hier nicht erzwingen.
+                    if mat.get('textureRuleId'):
                         continue
 
                     metal_in = node.inputs.get("Metallic")
@@ -4506,7 +4929,10 @@ class BlenderOBJToGLBConverter:
 
             # Letzte Sicherung: Texturierte Materialien dürfen niemals metallisch sein
             self._ensure_non_metallic_for_textured_materials()
-            
+
+            # Textur-Regeln (nach Scale: Weltkoordinaten final → UV-Projektion maßhaltig)
+            self._apply_texture_rules()
+
             # Export GLB (SolidWorks Y-up mode)
             actual_output_path = self.export_glb(
                 output_path,
@@ -4824,6 +5250,9 @@ class BlenderOBJToGLBConverter:
             # Letzte Sicherung: Texturierte Materialien dürfen niemals metallisch sein
             self._ensure_non_metallic_for_textured_materials()
 
+            # Textur-Regeln (nach Scale: Weltkoordinaten final → UV-Projektion maßhaltig)
+            self._apply_texture_rules()
+
             # Export to GLB
             glb_result = self.export_glb(
                 output_path,
@@ -4921,6 +5350,9 @@ def parse_arguments():
     parser.add_argument('--target-mesh-signature-id', help='Optional signature id (debug)')
     parser.add_argument('--target-mesh-match-threshold', type=float, default=0.15, help='Match distance threshold (lower=stricter)')
     parser.add_argument('--target-mesh-material-json', help='JSON object describing the material preset to apply to the matched mesh')
+
+    # Textur-Regeln: pattern → Textur-Maps (inkl. UV-Box-Projektion in Weltkoordinaten)
+    parser.add_argument('--texture-rules-json', help='JSON {rules:[{target,pattern,flags,textureId,repeatMm,maps,finish}]}')
     
     # Get arguments after '--' separator
     if '--' in sys.argv:
@@ -4991,6 +5423,10 @@ def main():
         target_mesh_material = _safe_json(getattr(args, 'target_mesh_material_json', None))
         if not isinstance(target_mesh_material, dict):
             target_mesh_material = None
+
+        texture_rules = _safe_json(getattr(args, 'texture_rules_json', None))
+        if not isinstance(texture_rules, dict) or not isinstance(texture_rules.get('rules'), list):
+            texture_rules = None
         
         print(f"Starting conversion with Blender {bpy.app.version_string}")
         print(f"Job ID: {args.job_id}")
@@ -5009,6 +5445,7 @@ def main():
         
         # Create converter
         converter = BlenderOBJToGLBConverter()
+        converter.texture_rules = texture_rules
         
         # Perform conversion based on input type
         if input_type == "STEP":

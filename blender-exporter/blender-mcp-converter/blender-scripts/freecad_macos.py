@@ -112,10 +112,12 @@ def _build_object_path(obj):
 
 
 def _sanitize_path_segments(path_segments, fallback_prefix):
+    # Namen originalgetreu übernehmen (SolidWorks-Namen wie "Teil<1>" inkl. <>,
+    # Umlauten und Bindestrichen); nur Zeichen ersetzen, die OBJ-Zeilen brechen.
     sanitized = []
     for idx, segment in enumerate(path_segments):
         cleaned = segment.replace(' ', '_')
-        cleaned = re.sub(r'[^0-9A-Za-z_]+', '_', cleaned)
+        cleaned = re.sub(r'[\x00-\x1f\x7f]+', '_', cleaned)
         cleaned = cleaned.strip('_') or f"{fallback_prefix}_{idx}"
         sanitized.append(cleaned)
     return sanitized

@@ -431,6 +431,9 @@ class BlenderConverter:
 
             _append_json_flag("--target-mesh-material-json", params.options.get("targetMeshMaterial"))
 
+            # Textur-Regeln ({rules:[...]}; Anwendung in Blender inkl. UV-Box-Projektion)
+            _append_json_flag("--texture-rules-json", params.options.get("textureRules"))
+
             # Optional auto labeling of parts (off by default)
             if params.options.get("autoLabelParts", False):
                 blender_args.append("--auto-label")

@@ -114,7 +114,10 @@ const buildConversionOptions = (body = {}) => {
   targetMeshSignature: safeJsonValue(body.targetMeshSignature),
   targetMeshSignatureId: body.targetMeshSignatureId || null,
   targetMeshMatchThreshold: parseFloatOrFallback(body.targetMeshMatchThreshold, 0.15),
-  targetMeshMaterial: safeJsonValue(body.targetMeshMaterial)
+  targetMeshMaterial: safeJsonValue(body.targetMeshMaterial),
+
+  // Textur-Regeln ({rules:[...]}; Anwendung in Blender inkl. UV-Projektion)
+  textureRules: safeJsonValue(body.textureRules)
   };
   if (opts.rotateAxis && opts.rotateDegrees) opts.rotateYUp = false;
   return opts;

@@ -52,7 +52,10 @@ export const conversionRequestSchema = Joi.object({
   targetMeshSignature: Joi.string().max(400000).optional(),
   targetMeshSignatureId: Joi.string().pattern(/^[A-Za-z0-9_.:-]{1,80}$/).optional(),
   targetMeshMatchThreshold: Joi.string().pattern(/^[0-9]*\.?[0-9]+$/).optional(),
-  targetMeshMaterial: Joi.string().max(400000).optional()
+  targetMeshMaterial: Joi.string().max(400000).optional(),
+
+  // Textur-Regeln (JSON-String {rules:[...]}; Anwendung in Blender inkl. UV-Projektion)
+  textureRules: Joi.string().max(400000).optional()
 });
 
 /**
